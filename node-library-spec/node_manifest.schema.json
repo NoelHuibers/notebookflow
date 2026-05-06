@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://notebookflow.dev/node_manifest.schema.json",
+  "title": "NotebookFlow Node Manifest",
+  "description": "Public extension contract for a single node package.",
+  "type": "object",
+  "required": ["id", "name", "tag", "inputs", "outputs"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+      "description": "Globally unique node id, e.g. notebookflow.parse_csv"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable node name shown on the canvas."
+    },
+    "tag": {
+      "type": "string",
+      "enum": ["input", "transform", "output", "ai", "io"]
+    },
+    "version": {
+      "type": "string",
+      "default": "0.0.0"
+    },
+    "description": {
+      "type": "string",
+      "default": ""
+    },
+    "inputs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Port" }
+    },
+    "outputs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Port" }
+    },
+    "template": {
+      "type": "string",
+      "description": "Cell-source template inserted when the node is added to a notebook."
+    }
+  },
+  "$defs": {
+    "Port": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": ["dataframe", "json", "text", "fileref", "any"],
+          "default": "any"
+        },
+        "required": { "type": "boolean", "default": true }
+      }
+    }
+  }
+}

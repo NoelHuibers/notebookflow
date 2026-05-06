@@ -1,0 +1,41 @@
+{
+  "name": "@notebookflow/vscode-extension",
+  "version": "0.0.0",
+  "displayName": "NotebookFlow",
+  "description": "VS Code platform adapter for NotebookFlow",
+  "publisher": "notebookflow",
+  "engines": { "vscode": "^1.90.0" },
+  "type": "module",
+  "main": "./dist/extension.js",
+  "activationEvents": ["onNotebook:jupyter-notebook"],
+  "contributes": {
+    "commands": [
+      {
+        "command": "notebookflow.openCanvas",
+        "title": "NotebookFlow: Open Canvas"
+      }
+    ]
+  },
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsc -b --watch",
+    "test": "vitest run",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist .turbo *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@notebookflow/graph-canvas": "workspace:*",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.118.0",
+    "@types/react": "^18.3.28",
+    "@types/react-dom": "^18.3.7",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5",
+    "rimraf": "^6.1.3"
+  }
+}
