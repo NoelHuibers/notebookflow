@@ -1,16 +1,61 @@
 /**
- * SplitView — Lumino widget that puts the graph canvas next to the notebook.
+ * SplitView — Lumino widget that hosts the NotebookFlow React surface.
  *
- * Owns the React mount point for @notebookflow/graph-canvas and forwards
- * notebook-tracker events into the SyncEngine.
+ * JupyterLab's ``ReactWidget`` from ``@jupyterlab/apputils`` handles the
+ * React mount/unmount lifecycle for us; this class just wires a fresh
+ * NotebookBridge + EngineClient pair into the App component and sets the
+ * shell-side metadata Lumino needs (icon, title, id).
  */
 
-import { Widget } from "@lumino/widgets";
+import { ReactWidget } from "@jupyterlab/apputils";
+import type { NotebookPanel } from "@jupyterlab/notebook";
+import type { ReactElement } from "react";
+import { createElement } from "react";
 
-export class SplitView extends Widget {
-  constructor() {
+import { App } from "./App";
+import type { EngineEvent, PipelineDef } from "./EngineClient";
+import { EngineClient } from "./EngineClient";
+import { NotebookBridge } from "./NotebookBridge";
+
+let widgetCounter = 0;
+
+export class SplitView extends ReactWidget {
+  private readonly bridge: NotebookBridge;
+  private readonly engine: EngineClient;
+
+  constructor(panel: NotebookPanel) {
     super();
-    // TODO: create container DOM, mount React Canvas, hook into the
-    //   active notebook via INotebookTracker, instantiate SyncEngine.
+    widgetCounter += 1;
+    this.id = `notebookflow-split-${String(widgetCounter)}`;
+    this.title.label = `NotebookFlow: ${panel.context.path.split("/").pop() ?? "notebook"}`;
+    this.title.closable = true;
+    this.addClass("notebookflow-split-view");
+
+    this.bridge = new NotebookBridge(panel);
+    this.engine = new EngineClient();
+
+    panel.disposed.connect(() => {
+      this.dispose();
+    });
+  }
+
+  protected override render(): ReactElement {
+    return createElement(App, {
+      bridge: this.bridge,
+      onRun: (pipeline: PipelineDef, onEvent: (event: EngineEvent) => void): Promise<void> =>
+        this.engine.runPipeline({
+          pipelineId: `jupyter-${this.id}`,
+          pipeline,
+          onEvent,
+        }),
+    });
+  }
+
+  override dispose(): void {
+    if (this.isDisposed) {
+      return;
+    }
+    this.bridge.dispose();
+    super.dispose();
   }
 }

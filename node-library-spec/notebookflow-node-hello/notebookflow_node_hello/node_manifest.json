@@ -1,0 +1,10 @@
+{
+  "id": "community.hello",
+  "name": "Hello",
+  "tag": "transform",
+  "version": "0.1.0",
+  "description": "Minimal third-party transform that greets its input.",
+  "inputs": [{ "name": "name", "type": "text" }],
+  "outputs": [{ "name": "greeting", "type": "text" }],
+  "template": "greeting = f'Hello, {name}!'\n"
+}

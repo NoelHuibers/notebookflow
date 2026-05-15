@@ -1,6 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalDependencies": ["**/.env.*local", "tsconfig.base.json"],
+  "globalDependencies": ["**/.env.*local", "tsconfig.base.json", "biome.json"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
@@ -15,9 +15,6 @@
       "dependsOn": ["^build"],
       "outputs": ["coverage/**"],
       "inputs": ["src/**", "tests/**", "vitest.config.ts"]
-    },
-    "lint": {
-      "outputs": []
     },
     "typecheck": {
       "dependsOn": ["^build"],

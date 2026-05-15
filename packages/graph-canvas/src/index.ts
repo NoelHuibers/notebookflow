@@ -10,14 +10,12 @@ export { Canvas } from "./components/Canvas";
 export { NotebookNode } from "./components/Node";
 export { NodeGroup } from "./components/NodeGroup";
 export { Wire } from "./components/Wire";
-
+export * as sync from "./sync";
 export type {
   GraphModel,
-  NodeModel,
   NodeGroupModel,
-  WireModel,
-  NodeTag,
   NodeMarker,
+  NodeModel,
+  NodeTag,
+  WireModel,
 } from "./types";
-
-export * as sync from "./sync";

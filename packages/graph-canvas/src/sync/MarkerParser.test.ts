@@ -1,0 +1,204 @@
+import { describe, expect, it } from "vitest";
+
+import type { NodeTag } from "../types";
+import twoNode from "./fixtures/two-node.ipynb.json";
+import type { NotebookCell } from "./MarkerParser";
+import { MarkerParser } from "./MarkerParser";
+
+interface IpynbCell {
+  cell_type: string;
+  source: string | string[];
+}
+interface IpynbDoc {
+  cells: IpynbCell[];
+}
+
+function toNotebookCells(doc: IpynbDoc): NotebookCell[] {
+  return doc.cells.map((c) => ({
+    cellType: c.cell_type as NotebookCell["cellType"],
+    source: Array.isArray(c.source) ? c.source.join("") : c.source,
+  }));
+}
+
+describe("MarkerParser.isValidTag", () => {
+  it("accepts every NodeTag value", () => {
+    const tags: NodeTag[] = ["input", "transform", "output", "ai", "io"];
+    for (const t of tags) {
+      expect(MarkerParser.isValidTag(t)).toBe(true);
+    }
+  });
+
+  it("rejects arbitrary strings", () => {
+    for (const t of ["bogus", "", "INPUT", "transform ", "code"]) {
+      expect(MarkerParser.isValidTag(t)).toBe(false);
+    }
+  });
+});
+
+describe("MarkerParser.parseLine", () => {
+  it("parses a minimal marker", () => {
+    const m = MarkerParser.parseLine("# @node: Load CSV  [input]");
+    expect(m).toEqual({ name: "Load CSV", tag: "input", inputs: [], outputs: [] });
+  });
+
+  it("parses a marker with in= and out=", () => {
+    const m = MarkerParser.parseLine("# @node: Filter [transform] in=load_csv.df  out=df");
+    expect(m).toEqual({
+      name: "Filter",
+      tag: "transform",
+      inputs: ["load_csv.df"],
+      outputs: ["df"],
+    });
+  });
+
+  it("handles in= and out= in flipped order", () => {
+    const m = MarkerParser.parseLine("# @node: Foo [transform] out=df  in=a.x,b.y");
+    expect(m).toEqual({
+      name: "Foo",
+      tag: "transform",
+      inputs: ["a.x", "b.y"],
+      outputs: ["df"],
+    });
+  });
+
+  it("tolerates whitespace around commas inside in=", () => {
+    const m = MarkerParser.parseLine("# @node: Foo [transform] in=a.x , b.y");
+    expect(m?.inputs).toEqual(["a.x", "b.y"]);
+  });
+
+  it("preserves spaces inside node names in input refs", () => {
+    const m = MarkerParser.parseLine("# @node: Filter [transform] in=Load CSV.df");
+    expect(m?.inputs).toEqual(["Load CSV.df"]);
+  });
+
+  it("returns null for a blank line", () => {
+    expect(MarkerParser.parseLine("   ")).toBeNull();
+  });
+
+  it("returns null for a non-marker code line", () => {
+    expect(MarkerParser.parseLine("import pandas as pd")).toBeNull();
+  });
+
+  it("returns null for a comment that isn't a marker", () => {
+    expect(MarkerParser.parseLine("# not a marker")).toBeNull();
+  });
+
+  it("throws on missing name", () => {
+    expect(() => MarkerParser.parseLine("# @node: [input]")).toThrow();
+  });
+
+  it("throws on unknown tag", () => {
+    expect(() => MarkerParser.parseLine("# @node: Foo [bogus]")).toThrow();
+  });
+
+  it("throws on uppercase port name in input ref", () => {
+    expect(() => MarkerParser.parseLine("# @node: Foo [transform] in=Bad.PORT")).toThrow();
+  });
+
+  it("throws on input ref missing the dot", () => {
+    expect(() => MarkerParser.parseLine("# @node: Foo [transform] in=load_csv")).toThrow();
+  });
+
+  it("throws on unrecognized trailing content", () => {
+    expect(() => MarkerParser.parseLine("# @node: Foo [transform] garbage")).toThrow();
+  });
+});
+
+describe("MarkerParser.formatMarker", () => {
+  it("emits canonical form without ports", () => {
+    expect(
+      MarkerParser.formatMarker({ name: "Load CSV", tag: "input", inputs: [], outputs: [] }),
+    ).toBe("# @node: Load CSV  [input]");
+  });
+
+  it("emits canonical form with in= and out=", () => {
+    expect(
+      MarkerParser.formatMarker({
+        name: "Filter",
+        tag: "transform",
+        inputs: ["load_csv.df"],
+        outputs: ["df"],
+      }),
+    ).toBe("# @node: Filter  [transform]  in=load_csv.df  out=df");
+  });
+
+  it("omits empty in= and out= sections", () => {
+    expect(
+      MarkerParser.formatMarker({ name: "Sink", tag: "output", inputs: ["a.x"], outputs: [] }),
+    ).toBe("# @node: Sink  [output]  in=a.x");
+    expect(
+      MarkerParser.formatMarker({ name: "Source", tag: "input", inputs: [], outputs: ["df"] }),
+    ).toBe("# @node: Source  [input]  out=df");
+  });
+});
+
+describe("MarkerParser round-trip", () => {
+  const examples = [
+    { name: "Load CSV", tag: "input" as const, inputs: [], outputs: [] },
+    { name: "Filter", tag: "transform" as const, inputs: ["a.x"], outputs: ["df"] },
+    {
+      name: "Merge two",
+      tag: "transform" as const,
+      inputs: ["a.x", "b.y"],
+      outputs: ["merged"],
+    },
+    { name: "Sink", tag: "output" as const, inputs: ["pipeline.result"], outputs: [] },
+    { name: "AI step", tag: "ai" as const, inputs: ["prompt.text"], outputs: ["completion"] },
+  ];
+
+  it.each(examples)("parseLine(formatMarker($name)) preserves the marker", (m) => {
+    const formatted = MarkerParser.formatMarker(m);
+    const reparsed = MarkerParser.parseLine(formatted);
+    expect(reparsed).toEqual(m);
+  });
+});
+
+describe("MarkerParser.parseNotebook", () => {
+  it("parses the two-node fixture into 2 markers and 1 error", () => {
+    const cells = toNotebookCells(twoNode);
+    const result = MarkerParser.parseNotebook("nb/demo.ipynb", cells);
+
+    expect(result.markers).toHaveLength(2);
+    expect(result.markers[0]).toEqual({
+      name: "Load CSV",
+      tag: "input",
+      inputs: [],
+      outputs: ["df"],
+      notebookPath: "nb/demo.ipynb",
+      cellIndex: 1,
+    });
+    expect(result.markers[1]).toEqual({
+      name: "Filter",
+      tag: "transform",
+      inputs: ["Load CSV.df"],
+      outputs: ["clean_df"],
+      notebookPath: "nb/demo.ipynb",
+      cellIndex: 2,
+    });
+
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]?.cellIndex).toBe(4);
+  });
+
+  it("skips markdown cells", () => {
+    const cells: NotebookCell[] = [
+      { cellType: "markdown", source: "# @node: Heading [input]" },
+      { cellType: "code", source: "# @node: Real  [input]\nx = 1" },
+    ];
+    const result = MarkerParser.parseNotebook("nb.ipynb", cells);
+    expect(result.markers).toHaveLength(1);
+    expect(result.markers[0]?.name).toBe("Real");
+  });
+
+  it("only considers the first non-blank line", () => {
+    const cells: NotebookCell[] = [
+      {
+        cellType: "code",
+        source: "\n\n  \n# @node: Real  [input]\n# @node: Decoy  [transform]\nx = 1",
+      },
+    ];
+    const result = MarkerParser.parseNotebook("nb.ipynb", cells);
+    expect(result.markers).toHaveLength(1);
+    expect(result.markers[0]?.name).toBe("Real");
+  });
+});

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
-from typing import Any, Callable, Coroutine, Literal
+from typing import Any, Literal
 
 TriggerKind = Literal["manual", "file_watch", "cron", "webhook"]
 

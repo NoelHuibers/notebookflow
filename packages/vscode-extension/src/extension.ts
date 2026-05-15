@@ -1,19 +1,45 @@
 /**
  * VS Code platform adapter — extension entry point.
  *
- * On activation, spawns the FastAPI engine as a child process and registers
- * the `notebookflow.openCanvas` command, which opens a WebviewPanel hosting
- * the shared graph canvas.
+ * Owns the engine subprocess (lazy-started on first canvas open, killed on
+ * extension deactivate) and registers the `notebookflow.openCanvas` command
+ * that opens a webview hosting the shared NotebookFlow Canvas.
  */
 
-import type * as vscode from "vscode";
+import * as vscode from "vscode";
 
-export function activate(_context: vscode.ExtensionContext): void {
-  // TODO: spawn engine via child_process, register command opening WebviewPanel,
-  //   wire NotebookBridge into vscode.notebooks API.
-  throw new Error("vscode-extension.activate: not implemented");
+import { EngineProcess } from "./EngineProcess";
+import { CanvasWebviewPanel } from "./WebviewPanel";
+
+let engine: EngineProcess | null = null;
+
+export function activate(context: vscode.ExtensionContext): void {
+  engine = new EngineProcess();
+  context.subscriptions.push(engine);
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("notebookflow.openCanvas", () => {
+      const editor = vscode.window.activeNotebookEditor;
+      if (editor === undefined) {
+        void vscode.window.showErrorMessage(
+          "NotebookFlow: open a Jupyter notebook before running this command.",
+        );
+        return;
+      }
+      if (engine === null) {
+        void vscode.window.showErrorMessage(
+          "NotebookFlow: extension is deactivating; cannot open the canvas.",
+        );
+        return;
+      }
+      CanvasWebviewPanel.create(context, editor.notebook, engine);
+    }),
+  );
 }
 
 export function deactivate(): void {
-  // TODO: terminate the spawned engine process cleanly.
+  if (engine !== null) {
+    engine.dispose();
+    engine = null;
+  }
 }

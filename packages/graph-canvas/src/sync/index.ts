@@ -5,10 +5,8 @@
  * can import them as `@notebookflow/graph-canvas/sync`.
  */
 
-export { MarkerParser } from "./MarkerParser";
 export type { NotebookCell, ParseError, ParseResult } from "./MarkerParser";
-
-export { SyncEngine } from "./SyncEngine";
+export { MarkerParser } from "./MarkerParser";
 export type {
   CellPatch,
   ConflictResolution,
@@ -16,3 +14,4 @@ export type {
   SyncEngineOptions,
   SyncEvent,
 } from "./SyncEngine";
+export { SyncEngine } from "./SyncEngine";

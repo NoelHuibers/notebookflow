@@ -4,9 +4,10 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "composite": true,
-    "lib": ["ES2024"]
+    "lib": ["ES2024"],
+    "types": ["node", "vscode"]
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"],
+  "exclude": ["node_modules", "dist", "dist-webview", "webview"],
   "references": [{ "path": "../graph-canvas" }]
 }

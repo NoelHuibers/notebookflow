@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+@source "../../graph-canvas/src/**/*.{ts,tsx}";
+
+/* Map VS Code theme tokens into the shadcn / Tailwind design-token slots so
+ * the shared Canvas components inherit the editor's colour scheme. */
+:root {
+  --background: var(--vscode-editor-background, oklch(0.145 0 0));
+  --foreground: var(--vscode-editor-foreground, oklch(0.985 0 0));
+  --card: var(--vscode-editorWidget-background, oklch(0.205 0 0));
+  --card-foreground: var(--vscode-editorWidget-foreground, oklch(0.985 0 0));
+  --muted: var(--vscode-input-background, oklch(0.269 0 0));
+  --muted-foreground: var(--vscode-descriptionForeground, oklch(0.708 0 0));
+  --border: var(--vscode-panel-border, oklch(1 0 0 / 10%));
+  --primary: var(--vscode-button-background, oklch(0.922 0 0));
+  --primary-foreground: var(--vscode-button-foreground, oklch(0.205 0 0));
+  --radius: 0.5rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

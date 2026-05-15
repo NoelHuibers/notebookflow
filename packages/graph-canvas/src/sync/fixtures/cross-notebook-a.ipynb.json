@@ -1,0 +1,20 @@
+{
+  "cells": [
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {},
+      "outputs": [],
+      "source": [
+        "# @node: Load CSV  [input]  out=df\n",
+        "import pandas as pd\n",
+        "df = pd.read_csv('data.csv')\n"
+      ]
+    }
+  ],
+  "metadata": {
+    "kernelspec": { "display_name": "Python 3", "language": "python", "name": "python3" }
+  },
+  "nbformat": 4,
+  "nbformat_minor": 5
+}

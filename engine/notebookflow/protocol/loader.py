@@ -7,7 +7,8 @@ whose body is rendered into a notebook cell at insertion time.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from notebookflow.protocol.manifest import NodeManifest
 from notebookflow.protocol.registry import Registry
