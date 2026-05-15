@@ -2,11 +2,60 @@
 
 n8n-style workflow orchestration for computational notebooks. Visually wire together Jupyter notebooks and cell groups into pipelines, with AI assistance, a node library, and full bidirectional sync between the visual graph and the actual notebook cells.
 
-## The thesis
+## Quick start
+
+### 1. Prerequisites
+
+| Tool   | Version  | Notes                                                                |
+|--------|----------|----------------------------------------------------------------------|
+| Node   | `>=20`   | Required by every TS package.                                        |
+| pnpm   | `>=10`   | Pinned via `packageManager` in [package.json](package.json) — `corepack enable` will pick it up. |
+| Python | `>=3.11` | Required by the engine.                                              |
+| uv     | latest   | Astral's package manager — used for the engine.                      |
+
+### 2. One-time setup
+
+```powershell
+pnpm bootstrap
+```
+
+`pnpm bootstrap` chains everything you need on a clean checkout:
+
+1. `pnpm install` — workspace deps.
+2. `uv --project engine sync --all-extras` — engine venv with all dev extras.
+3. `uv --project engine add --optional dev jupyterlab` — adds JupyterLab to the engine's dev group (no-op on repeat runs).
+4. `pnpm --filter @notebookflow/jupyterlab-extension add -D @jupyterlab/builder` — adds the labextension webpack builder.
+5. `pnpm --filter @notebookflow/jupyterlab-extension build:lab` — produces the labextension bundle into `engine/notebookflow/labextension/`.
+6. `pnpm jupyter:install` — copies the labextension bundle into `engine/.venv/share/jupyter/labextensions/` so JupyterLab discovers it on launch.
+7. `turbo run build` — builds every TS package (graph-canvas, web-app, vscode-extension, jupyterlab-extension).
+
+It's idempotent — re-run after pulling.
+
+> The script is named `bootstrap` (not `setup`) because `pnpm setup` is a built-in pnpm subcommand that installs pnpm globally — naming the script `setup` makes pnpm shadow it.
+
+### 3. Pick an option
+
+| Command              | What happens                                                                                              |
+|----------------------|-----------------------------------------------------------------------------------------------------------|
+| `pnpm start:web`     | Engine + Vite web app side-by-side via `concurrently`. Open the printed URL (`http://localhost:5173/`).   |
+| `pnpm start:vscode`  | Builds the extension, then auto-launches a VS Code dev host with `examples/demo.ipynb` already open. Engine spawns automatically once you run the **NotebookFlow: Open Canvas** command. |
+| `pnpm start:jupyter` | Builds the labextension bundle, then runs engine and JupyterLab side-by-side via `concurrently`. Lab opens with `examples/demo.ipynb`. |
+
+Ctrl+C in any `start:*` command tears down all child processes via `concurrently`'s `--kill-others-on-fail`.
+
+### What each one shows you
+
+- **Web app** — SyncEngine + Canvas only (the web-app fixture is in-browser; no notebook write-back, no execution).
+- **VS Code** — full loop: live notebook editing (`WorkspaceEdit` cell patches), rename round-trip, pipeline execution over WebSocket via the auto-spawned engine.
+- **JupyterLab** — full loop: live notebook editing via JL's shared (CRDT) model, rename round-trip, pipeline execution over WebSocket to the parallel engine.
+
+## Why NotebookFlow
 
 Flowco (UIST 2025) proved that a dataflow graph is a better authoring model than a linear notebook — but it replaces the notebook entirely. NotebookFlow extends notebooks instead. The `.ipynb` file is always the source of truth. The graph is derived from it.
 
-## Two-level data model
+## Concepts
+
+### Two-level data model
 
 **Level 1 — Cell Group = Node.** A set of cells inside a notebook delimited by a `# @node` marker:
 
@@ -24,7 +73,7 @@ Connections can be drawn at either level:
 - Notebook → Notebook (coarse, pipeline level)
 - Node → Node across notebooks (fine-grained)
 
-## Bidirectional sync — the core research contribution
+### Bidirectional sync — the core research contribution
 
 The `.ipynb` file is always the source of truth. The graph is derived, never primary.
 
@@ -34,7 +83,31 @@ The `.ipynb` file is always the source of truth. The graph is derived, never pri
 
 This is what distinguishes NotebookFlow from Flowco: we extend notebooks rather than replacing them.
 
-## Architecture layers
+## Repo layout
+
+```
+notebookflow/
+├── packages/
+│   ├── graph-canvas/         # Shared React + React Flow component, SyncEngine, MarkerParser
+│   ├── jupyterlab-extension/ # JupyterLab platform adapter (Lumino + ReactWidget)
+│   ├── vscode-extension/     # VS Code platform adapter (host + Vite-bundled webview)
+│   └── web-app/              # Standalone web app (Tailwind + shadcn shell)
+├── engine/                   # Python backend (FastAPI + WebSocket, DAG/DataBus/Executor)
+├── node-library-spec/        # Public extension protocol spec + reference package
+├── examples/                 # Sample .ipynb files for the demos
+├── biome.json
+├── pnpm-workspace.yaml
+├── turbo.json
+└── README.md
+```
+
+## Example notebook
+
+`examples/demo.ipynb` is a self-contained four-node pipeline (Load Data → Filter → Summarize → Report) using inline pandas data — no external CSV required, so the `Run pipeline` button works out of the box. Use it as the reference for the marker grammar.
+
+## Development
+
+### Architecture layers
 
 1. **Platform Adapters** — JupyterLab extension, VS Code extension, standalone web app. All share the same graph canvas component and talk to the core engine via WebSocket.
 2. **View Layer** — Shared React + React Flow graph canvas, notebook cell view, sync engine ([MarkerParser.ts](packages/graph-canvas/src/sync/MarkerParser.ts), [SyncEngine.ts](packages/graph-canvas/src/sync/SyncEngine.ts)).
@@ -43,85 +116,48 @@ This is what distinguishes NotebookFlow from Flowco: we extend notebooks rather 
 5. **Extension Protocol** — Node packages declare a `node_manifest.json`. Installed via `pip install`, discovered via Python entry points.
 6. **LLM Assistance** — Pipeline author (NL → pipeline), code synthesiser (per-node code), explainer (graph → prose).
 
-## Platform communication
+### Platform communication
 
-- **JupyterLab:** Jupyter Server Extension shim auto-launches FastAPI and proxies via `jupyter-server-proxy`. Zero extra setup.
-- **VS Code:** Extension auto-launches the Python process on activation, connects to FastAPI WebSocket.
-- **Standalone Web App:** Connects to a remotely hosted FastAPI instance, or a locally running one.
+- **VS Code:** Extension auto-launches the engine as a child process on first canvas open, connects the webview to its WebSocket. Implemented.
+- **JupyterLab:** Canvas connects to a manually-started engine over WebSocket today; a `jupyter-server-proxy` shim that auto-launches FastAPI is on the roadmap.
+- **Standalone Web App:** Connects to a remotely hosted FastAPI instance, or a locally running one. (Currently exercises only the in-browser SyncEngine.)
 
-The real engine always lives in FastAPI. JupyterLab just gets a thin shim on top.
+The real engine always lives in FastAPI; each adapter is a thin host around it.
 
-## Tech stack
+### Tech stack
 
-**Frontend (TypeScript):** pnpm, Turborepo, React, React Flow, tsc, Vitest, ESLint, Prettier.
+**Frontend (TypeScript):** pnpm, Turborepo, React, React Flow, Tailwind v4, shadcn/ui (web-app shell), tsc, Vitest, Biome (lint + format).
 
 **Backend (Python):** uv, Ruff, ty, pytest, FastAPI, WebSockets.
 
-## Repo layout
+### Verify
 
-```
-notebookflow/
-├── packages/
-│   ├── graph-canvas/         # Shared React + React Flow component
-│   ├── jupyterlab-extension/ # JupyterLab platform adapter
-│   ├── vscode-extension/     # VS Code platform adapter
-│   └── web-app/              # Standalone web app (future)
-├── engine/                   # Python backend (FastAPI + WebSocket)
-├── node-library-spec/        # Public extension protocol spec
-├── pnpm-workspace.yaml
-├── turbo.json
-└── README.md
-```
-
-## Getting started
-
-### Prerequisites
-
-| Tool   | Version  | Notes                                                                |
-|--------|----------|----------------------------------------------------------------------|
-| Node   | `>=20`   | Required by every TS package.                                        |
-| pnpm   | `>=10`   | Pinned via `packageManager` in [package.json](package.json) — `corepack enable` will pick it up. |
-| Python | `>=3.11` | Required by the engine.                                              |
-| uv     | latest   | Astral's package manager — used for the engine.                      |
-
-### Install
-
-```powershell
-# TypeScript packages
-pnpm install
-
-# Python engine
-cd engine
-uv sync --all-extras
-cd ..
-```
-
-### Verify the scaffolding
-
-Everything below should pass on a clean checkout (the source files are stubs that throw `NotImplementedError`/`Error("not implemented")` at runtime, but they're fully type-safe and lint-clean).
+Everything below should pass on a clean checkout:
 
 ```powershell
 pnpm typecheck                  # tsc -b across all TS packages
-pnpm lint                       # flat ESLint config, type-aware
+pnpm check                      # biome lint + format check + import sort
+pnpm --filter @notebookflow/graph-canvas test    # 40 sync-engine tests
 
 cd engine
 uv run ruff check .
 uv run ty check
-uv run pytest                   # no tests yet — exits 0 with "no tests collected"
+uv run pytest                   # 52 tests (DAG, DataBus, Executor, Registry, server)
 cd ..
 ```
 
 ### Day-to-day commands
 
-| Command              | What it does                                                     |
-|----------------------|------------------------------------------------------------------|
-| `pnpm dev`           | `tsc -b --watch` across all TS packages (Turbo orchestrated).    |
-| `pnpm build`         | Build all TS packages.                                           |
-| `pnpm test`          | Vitest across all TS packages.                                   |
-| `pnpm lint:fix`      | ESLint with `--fix`.                                             |
-| `pnpm format`        | Prettier.                                                        |
-| `uv run notebookflow`| Start the FastAPI engine on `127.0.0.1:8765`.                    |
-| `uv run pytest`      | Run engine tests (from `engine/`).                               |
+| Command               | What it does                                                       |
+|-----------------------|--------------------------------------------------------------------|
+| `pnpm dev`            | `tsc -b --watch` across all TS packages (Turbo orchestrated).      |
+| `pnpm build`          | Build all TS packages.                                             |
+| `pnpm test`           | Vitest across all TS packages.                                     |
+| `pnpm check`          | `biome check .` — lint + format check + import sort, read-only.    |
+| `pnpm check:fix`      | `biome check --write .` — apply all auto-fixes.                    |
+| `pnpm format`         | `biome format --write .`                                           |
+| `uv run notebookflow` | Start the FastAPI engine on `127.0.0.1:8765` (from `engine/`).     |
+| `uv run pytest`       | Run engine tests (from `engine/`).                                 |
 
 Per-package commands work too — `cd packages/graph-canvas && pnpm test:watch` for tight TDD loops.
 
@@ -137,26 +173,26 @@ pnpm test:watch   # vitest in watch mode
 
 Cross-package edits propagate automatically via TypeScript project references — editing `graph-canvas` and rebuilding picks up in `jupyterlab-extension`, `vscode-extension`, and `web-app` without any extra wiring.
 
-### Running each platform adapter
+### Manual run (without orchestration)
 
-| Adapter                | How to run it                                                      |
-|------------------------|--------------------------------------------------------------------|
-| Engine (standalone)    | `cd engine && uv run notebookflow` — FastAPI at `127.0.0.1:8765`.  |
-| JupyterLab extension   | `pnpm --filter @notebookflow/jupyterlab-extension build`, then `jupyter labextension develop engine --overwrite` and `jupyter lab`. |
-| VS Code extension      | `pnpm --filter @notebookflow/vscode-extension build`, then F5 in VS Code with the package open (Run Extension launch config). |
-| Web app                | `pnpm --filter @notebookflow/web-app dev` — Vite dev server.       |
+If you'd rather drive the pieces individually:
 
-(All four are stubs today; they'll throw on activation until the underlying components are implemented.)
+| Piece            | Command                                                       |
+|------------------|---------------------------------------------------------------|
+| Engine only      | `pnpm engine`                                                 |
+| Web app only     | `pnpm --filter @notebookflow/web-app dev`                     |
+| VS Code only     | `pnpm --filter @notebookflow/vscode-extension build && code packages/vscode-extension` (then F5) |
+| Jupyter Lab only | `pnpm jupyter:lab` (engine must already be running)           |
+
+### Troubleshooting
+
+- **`pnpm bootstrap` fails on `uv` step** → `uv` isn't on PATH. Install with `winget install astral-sh.uv` (Windows) or `curl -LsSf https://astral.sh/uv/install.sh | sh` (macOS/Linux), then reopen your shell.
+- **`pnpm start:vscode` says `code` not found** → install VS Code's `code` CLI shim. In VS Code: command palette → **Shell Command: Install 'code' command in PATH**. Or use the manual fallback: `pnpm --filter @notebookflow/vscode-extension build && code packages/vscode-extension`, then F5 in that window.
+- **JupyterLab extension doesn't appear in the palette** → re-run `pnpm jupyter:install` (it re-copies the bundle into the venv), refresh the browser tab. Check **Help → About JupyterLab → Installed Extensions** to confirm `@notebookflow/jupyterlab-extension` is listed.
+- **VS Code's engine fails to spawn** → check the **NotebookFlow Engine** output channel for the subprocess error. If `uv` isn't visible to VS Code, set `notebookflow.enginePath` in VS Code settings to an absolute path to a directory containing the engine.
 
 ## Implementation status
 
-Scaffolding stage. Every source file under `packages/` and `engine/notebookflow/` is a typed stub with a docstring explaining what it does and a `TODO`/`NotImplementedError` for the body.
+Phases 1–5d landed: sync engine + canvas + Tailwind/shadcn web-app + Python core (DAG, DataBus, Executor) + node registry with built-in nodes + FastAPI server (`/health`, `/nodes`, `/pipelines/{id}/run`, `/ws`) + VS Code extension (with engine subprocess) + JupyterLab extension (TS source compiles; labextension build expected from the user). Test count: 92 (40 TS sync-engine + 52 Python).
 
-Recommended implementation order — bottom-up, sync engine first because it's the differentiator and has no dependencies:
-
-```
-MarkerParser.ts → SyncEngine.ts → dag.py → executor.py
-  → graph canvas → node library → extension protocol
-```
-
-The first useful vertical slice: parse a real `.ipynb` with two `# @node` markers → render two boxes on a canvas → rename one in the canvas → see the marker update in the file. That exercises [MarkerParser](packages/graph-canvas/src/sync/MarkerParser.ts) + [SyncEngine](packages/graph-canvas/src/sync/SyncEngine.ts) + [Canvas](packages/graph-canvas/src/components/Canvas.tsx) without needing the executor or any platform adapter.
+Deferred from the original plan: triggers (`triggers.py`), LLM modules (`pipeline_author`/`code_synth`/`explainer`), `jupyter-server-proxy` auto-launch for the JL adapter, KernelBridge live-kernel execution.

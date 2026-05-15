@@ -8,8 +8,8 @@
 
 import * as vscode from "vscode";
 
-import { EngineProcess } from "./EngineProcess";
-import { CanvasWebviewPanel } from "./WebviewPanel";
+import { EngineProcess } from "./EngineProcess.js";
+import { CanvasWebviewPanel } from "./WebviewPanel.js";
 
 let engine: EngineProcess | null = null;
 

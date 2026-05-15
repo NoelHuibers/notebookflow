@@ -18,13 +18,17 @@ import * as path from "node:path";
 
 import * as vscode from "vscode";
 
-import type { EngineProcess } from "./EngineProcess";
-import { NotebookBridge } from "./NotebookBridge";
+import type { EngineProcess } from "./EngineProcess.js";
+import { NotebookBridge } from "./NotebookBridge.js";
 
 interface PatchMessage {
   type: "patch";
   cellIndex: number;
   newSource: string | null;
+}
+
+interface ReadyMessage {
+  type: "webviewReady";
 }
 
 function isPatchMessage(msg: unknown): msg is PatchMessage {
@@ -39,6 +43,12 @@ function isPatchMessage(msg: unknown): msg is PatchMessage {
     return false;
   }
   return typeof candidate.newSource === "string" || candidate.newSource === null;
+}
+
+function isReadyMessage(msg: unknown): msg is ReadyMessage {
+  return (
+    typeof msg === "object" && msg !== null && (msg as { type?: unknown }).type === "webviewReady"
+  );
 }
 
 export class CanvasWebviewPanel {
@@ -95,8 +105,9 @@ export class CanvasWebviewPanel {
       }),
     );
 
-    this.sendIngest();
-    void this.kickEngine();
+    // Initial ingest + engine kick happen in handleMessage on the
+    // webview's `webviewReady` signal — sending them now would race
+    // ahead of the React app's message listener and get dropped.
   }
 
   reveal(): void {
@@ -132,6 +143,11 @@ export class CanvasWebviewPanel {
   }
 
   private async handleMessage(msg: unknown): Promise<void> {
+    if (isReadyMessage(msg)) {
+      this.sendIngest();
+      void this.kickEngine();
+      return;
+    }
     if (!isPatchMessage(msg)) {
       return;
     }

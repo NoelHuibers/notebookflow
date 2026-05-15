@@ -118,6 +118,10 @@ export function App(): ReactElement {
       }
     };
     window.addEventListener("message", handler);
+    // Signal to the host that our listener is attached. The host waits for
+    // this before posting ingest / engineUrl, otherwise those messages race
+    // ahead of React's first render and get dropped on the floor.
+    vscode.postMessage({ type: "webviewReady" });
     return () => {
       window.removeEventListener("message", handler);
     };
