@@ -2,7 +2,7 @@
 node_modules/
 dist/
 dist-webview/
-lib/
+/lib/
 .turbo/
 *.tsbuildinfo
 
