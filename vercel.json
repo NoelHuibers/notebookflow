@@ -1,7 +1,0 @@
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "pnpm --filter @notebookflow/web-app build",
-  "outputDirectory": "packages/web-app/dist",
-  "installCommand": "pnpm install --frozen-lockfile",
-  "framework": null
-}
