@@ -16,6 +16,7 @@ Surface:
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -263,7 +264,14 @@ async def _stream_run(
 
 
 def main() -> None:
-    """CLI entry point — `notebookflow` script declared in pyproject.toml."""
+    """CLI entry point — `notebookflow` script declared in pyproject.toml.
+
+    Reads the ``PORT`` env var (Fly.io / Railway / Render all set this); falls
+    back to 8765 for local development. Always binds ``0.0.0.0`` in container
+    contexts; local dev gets the same since loopback connections still work.
+    """
     import uvicorn
 
-    uvicorn.run("notebookflow.server:app", host="127.0.0.1", port=8765, reload=False)
+    port = int(os.environ.get("PORT", "8765"))
+    host = os.environ.get("HOST", "0.0.0.0")
+    uvicorn.run("notebookflow.server:app", host=host, port=port, reload=False)

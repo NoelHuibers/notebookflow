@@ -105,6 +105,42 @@ notebookflow/
 
 `examples/demo.ipynb` is a self-contained four-node pipeline (Load Data → Filter → Summarize → Report) using inline pandas data — no external CSV required, so the `Run pipeline` button works out of the box. Use it as the reference for the marker grammar.
 
+## Deploying
+
+The web-app is a static React bundle, the engine is a Python FastAPI server with WebSocket. They deploy separately.
+
+### Frontend on Vercel
+
+1. **`packages/web-app/vercel.json`** is the canonical Vercel config for the monorepo. In the Vercel project settings, set **Root Directory** to `packages/web-app`. The included `installCommand` jumps to repo root for the workspace install (`cd ../.. && pnpm install --frozen-lockfile`).
+2. Add an **Environment Variable** in Vercel: `VITE_NOTEBOOKFLOW_ENGINE_URL = wss://<your-engine>.fly.dev/ws`. The web-app bakes this in at build time; `Run pipeline` won't work without it pointing at a reachable engine.
+3. Push → Vercel auto-builds → the static frontend goes live.
+
+### Engine on Fly.io
+
+The repo includes `Dockerfile`, `fly.toml`, and `.dockerignore` at the root. Fly's HTTP service tunnels WebSockets out of the box.
+
+```powershell
+# One-time
+fly auth login
+fly launch --no-deploy    # creates the app; keeps our fly.toml
+fly deploy
+
+# Verify
+curl https://<app>.fly.dev/health    # -> {"status":"ok"}
+curl https://<app>.fly.dev/nodes     # -> [...] (3 built-in manifests)
+```
+
+The container reads `PORT` (Fly sets this), binds `0.0.0.0`, and runs `uv run notebookflow`. `auto_stop_machines = "stop"` plus `min_machines_running = 0` keeps the engine within the free tier when idle.
+
+After deploy, plug the URL into Vercel's env var (above), then redeploy the frontend.
+
+### Other Python hosts
+
+Same Dockerfile works on Railway, Render, Modal, DigitalOcean App Platform, or any container host. The engine just needs:
+- The container to set `PORT` (most PaaS do).
+- WebSocket support on the public route.
+- ~512 MB RAM is plenty for the executor.
+
 ## Development
 
 ### Architecture layers

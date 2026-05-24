@@ -1,0 +1,42 @@
+# Build artifacts
+**/node_modules
+**/dist
+**/dist-webview
+**/.turbo
+**/*.tsbuildinfo
+
+# Python
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/.ty_cache
+**/*.egg-info
+
+# Frontend packages — not needed inside the engine container
+packages/
+examples/
+node-library-spec/
+.claude/
+.git/
+.github/
+.vscode/
+.turbo/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+*.swp
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Lockfiles for other ecosystems
+pnpm-lock.yaml
+biome.json
+turbo.json
+package.json
+pnpm-workspace.yaml
