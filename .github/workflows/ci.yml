@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    name: Node (biome + typecheck + vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Biome check (lint + format)
+        run: pnpm check
+
+      - name: TypeScript typecheck
+        run: pnpm typecheck
+
+      - name: Vitest (graph-canvas)
+        run: pnpm --filter @notebookflow/graph-canvas test
+
+  python:
+    name: Python (pytest + ruff + ty)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: engine/uv.lock
+
+      - name: Install Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Sync engine dependencies
+        run: uv --project engine sync --all-extras --python ${{ matrix.python-version }}
+
+      - name: Pytest
+        working-directory: engine
+        run: uv run pytest
+
+      - name: Ruff
+        working-directory: engine
+        run: uv run ruff check .
+
+      - name: ty (type check)
+        working-directory: engine
+        run: uv run ty check
