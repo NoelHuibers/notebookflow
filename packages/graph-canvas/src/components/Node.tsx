@@ -1,17 +1,19 @@
 /**
  * NotebookNode — renders a single cell-group node on the canvas.
  *
- * Header shows the node name and a tag chip. Input handles on the left, one
- * per declared `in=` ref. Output handles on the right, one per declared
- * `out=` port name. Double-click the name to rename via the host-provided
- * callback (the Canvas passes it through `data`).
+ * Header shows the node name, an explicit rename button, and a tag chip.
+ * Input handles on the left, one per declared `in=` ref. Output handles on
+ * the right, one per declared `out=` port name. Rename flows through the
+ * host-provided callback that the Canvas passes via `data`.
  *
  * Styling is explicit so the shared node surface stays stable across hosts,
  * while still allowing a host to override palette tokens via CSS variables
  * such as `--card`, `--foreground`, and `--border`.
  */
 
-import type { CSSProperties, ReactElement } from "react";
+import { Pencil } from "lucide-react";
+import type { ChangeEvent, CSSProperties, KeyboardEvent, ReactElement } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { NodeProps } from "reactflow";
 import { Handle, Position } from "reactflow";
 
@@ -55,7 +57,10 @@ const NODE_FONT_FAMILY =
 interface NotebookNodeStyles {
   wrapper: CSSProperties;
   header: CSSProperties;
+  titleRow: CSSProperties;
   renameButton: CSSProperties;
+  renameAction: CSSProperties;
+  renameInput: CSSProperties;
   tagChip: CSSProperties;
   meta: CSSProperties;
   emptyState: CSSProperties;
@@ -64,28 +69,103 @@ interface NotebookNodeStyles {
 export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
   const { data, selected } = props;
   const styles = nodeStyles(data.tag, selected);
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftName, setDraftName] = useState(data.name);
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
-  const handleRename = (): void => {
+  useEffect(() => {
+    if (!isEditing) {
+      setDraftName(data.name);
+    }
+  }, [data.name, isEditing]);
+
+  useEffect(() => {
+    if (isEditing) {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    }
+  }, [isEditing]);
+
+  const openRename = (): void => {
     if (data.onRename === undefined) {
       return;
     }
-    const next = globalThis.prompt("New node name:", data.name);
-    if (next !== null && next.trim() !== "" && next !== data.name) {
-      data.onRename(data.id, next.trim());
+    setDraftName(data.name);
+    setIsEditing(true);
+  };
+
+  const cancelRename = (): void => {
+    setDraftName(data.name);
+    setIsEditing(false);
+  };
+
+  const commitRename = (): void => {
+    if (data.onRename === undefined) {
+      cancelRename();
+      return;
+    }
+    const next = (renameInputRef.current?.value ?? draftName).trim();
+    setIsEditing(false);
+    if (next !== "" && next !== data.name) {
+      data.onRename(data.id, next);
+    }
+  };
+
+  const handleDraftChange = (event: ChangeEvent<HTMLInputElement>): void => {
+    setDraftName(event.target.value);
+  };
+
+  const handleRenameKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commitRename();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelRename();
     }
   };
 
   return (
     <div style={styles.wrapper}>
       <div style={styles.header}>
-        <button
-          type="button"
-          onDoubleClick={handleRename}
-          title="Double-click to rename"
-          style={styles.renameButton}
-        >
-          {data.name}
-        </button>
+        <div style={styles.titleRow}>
+          {isEditing ? (
+            <input
+              ref={renameInputRef}
+              aria-label="Node name"
+              className="nodrag nopan"
+              value={draftName}
+              onChange={handleDraftChange}
+              onBlur={commitRename}
+              onKeyDown={handleRenameKeyDown}
+              style={styles.renameInput}
+            />
+          ) : (
+            <>
+              <button
+                type="button"
+                className="nodrag nopan"
+                onDoubleClick={openRename}
+                title="Double-click to rename"
+                style={styles.renameButton}
+              >
+                {data.name}
+              </button>
+              <button
+                type="button"
+                className="nodrag nopan"
+                onClick={openRename}
+                aria-label="Rename node"
+                title="Rename node"
+                style={styles.renameAction}
+              >
+                <Pencil aria-hidden="true" size={12} strokeWidth={2} />
+              </button>
+            </>
+          )}
+        </div>
         <span style={styles.tagChip}>{data.tag}</span>
       </div>
       <div style={styles.meta}>
@@ -175,6 +255,13 @@ function nodeStyles(tag: NodeTag, selected: boolean): NotebookNodeStyles {
       color: "#ffffff",
       boxSizing: "border-box",
     },
+    titleRow: {
+      display: "flex",
+      alignItems: "center",
+      gap: 4,
+      minWidth: 0,
+      flex: 1,
+    },
     renameButton: {
       appearance: "none",
       border: "none",
@@ -185,9 +272,43 @@ function nodeStyles(tag: NodeTag, selected: boolean): NotebookNodeStyles {
       font: "inherit",
       fontWeight: 600,
       lineHeight: 1.2,
-      cursor: "text",
       textAlign: "left",
-      userSelect: "none",
+      cursor: "text",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
+      minWidth: 0,
+      flex: "0 1 auto",
+    },
+    renameAction: {
+      appearance: "none",
+      border: "none",
+      borderRadius: 4,
+      background: "transparent",
+      color: "inherit",
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      lineHeight: 0,
+      padding: 2,
+      cursor: "pointer",
+      opacity: 0.78,
+      flexShrink: 0,
+    },
+    renameInput: {
+      appearance: "none",
+      border: "1px solid rgba(255, 255, 255, 0.45)",
+      borderRadius: 6,
+      background: "rgba(255, 255, 255, 0.16)",
+      color: "inherit",
+      font: "inherit",
+      fontWeight: 600,
+      lineHeight: 1.2,
+      padding: "4px 8px",
+      minWidth: 0,
+      width: "100%",
+      outline: "none",
+      boxSizing: "border-box",
     },
     tagChip: {
       display: "inline-flex",
