@@ -25,7 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import type { EngineEvent, PipelineDef } from "@/lib/EngineClient";
+import type { EngineEvent, NbOutput, PipelineDef } from "@/lib/EngineClient";
 import { EngineClient } from "@/lib/EngineClient";
 import type { IpynbDoc } from "@/lib/notebook";
 import { downloadNotebook, parseNotebook } from "@/lib/notebook";
@@ -46,6 +46,7 @@ export function App(): ReactElement {
   const [selected, setSelected] = useState<NodeModel | null>(null);
   const [patches, setPatches] = useState<CellPatch[]>([]);
   const [events, setEvents] = useState<EngineEvent[]>([]);
+  const [outputsByCell, setOutputsByCell] = useState<Record<number, NbOutput[]>>({});
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const engineRef = useRef<SyncEngine | null>(null);
@@ -98,6 +99,7 @@ export function App(): ReactElement {
       setSelected(null);
       setPatches([]);
       setEvents([]);
+      setOutputsByCell({});
       setError(null);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "unknown error";
@@ -123,6 +125,7 @@ export function App(): ReactElement {
       return;
     }
     setEvents([]);
+    setOutputsByCell({});
     setIsRunning(true);
     setError(null);
     clientRef.current
@@ -131,6 +134,13 @@ export function App(): ReactElement {
         pipeline: pipelineDef,
         onEvent: (event) => {
           setEvents((prev) => [...prev, event]);
+          if (event.type === "nodeCompleted") {
+            const node = graph.nodes[event.result.nodeId];
+            const cellIndex = node?.cellIndices[0];
+            if (cellIndex !== undefined) {
+              setOutputsByCell((prev) => ({ ...prev, [cellIndex]: event.result.outputs }));
+            }
+          }
         },
       })
       .catch((err: unknown) => {
@@ -140,11 +150,11 @@ export function App(): ReactElement {
       .finally(() => {
         setIsRunning(false);
       });
-  }, [isRunning, pipelineDef]);
+  }, [isRunning, pipelineDef, graph]);
 
   const handleDownload = useCallback((): void => {
-    downloadNotebook(notebook.cells, notebook.doc, notebook.name);
-  }, [notebook]);
+    downloadNotebook(notebook.cells, notebook.doc, notebook.name, outputsByCell);
+  }, [notebook, outputsByCell]);
 
   const handleReingest = useCallback((): void => {
     const engine = engineRef.current;
@@ -195,7 +205,11 @@ export function App(): ReactElement {
           <section className="flex w-1/2 min-w-0 flex-col border-r">
             <div className="border-b px-4 py-2 text-xs text-muted-foreground">Cells</div>
             <ScrollArea className="flex-1">
-              <CellList cells={notebook.cells} onCellsChange={handleCellsChange} />
+              <CellList
+                cells={notebook.cells}
+                onCellsChange={handleCellsChange}
+                outputsByCell={outputsByCell}
+              />
             </ScrollArea>
           </section>
 

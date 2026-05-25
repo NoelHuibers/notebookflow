@@ -10,6 +10,8 @@ import type { NotebookCell } from "@notebookflow/graph-canvas/sync";
 import type { ReactElement } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { NbOutput } from "@/lib/EngineClient";
+
 import { CellEditor } from "./CellEditor";
 
 const DEBOUNCE_MS = 300;
@@ -17,9 +19,10 @@ const DEBOUNCE_MS = 300;
 export interface CellListProps {
   cells: NotebookCell[];
   onCellsChange: (next: NotebookCell[]) => void;
+  outputsByCell?: Record<number, NbOutput[]>;
 }
 
-export function CellList({ cells, onCellsChange }: CellListProps): ReactElement {
+export function CellList({ cells, onCellsChange, outputsByCell }: CellListProps): ReactElement {
   const [draft, setDraft] = useState<NotebookCell[]>(cells);
   const incomingRef = useRef(cells);
   const onChangeRef = useRef(onCellsChange);
@@ -75,6 +78,7 @@ export function CellList({ cells, onCellsChange }: CellListProps): ReactElement 
             key={`cell-${String(idx)}`}
             cell={cell}
             index={idx}
+            outputs={outputsByCell?.[idx] ?? []}
             onChange={(next) => {
               handleChange(idx, next);
             }}

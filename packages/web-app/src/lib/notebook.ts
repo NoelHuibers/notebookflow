@@ -8,6 +8,8 @@
 
 import type { NotebookCell } from "@notebookflow/graph-canvas/sync";
 
+import type { NbOutput } from "./EngineClient";
+
 export interface IpynbCell {
   cell_type: string;
   source: string | string[];
@@ -60,11 +62,21 @@ function normaliseCellType(kind: string): NotebookCell["cellType"] {
   return "raw";
 }
 
-/** Serialize the current cell state back into nbformat-v4 JSON for download. */
-export function serializeNotebook(cells: NotebookCell[], original: IpynbDoc): string {
+/**
+ * Serialize the current cell state back into nbformat-v4 JSON for download.
+ *
+ * If `outputsByCell` is provided, each code cell's outputs are replaced with
+ * the captured outputs from the most recent run -- so a Downloaded notebook
+ * contains real results, not stale ones from the source file.
+ */
+export function serializeNotebook(
+  cells: NotebookCell[],
+  original: IpynbDoc,
+  outputsByCell: Record<number, NbOutput[]> = {},
+): string {
   const merged: IpynbDoc = {
     ...original,
-    cells: cells.map((cell, idx) => mergeCell(cell, original.cells[idx])),
+    cells: cells.map((cell, idx) => mergeCell(cell, original.cells[idx], outputsByCell[idx])),
     nbformat: original.nbformat ?? 4,
     nbformat_minor: original.nbformat_minor ?? 5,
   };
@@ -74,7 +86,7 @@ export function serializeNotebook(cells: NotebookCell[], original: IpynbDoc): st
   return JSON.stringify(merged, null, 1);
 }
 
-function mergeCell(updated: NotebookCell, original?: IpynbCell): IpynbCell {
+function mergeCell(updated: NotebookCell, original?: IpynbCell, outputs?: NbOutput[]): IpynbCell {
   const base: IpynbCell = original ?? {
     cell_type: updated.cellType,
     source: [],
@@ -87,7 +99,7 @@ function mergeCell(updated: NotebookCell, original?: IpynbCell): IpynbCell {
     ...(updated.cellType === "code"
       ? {
           execution_count: base.execution_count ?? null,
-          outputs: base.outputs ?? [],
+          outputs: outputs ?? base.outputs ?? [],
         }
       : {}),
   };
@@ -103,8 +115,13 @@ function splitSource(source: string): string[] {
 }
 
 /** Build a Blob and trigger a browser download of the assembled notebook. */
-export function downloadNotebook(cells: NotebookCell[], doc: IpynbDoc, filename: string): void {
-  const json = serializeNotebook(cells, doc);
+export function downloadNotebook(
+  cells: NotebookCell[],
+  doc: IpynbDoc,
+  filename: string,
+  outputsByCell: Record<number, NbOutput[]> = {},
+): void {
+  const json = serializeNotebook(cells, doc, outputsByCell);
   const blob = new Blob([json], { type: "application/x-ipynb+json" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");

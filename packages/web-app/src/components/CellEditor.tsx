@@ -14,13 +14,18 @@ import CodeMirror from "@uiw/react-codemirror";
 import type { ReactElement } from "react";
 import { useMemo } from "react";
 
+import type { NbOutput } from "@/lib/EngineClient";
+
+import { CellOutputs } from "./CellOutputs";
+
 export interface CellEditorProps {
   cell: NotebookCell;
   index: number;
+  outputs?: NbOutput[];
   onChange: (next: string) => void;
 }
 
-export function CellEditor({ cell, index, onChange }: CellEditorProps): ReactElement {
+export function CellEditor({ cell, index, outputs = [], onChange }: CellEditorProps): ReactElement {
   const extensions = useMemo(() => (cell.cellType === "code" ? [python()] : []), [cell.cellType]);
 
   return (
@@ -43,6 +48,7 @@ export function CellEditor({ cell, index, onChange }: CellEditorProps): ReactEle
           highlightActiveLineGutter: false,
         }}
       />
+      <CellOutputs outputs={outputs} />
     </div>
   );
 }

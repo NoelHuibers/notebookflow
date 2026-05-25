@@ -34,11 +34,31 @@ export interface PipelineDef {
   edges: EdgeDef[];
 }
 
+/**
+ * nbformat-shaped output dicts emitted by the engine for each executed node.
+ * Snake_case keys match the wire payload + nbformat-v4 schema, so these
+ * structs round-trip cleanly into a downloaded `.ipynb`.
+ */
+export type NbOutput =
+  | { output_type: "stream"; name: "stdout" | "stderr"; text: string }
+  | {
+      output_type: "display_data";
+      data: Record<string, string>;
+      metadata: Record<string, unknown>;
+    }
+  | {
+      output_type: "execute_result";
+      data: Record<string, string>;
+      metadata: Record<string, unknown>;
+    }
+  | { output_type: "error"; ename: string; evalue: string; traceback: string[] };
+
 export interface ExecutionResultMsg {
   nodeId: string;
   status: string;
   error: string | null;
   durationMs: number;
+  outputs: NbOutput[];
 }
 
 export type EngineEvent =
