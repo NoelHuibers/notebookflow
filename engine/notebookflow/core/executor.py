@@ -12,13 +12,20 @@ slot in without changing call sites.
 
 from __future__ import annotations
 
+import contextlib
 import time
-from collections.abc import AsyncIterator
-from dataclasses import dataclass
+import traceback
+from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 from notebookflow.core.dag import DAG, DAGNode
 from notebookflow.core.databus import DataBus
+
+# nbformat-shaped output dicts. We don't validate against nbformat's JSON schema
+# here -- consumers (web-app cell view, downloaded .ipynb) tolerate the same
+# loose shape that real Jupyter kernels emit.
+NbOutput = dict[str, Any]
 
 
 @dataclass(slots=True)
@@ -27,6 +34,67 @@ class ExecutionResult:
     status: str  # one of: ok, error, skipped
     error: str | None = None
     duration_ms: float = 0.0
+    outputs: list[NbOutput] = field(default_factory=list)
+
+
+class _StreamCapture:
+    """File-like sink that appends nbformat stream outputs in arrival order.
+
+    Adjacent writes to the same stream coalesce into one output entry so the
+    list stays compact; writes interleaved with display() calls keep their
+    relative order in the outputs list.
+    """
+
+    def __init__(self, outputs: list[NbOutput], name: str) -> None:
+        self._outputs = outputs
+        self._name = name
+
+    def write(self, s: str) -> int:
+        if not s:
+            return 0
+        last = self._outputs[-1] if self._outputs else None
+        if (
+            last is not None
+            and last.get("output_type") == "stream"
+            and last.get("name") == self._name
+        ):
+            last["text"] += s
+        else:
+            self._outputs.append({"output_type": "stream", "name": self._name, "text": s})
+        return len(s)
+
+    def flush(self) -> None:
+        return
+
+
+def _format_display(obj: Any) -> dict[str, str]:
+    """Build an nbformat MIME bundle for one display() target."""
+    data: dict[str, str] = {"text/plain": repr(obj)}
+    html_repr = getattr(obj, "_repr_html_", None)
+    if callable(html_repr):
+        try:
+            html = html_repr()
+        except Exception:  # noqa: BLE001 -- a buggy _repr_html_ must not kill the cell
+            html = None
+        if isinstance(html, str):
+            data["text/html"] = html
+    return data
+
+
+def _make_display(outputs: list[NbOutput]) -> Callable[..., None]:
+    """Build a display() function that appends display_data outputs for this node."""
+
+    def display(*objs: Any) -> None:
+        for obj in objs:
+            outputs.append(
+                {
+                    "output_type": "display_data",
+                    "data": _format_display(obj),
+                    "metadata": {},
+                },
+            )
+
+    return display
 
 
 class Executor:
@@ -66,17 +134,36 @@ class Executor:
         for port, value in inputs.items():
             self._namespace[port] = value
 
+        outputs: list[NbOutput] = []
+        stdout = _StreamCapture(outputs, "stdout")
+        stderr = _StreamCapture(outputs, "stderr")
+        # Inject display() into the cell's namespace so cell source can call it
+        # without importing IPython. Fresh binding per node so each node's
+        # display() targets its own outputs list.
+        self._namespace["display"] = _make_display(outputs)
+
         start = time.monotonic()
         try:
-            if node.source:
-                exec(node.source, self._namespace)  # noqa: S102
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                if node.source:
+                    exec(node.source, self._namespace)  # noqa: S102
         except Exception as exc:  # noqa: BLE001 — we deliberately surface every error
             duration_ms = (time.monotonic() - start) * 1000.0
+            tb_lines = traceback.format_exception(type(exc), exc, exc.__traceback__)
+            outputs.append(
+                {
+                    "output_type": "error",
+                    "ename": type(exc).__name__,
+                    "evalue": str(exc),
+                    "traceback": [line.rstrip("\n") for line in tb_lines],
+                },
+            )
             return ExecutionResult(
                 node_id=node.id,
                 status="error",
                 error=f"{type(exc).__name__}: {exc}",
                 duration_ms=duration_ms,
+                outputs=outputs,
             )
         duration_ms = (time.monotonic() - start) * 1000.0
 
@@ -84,7 +171,12 @@ class Executor:
             if port in self._namespace:
                 self._bus.put(node.id, port, self._namespace[port])
 
-        return ExecutionResult(node_id=node.id, status="ok", duration_ms=duration_ms)
+        return ExecutionResult(
+            node_id=node.id,
+            status="ok",
+            duration_ms=duration_ms,
+            outputs=outputs,
+        )
 
     def _gather_inputs(
         self, node: DAGNode, name_to_id: dict[str, str]

@@ -21,10 +21,11 @@ import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from notebookflow.core.dag import DAG, DAGEdge, DAGNode
@@ -67,6 +68,10 @@ class ExecutionResultModel(_APIModel):
     status: str
     error: str | None = None
     duration_ms: float
+    # nbformat-shaped outputs (stream/display_data/error). Snake_case keys
+    # inside each dict stay as-is -- to_camel only renames pydantic fields,
+    # not arbitrary dict contents, so nbformat round-trips cleanly.
+    outputs: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class RunResponse(_APIModel):
@@ -136,6 +141,7 @@ def _result_to_model(result: ExecutionResult) -> ExecutionResultModel:
         status=result.status,
         error=result.error,
         duration_ms=result.duration_ms,
+        outputs=result.outputs,
     )
 
 

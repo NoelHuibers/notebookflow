@@ -135,3 +135,113 @@ async def test_run_node_returns_error_result_for_failing_source(
     result = await executor.run_node(node, inputs={})
     assert result.status == "error"
     assert result.error is not None
+
+
+async def test_run_node_captures_stdout(bus: DataBus) -> None:
+    node = DAGNode(id="a", name="A", tag="output", source="print('hello'); print('world')\n")
+    result = await Executor(DAG(), bus).run_node(node, inputs={})
+    assert result.status == "ok"
+    assert result.outputs == [
+        {"output_type": "stream", "name": "stdout", "text": "hello\nworld\n"},
+    ]
+
+
+async def test_run_node_captures_stderr(bus: DataBus) -> None:
+    node = DAGNode(
+        id="a",
+        name="A",
+        tag="output",
+        source="import sys\nsys.stderr.write('oops\\n')\n",
+    )
+    result = await Executor(DAG(), bus).run_node(node, inputs={})
+    assert result.status == "ok"
+    assert result.outputs == [
+        {"output_type": "stream", "name": "stderr", "text": "oops\n"},
+    ]
+
+
+async def test_run_node_captures_display_data_for_plain_object(bus: DataBus) -> None:
+    node = DAGNode(id="a", name="A", tag="output", source="display({'k': 1})\n")
+    result = await Executor(DAG(), bus).run_node(node, inputs={})
+    assert result.status == "ok"
+    assert len(result.outputs) == 1
+    out = result.outputs[0]
+    assert out["output_type"] == "display_data"
+    assert out["data"]["text/plain"] == "{'k': 1}"
+    assert "text/html" not in out["data"]
+
+
+async def test_run_node_captures_display_data_with_html_for_dataframe(bus: DataBus) -> None:
+    src = (
+        "import pandas as pd\n"
+        "display(pd.DataFrame({'x': [1, 2]}))\n"
+    )
+    node = DAGNode(id="a", name="A", tag="output", source=src)
+    result = await Executor(DAG(), bus).run_node(node, inputs={})
+    assert result.status == "ok"
+    assert len(result.outputs) == 1
+    out = result.outputs[0]
+    assert out["output_type"] == "display_data"
+    assert "<table" in out["data"]["text/html"]
+    assert "text/plain" in out["data"]
+
+
+async def test_run_node_emits_error_output_for_exception(bus: DataBus) -> None:
+    node = DAGNode(id="a", name="A", tag="transform", source="raise RuntimeError('boom')\n")
+    result = await Executor(DAG(), bus).run_node(node, inputs={})
+    assert result.status == "error"
+    assert len(result.outputs) == 1
+    out = result.outputs[0]
+    assert out["output_type"] == "error"
+    assert out["ename"] == "RuntimeError"
+    assert out["evalue"] == "boom"
+    assert any("RuntimeError" in line for line in out["traceback"])
+
+
+async def test_run_node_emits_error_output_after_partial_stdout(bus: DataBus) -> None:
+    src = "print('before')\nraise ValueError('nope')\n"
+    node = DAGNode(id="a", name="A", tag="transform", source=src)
+    result = await Executor(DAG(), bus).run_node(node, inputs={})
+    assert result.status == "error"
+    assert [o["output_type"] for o in result.outputs] == ["stream", "error"]
+    assert result.outputs[0]["text"] == "before\n"
+    assert result.outputs[1]["ename"] == "ValueError"
+
+
+async def test_run_node_preserves_order_across_stdout_display_stdout(bus: DataBus) -> None:
+    src = "print('a')\ndisplay('b')\nprint('c')\n"
+    node = DAGNode(id="a", name="A", tag="output", source=src)
+    result = await Executor(DAG(), bus).run_node(node, inputs={})
+    assert result.status == "ok"
+    assert [o["output_type"] for o in result.outputs] == ["stream", "display_data", "stream"]
+    assert result.outputs[0]["text"] == "a\n"
+    assert result.outputs[1]["data"]["text/plain"] == "'b'"
+    assert result.outputs[2]["text"] == "c\n"
+
+
+async def test_run_node_with_no_output_returns_empty_outputs(bus: DataBus) -> None:
+    node = DAGNode(id="a", name="A", tag="transform", source="x = 1\n")
+    result = await Executor(DAG(), bus).run_node(node, inputs={})
+    assert result.status == "ok"
+    assert result.outputs == []
+
+
+async def test_run_pipeline_attaches_outputs_per_node(bus: DataBus) -> None:
+    dag = DAG()
+    dag.add_node(
+        DAGNode(id="a", name="A", tag="input", outputs=["x"], source="print('A'); x = 1\n"),
+    )
+    dag.add_node(
+        DAGNode(
+            id="b",
+            name="B",
+            tag="output",
+            inputs=["A.x"],
+            source="print(f'B={x}')\n",
+        ),
+    )
+    dag.add_edge(DAGEdge("a", "x", "b", "A.x"))
+    results = await Executor(dag, bus).run_pipeline()
+    assert [r.status for r in results] == ["ok", "ok"]
+    assert results[0].outputs[0]["text"] == "A\n"
+    assert results[1].outputs[0]["text"] == "B=1\n"
