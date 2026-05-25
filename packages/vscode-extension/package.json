@@ -16,9 +16,20 @@
     "commands": [
       {
         "command": "notebookflow.openCanvas",
-        "title": "NotebookFlow: Open Canvas"
+        "title": "NotebookFlow: Open Canvas",
+        "category": "NotebookFlow",
+        "icon": "$(circuit-board)"
       }
     ],
+    "menus": {
+      "notebook/toolbar": [
+        {
+          "command": "notebookflow.openCanvas",
+          "group": "navigation@1",
+          "when": "notebookType == 'jupyter-notebook'"
+        }
+      ]
+    },
     "configuration": {
       "title": "NotebookFlow",
       "properties": {
