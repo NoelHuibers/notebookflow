@@ -36,6 +36,15 @@ const GROUP_Y = 0;
 const FIRST_NODE_Y = 70;
 const NODE_VERTICAL_SPACING = 140;
 
+const FLOW_STYLE = {
+  width: "100%",
+  height: "100%",
+  color: "var(--notebookflow-canvas-fg, #111827)",
+  fontFamily:
+    "var(--notebookflow-font-family, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif)",
+  lineHeight: 1.4,
+} as const;
+
 export interface CanvasProps {
   graph: GraphModel;
   onNodeRename?: (nodeId: string, nextName: string) => void;
@@ -114,6 +123,8 @@ export function Canvas(props: CanvasProps): ReactElement {
       edges={rfEdges}
       nodeTypes={NODE_TYPES}
       edgeTypes={EDGE_TYPES}
+      className="notebookflow-canvas"
+      style={FLOW_STYLE}
       onConnect={handleConnect}
       onNodeClick={handleNodeClick}
       onPaneClick={handlePaneClick}

@@ -15,6 +15,8 @@
  *     gets a clickable button to the right of Run/Restart).
  */
 
+import "reactflow/dist/style.css";
+
 import type { JupyterFrontEnd, JupyterFrontEndPlugin } from "@jupyterlab/application";
 import { ICommandPalette, ToolbarButton } from "@jupyterlab/apputils";
 import type { INotebookTracker, NotebookPanel } from "@jupyterlab/notebook";
