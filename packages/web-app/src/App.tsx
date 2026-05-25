@@ -169,7 +169,7 @@ export function App(): ReactElement {
 
   return (
     <FileDropZone onFile={handleFile}>
-      <div className="flex h-screen flex-col bg-background text-foreground font-sans">
+      <div className="flex h-screen overflow-hidden flex-col bg-background text-foreground font-sans">
         <header className="flex items-center gap-3 border-b bg-card px-4 py-2.5">
           <span className="font-semibold tracking-tight">NotebookFlow</span>
           <Badge variant="secondary" className="font-mono">
@@ -201,10 +201,10 @@ export function App(): ReactElement {
           </div>
         )}
 
-        <div className="flex min-h-0 flex-1">
-          <section className="flex w-1/2 min-w-0 flex-col border-r">
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <section className="flex min-h-0 w-1/2 min-w-0 flex-col border-r">
             <div className="border-b px-4 py-2 text-xs text-muted-foreground">Cells</div>
-            <ScrollArea className="flex-1">
+            <ScrollArea className="min-h-0 flex-1">
               <CellList
                 cells={notebook.cells}
                 onCellsChange={handleCellsChange}
@@ -213,16 +213,16 @@ export function App(): ReactElement {
             </ScrollArea>
           </section>
 
-          <section className="flex w-1/2 min-w-0 flex-col">
+          <section className="flex min-h-0 w-1/2 min-w-0 flex-col">
             <div className="border-b px-4 py-2 text-xs text-muted-foreground">Canvas</div>
-            <div className="relative flex-1 bg-background">
+            <div className="relative min-h-0 flex-1 bg-background">
               <Canvas graph={graph} onNodeRename={handleRename} onNodeSelect={setSelected} />
             </div>
           </section>
         </div>
 
         <Separator />
-        <aside className="grid grid-cols-3 divide-x border-t bg-muted/30 text-xs">
+        <aside className="shrink-0 grid grid-cols-3 divide-x border-t bg-muted/30 text-xs">
           <InspectorPanel title="Selected" count={selected === null ? 0 : 1} empty="Click a node.">
             {selected !== null && (
               <pre className="overflow-x-auto rounded-md border bg-background p-2 font-mono text-[11px]">
@@ -284,14 +284,14 @@ interface InspectorPanelProps {
 
 function InspectorPanel({ title, count, empty, children }: InspectorPanelProps): ReactElement {
   return (
-    <div className="flex max-h-48 flex-col">
+    <div className="flex min-h-0 max-h-48 flex-col">
       <div className="flex items-center gap-2 border-b px-4 py-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
         {title}
         <Badge variant="outline" className="font-mono text-[10px]">
           {count}
         </Badge>
       </div>
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col gap-2 p-3">
           {count === 0 ? (
             <p className="text-[11px] italic text-muted-foreground">{empty}</p>
