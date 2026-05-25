@@ -15,7 +15,7 @@ import { Canvas } from "@notebookflow/graph-canvas";
 import type { CellPatch, NotebookCell } from "@notebookflow/graph-canvas/sync";
 import { SyncEngine } from "@notebookflow/graph-canvas/sync";
 import { Download, Play, RotateCcw } from "lucide-react";
-import type { ReactElement } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactElement } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { CellList } from "@/components/CellList";
@@ -24,20 +24,35 @@ import { FileDropZone } from "@/components/FileDropZone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import type { EngineEvent, NbOutput, PipelineDef } from "@/lib/EngineClient";
 import { EngineClient } from "@/lib/EngineClient";
 import type { IpynbDoc } from "@/lib/notebook";
+import { cn } from "@/lib/utils";
 import { downloadNotebook, parseNotebook } from "@/lib/notebook";
 
 import twoNode from "./fixtures/two-node.ipynb.json";
 
 const EMPTY_GRAPH: GraphModel = { nodes: {}, groups: {}, wires: {} };
+const DIVIDER_SIZE_PX = 10;
+const MIN_NOTEBOOK_WIDTH_PX = 280;
+const MIN_CANVAS_WIDTH_PX = 320;
+const MIN_MAIN_HEIGHT_PX = 220;
+const MIN_INSPECTOR_HEIGHT_PX = 140;
+const DEFAULT_NOTEBOOK_RATIO = 50;
+const DEFAULT_MAIN_RATIO = 72;
 
 interface LoadedNotebook {
   name: string;
   cells: NotebookCell[];
   doc: IpynbDoc;
+}
+
+type DragAxis = "horizontal" | "vertical";
+
+interface DragState {
+  axis: DragAxis;
+  startCoord: number;
+  startRatio: number;
 }
 
 export function App(): ReactElement {
@@ -49,8 +64,13 @@ export function App(): ReactElement {
   const [outputsByCell, setOutputsByCell] = useState<Record<number, NbOutput[]>>({});
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notebookRatio, setNotebookRatio] = useState(DEFAULT_NOTEBOOK_RATIO);
+  const [mainRatio, setMainRatio] = useState(DEFAULT_MAIN_RATIO);
+  const [dragState, setDragState] = useState<DragState | null>(null);
   const engineRef = useRef<SyncEngine | null>(null);
   const clientRef = useRef<EngineClient>(new EngineClient());
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const topPaneRef = useRef<HTMLDivElement | null>(null);
 
   // Lazily construct the SyncEngine once. We re-call ingest whenever the
   // notebook's cell array changes (drop, edit-debounce, re-ingest button).
@@ -167,6 +187,92 @@ export function App(): ReactElement {
 
   const nodeCount = Object.keys(graph.nodes).length;
 
+  useEffect(() => {
+    if (dragState === null) {
+      return;
+    }
+
+    const handlePointerMove = (event: PointerEvent): void => {
+      if (dragState.axis === "vertical") {
+        const host = topPaneRef.current;
+        if (host === null) {
+          return;
+        }
+        const availableWidth = Math.max(host.clientWidth - DIVIDER_SIZE_PX, 1);
+        const minRatio = Math.min((MIN_NOTEBOOK_WIDTH_PX / availableWidth) * 100, 50);
+        const maxRatio = Math.max(100 - (MIN_CANVAS_WIDTH_PX / availableWidth) * 100, 50);
+        const deltaRatio = ((event.clientX - dragState.startCoord) / availableWidth) * 100;
+        setNotebookRatio(clamp(dragState.startRatio + deltaRatio, minRatio, maxRatio));
+        return;
+      }
+
+      const host = contentRef.current;
+      if (host === null) {
+        return;
+      }
+      const availableHeight = Math.max(host.clientHeight - DIVIDER_SIZE_PX, 1);
+      const minRatio = Math.min((MIN_MAIN_HEIGHT_PX / availableHeight) * 100, 50);
+      const maxRatio = Math.max(100 - (MIN_INSPECTOR_HEIGHT_PX / availableHeight) * 100, 50);
+      const deltaRatio = ((event.clientY - dragState.startCoord) / availableHeight) * 100;
+      setMainRatio(clamp(dragState.startRatio + deltaRatio, minRatio, maxRatio));
+    };
+
+    const handlePointerUp = (): void => {
+      setDragState(null);
+    };
+
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = dragState.axis === "vertical" ? "col-resize" : "row-resize";
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+
+    return () => {
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [dragState]);
+
+  const handleVerticalDividerPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>): void => {
+      event.preventDefault();
+      setDragState({
+        axis: "vertical",
+        startCoord: event.clientX,
+        startRatio: notebookRatio,
+      });
+    },
+    [notebookRatio],
+  );
+
+  const handleHorizontalDividerPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>): void => {
+      event.preventDefault();
+      setDragState({
+        axis: "horizontal",
+        startCoord: event.clientY,
+        startRatio: mainRatio,
+      });
+    },
+    [mainRatio],
+  );
+
+  const contentStyle = useMemo(
+    () => ({
+      gridTemplateRows: `minmax(${MIN_MAIN_HEIGHT_PX}px, ${mainRatio}%) ${DIVIDER_SIZE_PX}px minmax(${MIN_INSPECTOR_HEIGHT_PX}px, calc(${100 - mainRatio}% - ${DIVIDER_SIZE_PX}px))`,
+    }),
+    [mainRatio],
+  );
+
+  const topPaneStyle = useMemo(
+    () => ({
+      gridTemplateColumns: `minmax(${MIN_NOTEBOOK_WIDTH_PX}px, ${notebookRatio}%) ${DIVIDER_SIZE_PX}px minmax(${MIN_CANVAS_WIDTH_PX}px, calc(${100 - notebookRatio}% - ${DIVIDER_SIZE_PX}px))`,
+    }),
+    [notebookRatio],
+  );
+
   return (
     <FileDropZone onFile={handleFile}>
       <div className="flex h-screen overflow-hidden flex-col bg-background text-foreground font-sans">
@@ -201,77 +307,116 @@ export function App(): ReactElement {
           </div>
         )}
 
-        <div className="flex min-h-0 flex-1 overflow-hidden">
-          <section className="flex min-h-0 w-1/2 min-w-0 flex-col border-r">
-            <div className="border-b px-4 py-2 text-xs text-muted-foreground">Cells</div>
-            <ScrollArea className="min-h-0 flex-1">
-              <CellList
-                cells={notebook.cells}
-                onCellsChange={handleCellsChange}
-                outputsByCell={outputsByCell}
-              />
-            </ScrollArea>
-          </section>
+        <div ref={contentRef} className="grid min-h-0 flex-1 overflow-hidden" style={contentStyle}>
+          <div ref={topPaneRef} className="grid min-h-0 overflow-hidden" style={topPaneStyle}>
+            <section className="flex min-h-0 min-w-0 flex-col">
+              <div className="border-b px-4 py-2 text-xs text-muted-foreground">Cells</div>
+              <ScrollArea className="min-h-0 flex-1">
+                <CellList
+                  cells={notebook.cells}
+                  onCellsChange={handleCellsChange}
+                  outputsByCell={outputsByCell}
+                />
+              </ScrollArea>
+            </section>
 
-          <section className="flex min-h-0 w-1/2 min-w-0 flex-col">
-            <div className="border-b px-4 py-2 text-xs text-muted-foreground">Canvas</div>
-            <div className="relative min-h-0 flex-1 bg-background">
-              <Canvas graph={graph} onNodeRename={handleRename} onNodeSelect={setSelected} />
-            </div>
-          </section>
-        </div>
+            <PaneDivider
+              orientation="vertical"
+              onPointerDown={handleVerticalDividerPointerDown}
+            />
 
-        <Separator />
-        <aside className="shrink-0 grid grid-cols-3 divide-x border-t bg-muted/30 text-xs">
-          <InspectorPanel title="Selected" count={selected === null ? 0 : 1} empty="Click a node.">
-            {selected !== null && (
-              <pre className="overflow-x-auto rounded-md border bg-background p-2 font-mono text-[11px]">
-                {JSON.stringify(selected, null, 2)}
-              </pre>
-            )}
-          </InspectorPanel>
-
-          <InspectorPanel
-            title="Execution events"
-            count={events.length}
-            empty="Click Run to dispatch this pipeline."
-          >
-            <ul className="flex flex-col gap-1">
-              {events.map((event, idx) => (
-                <li
-                  key={`${event.type}-${String(idx)}`}
-                  className="rounded border bg-background px-2 py-1 font-mono text-[11px]"
-                >
-                  {renderEvent(event)}
-                </li>
-              ))}
-            </ul>
-          </InspectorPanel>
-
-          <InspectorPanel
-            title="Cell patches"
-            count={patches.length}
-            empty="Rename a node in the canvas to see one."
-          >
-            {patches.map((patch, idx) => (
-              <div
-                key={`${patch.notebookPath}-${String(patch.cellIndex)}-${String(idx)}`}
-                className="rounded border bg-background p-2"
-              >
-                <div className="mb-1 flex items-center gap-2 text-[10px] text-muted-foreground">
-                  <Badge variant="secondary" className="font-mono">
-                    cell {patch.cellIndex}
-                  </Badge>
-                </div>
-                <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[11px]">
-                  {patch.newSource ?? "(deleted)"}
-                </pre>
+            <section className="flex min-h-0 min-w-0 flex-col">
+              <div className="border-b px-4 py-2 text-xs text-muted-foreground">Canvas</div>
+              <div className="relative min-h-0 flex-1 bg-background">
+                <Canvas graph={graph} onNodeRename={handleRename} onNodeSelect={setSelected} />
               </div>
-            ))}
-          </InspectorPanel>
-        </aside>
+            </section>
+          </div>
+
+          <PaneDivider
+            orientation="horizontal"
+            onPointerDown={handleHorizontalDividerPointerDown}
+          />
+
+          <aside className="min-h-0 grid grid-cols-3 divide-x bg-muted/30 text-xs">
+            <InspectorPanel title="Selected" count={selected === null ? 0 : 1} empty="Click a node.">
+              {selected !== null && (
+                <pre className="overflow-x-auto rounded-md border bg-background p-2 font-mono text-[11px]">
+                  {JSON.stringify(selected, null, 2)}
+                </pre>
+              )}
+            </InspectorPanel>
+
+            <InspectorPanel
+              title="Execution events"
+              count={events.length}
+              empty="Click Run to dispatch this pipeline."
+            >
+              <ul className="flex flex-col gap-1">
+                {events.map((event, idx) => (
+                  <li
+                    key={`${event.type}-${String(idx)}`}
+                    className="rounded border bg-background px-2 py-1 font-mono text-[11px]"
+                  >
+                    {renderEvent(event)}
+                  </li>
+                ))}
+              </ul>
+            </InspectorPanel>
+
+            <InspectorPanel
+              title="Cell patches"
+              count={patches.length}
+              empty="Rename a node in the canvas to see one."
+            >
+              {patches.map((patch, idx) => (
+                <div
+                  key={`${patch.notebookPath}-${String(patch.cellIndex)}-${String(idx)}`}
+                  className="rounded border bg-background p-2"
+                >
+                  <div className="mb-1 flex items-center gap-2 text-[10px] text-muted-foreground">
+                    <Badge variant="secondary" className="font-mono">
+                      cell {patch.cellIndex}
+                    </Badge>
+                  </div>
+                  <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[11px]">
+                    {patch.newSource ?? "(deleted)"}
+                  </pre>
+                </div>
+              ))}
+            </InspectorPanel>
+          </aside>
+        </div>
       </div>
     </FileDropZone>
+  );
+}
+
+interface PaneDividerProps {
+  orientation: DragAxis;
+  onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
+}
+
+function PaneDivider({ orientation, onPointerDown }: PaneDividerProps): ReactElement {
+  const isVertical = orientation === "vertical";
+
+  return (
+    <div
+      role="separator"
+      aria-orientation={orientation}
+      onPointerDown={onPointerDown}
+      className={cn(
+        "group relative flex shrink-0 touch-none select-none items-center justify-center bg-muted/70",
+        isVertical ? "h-full cursor-col-resize" : "w-full cursor-row-resize",
+      )}
+    >
+      <div
+        className={cn(
+          "rounded-full bg-border transition-colors group-hover:bg-foreground/30 group-active:bg-foreground/45",
+          isVertical ? "h-14 w-1" : "h-1 w-14",
+        )}
+      />
+    </div>
   );
 }
 
@@ -284,7 +429,7 @@ interface InspectorPanelProps {
 
 function InspectorPanel({ title, count, empty, children }: InspectorPanelProps): ReactElement {
   return (
-    <div className="flex min-h-0 max-h-48 flex-col">
+    <div className="flex min-h-0 flex-col">
       <div className="flex items-center gap-2 border-b px-4 py-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
         {title}
         <Badge variant="outline" className="font-mono text-[10px]">
@@ -373,4 +518,8 @@ function statusGlyph(status: string): string {
     return "↷";
   }
   return "•";
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }
