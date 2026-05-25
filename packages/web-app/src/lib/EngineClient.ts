@@ -47,8 +47,38 @@ export type EngineEvent =
   | { type: "pipelineCompleted"; pipelineId: string; results: ExecutionResultMsg[] }
   | { type: "error"; pipelineId?: string; message: string };
 
-export const DEFAULT_ENGINE_URL =
-  (import.meta.env.VITE_NOTEBOOKFLOW_ENGINE_URL as string | undefined) ?? "ws://localhost:8765/ws";
+const FALLBACK_ENGINE_URL = "ws://localhost:8765/ws";
+
+/**
+ * Resolve the engine WebSocket URL from the env var, falling back to localhost
+ * if the value is missing or doesn't look like a WS URL.
+ *
+ * The validation guards against a common Vercel misconfiguration: pasting the
+ * whole `VITE_NOTEBOOKFLOW_ENGINE_URL = ws://…` line into the Value field
+ * instead of just the URL. Without this guard, WebSocket would try to connect
+ * to the env-var name itself and produce a baffling error.
+ */
+function resolveEngineUrl(): string {
+  const raw = import.meta.env.VITE_NOTEBOOKFLOW_ENGINE_URL as string | undefined;
+  if (raw === undefined) {
+    return FALLBACK_ENGINE_URL;
+  }
+  const trimmed = raw.trim();
+  if (trimmed === "") {
+    return FALLBACK_ENGINE_URL;
+  }
+  if (!/^wss?:\/\//.test(trimmed)) {
+    console.warn(
+      `VITE_NOTEBOOKFLOW_ENGINE_URL is "${trimmed}" — expected ws:// or wss:// URL. ` +
+        `Check the Value field in your Vercel env vars: it should be the URL only, ` +
+        `not "KEY=VALUE". Falling back to ${FALLBACK_ENGINE_URL}.`,
+    );
+    return FALLBACK_ENGINE_URL;
+  }
+  return trimmed;
+}
+
+export const DEFAULT_ENGINE_URL = resolveEngineUrl();
 
 export interface RunOptions {
   pipelineId: string;
