@@ -15,7 +15,11 @@ import { Canvas } from "@notebookflow/graph-canvas";
 import type { CellPatch, NotebookCell } from "@notebookflow/graph-canvas/sync";
 import { SyncEngine } from "@notebookflow/graph-canvas/sync";
 import { Download, Play, RotateCcw } from "lucide-react";
-import type { PointerEvent as ReactPointerEvent, ReactElement } from "react";
+import type {
+  ReactElement,
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+} from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { CellList } from "@/components/CellList";
@@ -27,8 +31,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import type { EngineEvent, NbOutput, PipelineDef } from "@/lib/EngineClient";
 import { EngineClient } from "@/lib/EngineClient";
 import type { IpynbDoc } from "@/lib/notebook";
-import { cn } from "@/lib/utils";
 import { downloadNotebook, parseNotebook } from "@/lib/notebook";
+import { cn } from "@/lib/utils";
 
 import twoNode from "./fixtures/two-node.ipynb.json";
 
@@ -40,6 +44,7 @@ const MIN_MAIN_HEIGHT_PX = 220;
 const MIN_INSPECTOR_HEIGHT_PX = 140;
 const DEFAULT_NOTEBOOK_RATIO = 50;
 const DEFAULT_MAIN_RATIO = 72;
+const KEYBOARD_RESIZE_STEP = 2;
 
 interface LoadedNotebook {
   name: string;
@@ -187,6 +192,28 @@ export function App(): ReactElement {
 
   const nodeCount = Object.keys(graph.nodes).length;
 
+  const clampNotebookRatio = useCallback((value: number): number => {
+    const host = topPaneRef.current;
+    if (host === null) {
+      return clamp(value, 0, 100);
+    }
+    const availableWidth = Math.max(host.clientWidth - DIVIDER_SIZE_PX, 1);
+    const minRatio = Math.min((MIN_NOTEBOOK_WIDTH_PX / availableWidth) * 100, 50);
+    const maxRatio = Math.max(100 - (MIN_CANVAS_WIDTH_PX / availableWidth) * 100, 50);
+    return clamp(value, minRatio, maxRatio);
+  }, []);
+
+  const clampMainRatio = useCallback((value: number): number => {
+    const host = contentRef.current;
+    if (host === null) {
+      return clamp(value, 0, 100);
+    }
+    const availableHeight = Math.max(host.clientHeight - DIVIDER_SIZE_PX, 1);
+    const minRatio = Math.min((MIN_MAIN_HEIGHT_PX / availableHeight) * 100, 50);
+    const maxRatio = Math.max(100 - (MIN_INSPECTOR_HEIGHT_PX / availableHeight) * 100, 50);
+    return clamp(value, minRatio, maxRatio);
+  }, []);
+
   useEffect(() => {
     if (dragState === null) {
       return;
@@ -199,10 +226,8 @@ export function App(): ReactElement {
           return;
         }
         const availableWidth = Math.max(host.clientWidth - DIVIDER_SIZE_PX, 1);
-        const minRatio = Math.min((MIN_NOTEBOOK_WIDTH_PX / availableWidth) * 100, 50);
-        const maxRatio = Math.max(100 - (MIN_CANVAS_WIDTH_PX / availableWidth) * 100, 50);
         const deltaRatio = ((event.clientX - dragState.startCoord) / availableWidth) * 100;
-        setNotebookRatio(clamp(dragState.startRatio + deltaRatio, minRatio, maxRatio));
+        setNotebookRatio(clampNotebookRatio(dragState.startRatio + deltaRatio));
         return;
       }
 
@@ -211,10 +236,8 @@ export function App(): ReactElement {
         return;
       }
       const availableHeight = Math.max(host.clientHeight - DIVIDER_SIZE_PX, 1);
-      const minRatio = Math.min((MIN_MAIN_HEIGHT_PX / availableHeight) * 100, 50);
-      const maxRatio = Math.max(100 - (MIN_INSPECTOR_HEIGHT_PX / availableHeight) * 100, 50);
       const deltaRatio = ((event.clientY - dragState.startCoord) / availableHeight) * 100;
-      setMainRatio(clamp(dragState.startRatio + deltaRatio, minRatio, maxRatio));
+      setMainRatio(clampMainRatio(dragState.startRatio + deltaRatio));
     };
 
     const handlePointerUp = (): void => {
@@ -233,10 +256,10 @@ export function App(): ReactElement {
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
-  }, [dragState]);
+  }, [clampMainRatio, clampNotebookRatio, dragState]);
 
   const handleVerticalDividerPointerDown = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>): void => {
+    (event: ReactPointerEvent<HTMLButtonElement>): void => {
       event.preventDefault();
       setDragState({
         axis: "vertical",
@@ -248,7 +271,7 @@ export function App(): ReactElement {
   );
 
   const handleHorizontalDividerPointerDown = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>): void => {
+    (event: ReactPointerEvent<HTMLButtonElement>): void => {
       event.preventDefault();
       setDragState({
         axis: "horizontal",
@@ -257,6 +280,44 @@ export function App(): ReactElement {
       });
     },
     [mainRatio],
+  );
+
+  const handleVerticalDividerKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLButtonElement>): void => {
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setNotebookRatio((current) => clampNotebookRatio(current - KEYBOARD_RESIZE_STEP));
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setNotebookRatio((current) => clampNotebookRatio(current + KEYBOARD_RESIZE_STEP));
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        setNotebookRatio(() => clampNotebookRatio(0));
+      } else if (event.key === "End") {
+        event.preventDefault();
+        setNotebookRatio(() => clampNotebookRatio(100));
+      }
+    },
+    [clampNotebookRatio],
+  );
+
+  const handleHorizontalDividerKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLButtonElement>): void => {
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setMainRatio((current) => clampMainRatio(current - KEYBOARD_RESIZE_STEP));
+      } else if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setMainRatio((current) => clampMainRatio(current + KEYBOARD_RESIZE_STEP));
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        setMainRatio(() => clampMainRatio(0));
+      } else if (event.key === "End") {
+        event.preventDefault();
+        setMainRatio(() => clampMainRatio(100));
+      }
+    },
+    [clampMainRatio],
   );
 
   const contentStyle = useMemo(
@@ -322,7 +383,9 @@ export function App(): ReactElement {
 
             <PaneDivider
               orientation="vertical"
+              label="Resize notebook and canvas panes"
               onPointerDown={handleVerticalDividerPointerDown}
+              onKeyDown={handleVerticalDividerKeyDown}
             />
 
             <section className="flex min-h-0 min-w-0 flex-col">
@@ -335,11 +398,17 @@ export function App(): ReactElement {
 
           <PaneDivider
             orientation="horizontal"
+            label="Resize editor and inspector panes"
             onPointerDown={handleHorizontalDividerPointerDown}
+            onKeyDown={handleHorizontalDividerKeyDown}
           />
 
           <aside className="min-h-0 grid grid-cols-3 divide-x bg-muted/30 text-xs">
-            <InspectorPanel title="Selected" count={selected === null ? 0 : 1} empty="Click a node.">
+            <InspectorPanel
+              title="Selected"
+              count={selected === null ? 0 : 1}
+              empty="Click a node."
+            >
               {selected !== null && (
                 <pre className="overflow-x-auto rounded-md border bg-background p-2 font-mono text-[11px]">
                   {JSON.stringify(selected, null, 2)}
@@ -394,19 +463,27 @@ export function App(): ReactElement {
 
 interface PaneDividerProps {
   orientation: DragAxis;
-  onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  label: string;
+  onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => void;
 }
 
-function PaneDivider({ orientation, onPointerDown }: PaneDividerProps): ReactElement {
+function PaneDivider({
+  orientation,
+  label,
+  onPointerDown,
+  onKeyDown,
+}: PaneDividerProps): ReactElement {
   const isVertical = orientation === "vertical";
 
   return (
-    <div
-      role="separator"
-      aria-orientation={orientation}
+    <button
+      type="button"
+      aria-label={label}
       onPointerDown={onPointerDown}
+      onKeyDown={onKeyDown}
       className={cn(
-        "group relative flex shrink-0 touch-none select-none items-center justify-center bg-muted/70",
+        "group relative flex shrink-0 touch-none select-none items-center justify-center border-0 bg-muted/70 p-0",
         isVertical ? "h-full cursor-col-resize" : "w-full cursor-row-resize",
       )}
     >
@@ -416,7 +493,7 @@ function PaneDivider({ orientation, onPointerDown }: PaneDividerProps): ReactEle
           isVertical ? "h-14 w-1" : "h-1 w-14",
         )}
       />
-    </div>
+    </button>
   );
 }
 
