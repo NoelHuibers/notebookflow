@@ -99,3 +99,20 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Pandas DataFrame outputs land here via display(df) -> text/html. Sanitized
+   by DOMPurify before render; tag/attr allowlist is in CellOutputs.tsx. */
+.cell-output-html table {
+  @apply w-max min-w-full border-collapse font-mono text-[11px];
+  font-variant-numeric: tabular-nums;
+}
+.cell-output-html th,
+.cell-output-html td {
+  @apply border-b px-3 py-1 text-left align-top text-muted-foreground;
+}
+.cell-output-html thead th {
+  @apply border-b-2 font-medium text-foreground;
+}
+.cell-output-html tbody tr:hover td {
+  @apply bg-muted/40;
+}
