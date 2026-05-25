@@ -17,6 +17,7 @@
       "!**/*.tsbuildinfo",
       "!**/pnpm-lock.yaml",
       "!**/*.css",
+      "!**/*.html",
       "!engine",
       "!node-library-spec/notebookflow-node-hello"
     ]
