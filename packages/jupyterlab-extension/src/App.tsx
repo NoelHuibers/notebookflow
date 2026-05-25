@@ -62,10 +62,36 @@ export function App({ bridge, onRun }: AppProps): ReactElement {
       return;
     }
     const pipeline = buildPipelineDef(graph, bridge.readCells(), bridge.notebookPath);
+    const outputCellIndices = Array.from(
+      new Set(
+        pipeline.nodes
+          .flatMap((node) => node.cellIndices)
+          .filter((cellIndex) => Number.isInteger(cellIndex) && cellIndex >= 0),
+      ),
+    );
     setEvents([]);
     setIsRunning(true);
+    bridge.clearOutputs(outputCellIndices);
+    let nextExecutionCount = 0;
     void onRun(pipeline, (event) => {
       setEvents((prev) => [...prev, event]);
+      if (event.type !== "nodeCompleted") {
+        return;
+      }
+      const cellIndex = graph.nodes[event.result.nodeId]?.cellIndices[0];
+      if (cellIndex === undefined) {
+        return;
+      }
+      const executionCount = event.result.status === "skipped" ? null : ++nextExecutionCount;
+      try {
+        bridge.replaceOutputs(cellIndex, event.result.outputs, executionCount);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "unknown error";
+        setEvents((prev) => [
+          ...prev,
+          { type: "error", message: `output update failed: ${message}` },
+        ]);
+      }
     })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : "unknown error";

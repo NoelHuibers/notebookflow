@@ -6,7 +6,7 @@
  * the extension's install directory. Bridges three flows:
  *
  *   - extension → webview: ``ingest`` (cells), ``engineUrl`` / ``engineDown``.
- *   - webview → extension: ``patch`` (forwarded to NotebookBridge.applyPatch).
+ *   - webview → extension: ``patch`` plus output updates for executed cells.
  *
  * Pipeline execution itself runs webview ↔ engine over a direct WebSocket;
  * the extension stays out of the hot path.
@@ -19,7 +19,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 
 import type { EngineProcess } from "./EngineProcess.js";
-import { NotebookBridge } from "./NotebookBridge.js";
+import { type NbOutput, NotebookBridge } from "./NotebookBridge.js";
 
 interface PatchMessage {
   type: "patch";
@@ -29,6 +29,19 @@ interface PatchMessage {
 
 interface ReadyMessage {
   type: "webviewReady";
+}
+
+interface ReplaceOutputsMessage {
+  type: "replaceOutputs";
+  cellIndex: number;
+  outputs: NbOutput[];
+  status: string;
+  durationMs: number;
+}
+
+interface ClearOutputsMessage {
+  type: "clearOutputs";
+  cellIndices: number[];
 }
 
 function isPatchMessage(msg: unknown): msg is PatchMessage {
@@ -51,12 +64,45 @@ function isReadyMessage(msg: unknown): msg is ReadyMessage {
   );
 }
 
+function isReplaceOutputsMessage(msg: unknown): msg is ReplaceOutputsMessage {
+  if (typeof msg !== "object" || msg === null) {
+    return false;
+  }
+  const candidate = msg as {
+    type?: unknown;
+    cellIndex?: unknown;
+    outputs?: unknown;
+    status?: unknown;
+    durationMs?: unknown;
+  };
+  return (
+    candidate.type === "replaceOutputs" &&
+    typeof candidate.cellIndex === "number" &&
+    Array.isArray(candidate.outputs) &&
+    typeof candidate.status === "string" &&
+    typeof candidate.durationMs === "number"
+  );
+}
+
+function isClearOutputsMessage(msg: unknown): msg is ClearOutputsMessage {
+  if (typeof msg !== "object" || msg === null) {
+    return false;
+  }
+  const candidate = msg as { type?: unknown; cellIndices?: unknown };
+  return (
+    candidate.type === "clearOutputs" &&
+    Array.isArray(candidate.cellIndices) &&
+    candidate.cellIndices.every((cellIndex) => typeof cellIndex === "number")
+  );
+}
+
 export class CanvasWebviewPanel {
   private readonly panel: vscode.WebviewPanel;
   private readonly bridge: NotebookBridge;
   private readonly engine: EngineProcess;
   private readonly extensionUri: vscode.Uri;
   private readonly disposables: vscode.Disposable[] = [];
+  private messageQueue: Promise<void> = Promise.resolve();
 
   static create(
     context: vscode.ExtensionContext,
@@ -93,7 +139,12 @@ export class CanvasWebviewPanel {
 
     this.disposables.push(
       panel.webview.onDidReceiveMessage((msg: unknown) => {
-        void this.handleMessage(msg);
+        this.messageQueue = this.messageQueue
+          .then(() => this.handleMessage(msg))
+          .catch((err: unknown) => {
+            const message = err instanceof Error ? err.message : "unknown error";
+            void vscode.window.showErrorMessage(`NotebookFlow: bridge update failed — ${message}`);
+          });
       }),
       vscode.workspace.onDidChangeNotebookDocument((event) => {
         if (event.notebook === doc) {
@@ -148,14 +199,16 @@ export class CanvasWebviewPanel {
       void this.kickEngine();
       return;
     }
-    if (!isPatchMessage(msg)) {
+    if (isClearOutputsMessage(msg)) {
+      await this.bridge.clearOutputs(msg.cellIndices);
       return;
     }
-    try {
+    if (isReplaceOutputsMessage(msg)) {
+      await this.bridge.replaceOutputs(msg.cellIndex, msg.outputs, msg.status, msg.durationMs);
+      return;
+    }
+    if (isPatchMessage(msg)) {
       await this.bridge.applyPatch(msg.cellIndex, msg.newSource);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "unknown error";
-      void vscode.window.showErrorMessage(`NotebookFlow: patch failed — ${message}`);
     }
   }
 

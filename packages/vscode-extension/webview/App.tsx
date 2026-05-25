@@ -10,6 +10,8 @@
  *
  * This app posts back:
  *   { type: "patch", cellIndex, newSource } — every SyncEngine cell patch
+ *   { type: "clearOutputs", cellIndices } — clear notebook outputs before run
+ *   { type: "replaceOutputs", cellIndex, outputs, status, durationMs }
  */
 
 import type { GraphModel, NodeModel } from "@notebookflow/graph-canvas";
@@ -67,11 +69,26 @@ interface EdgeDef {
   targetPort: string;
 }
 
+type NbOutput =
+  | { output_type: "stream"; name: "stdout" | "stderr"; text: string }
+  | {
+      output_type: "display_data";
+      data: Record<string, string>;
+      metadata: Record<string, unknown>;
+    }
+  | {
+      output_type: "execute_result";
+      data: Record<string, string>;
+      metadata: Record<string, unknown>;
+    }
+  | { output_type: "error"; ename: string; evalue: string; traceback: string[] };
+
 interface ExecutionResultMsg {
   nodeId: string;
   status: string;
   error: string | null;
   durationMs: number;
+  outputs: NbOutput[];
 }
 
 type EngineEvent =
@@ -140,6 +157,17 @@ export function App(): ReactElement {
     setEvents([]);
     setIsRunning(true);
 
+    const outputCellIndices = Array.from(
+      new Set(
+        pipelineDef.nodes
+          .flatMap((node) => node.cellIndices)
+          .filter((cellIndex) => Number.isInteger(cellIndex) && cellIndex >= 0),
+      ),
+    );
+    if (outputCellIndices.length > 0) {
+      vscode.postMessage({ type: "clearOutputs", cellIndices: outputCellIndices });
+    }
+
     const wsUrl = `${engineUrl.replace(/^http/, "ws")}/ws`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
@@ -152,6 +180,18 @@ export function App(): ReactElement {
       try {
         const parsed = JSON.parse(event.data as string) as EngineEvent;
         setEvents((prev) => [...prev, parsed]);
+        if (parsed.type === "nodeCompleted") {
+          const cellIndex = graph.nodes[parsed.result.nodeId]?.cellIndices[0];
+          if (cellIndex !== undefined) {
+            vscode.postMessage({
+              type: "replaceOutputs",
+              cellIndex,
+              outputs: parsed.result.outputs,
+              status: parsed.result.status,
+              durationMs: parsed.result.durationMs,
+            });
+          }
+        }
         if (parsed.type === "pipelineCompleted" || parsed.type === "error") {
           setIsRunning(false);
           ws.close();
