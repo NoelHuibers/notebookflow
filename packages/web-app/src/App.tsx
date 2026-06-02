@@ -28,10 +28,10 @@ import { FileDropZone } from "@/components/FileDropZone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import type { EngineEvent, NbOutput, PipelineDef } from "@/lib/EngineClient";
+import type { EngineEvent, NbOutput, NodeManifestDef, PipelineDef } from "@/lib/EngineClient";
 import { EngineClient } from "@/lib/EngineClient";
 import type { IpynbDoc } from "@/lib/notebook";
-import { downloadNotebook, parseNotebook } from "@/lib/notebook";
+import { downloadNotebook, parseNotebook, toIpynbCell } from "@/lib/notebook";
 import { cn } from "@/lib/utils";
 
 import twoNode from "./fixtures/two-node.ipynb.json";
@@ -39,12 +39,15 @@ import twoNode from "./fixtures/two-node.ipynb.json";
 const EMPTY_GRAPH: GraphModel = { nodes: {}, groups: {}, wires: {} };
 const DIVIDER_SIZE_PX = 10;
 const MIN_NOTEBOOK_WIDTH_PX = 280;
-const MIN_CANVAS_WIDTH_PX = 320;
+const MIN_CANVAS_BODY_WIDTH_PX = 320;
+const MIN_PALETTE_WIDTH_PX = 220;
 const MIN_MAIN_HEIGHT_PX = 220;
 const MIN_INSPECTOR_HEIGHT_PX = 140;
 const DEFAULT_NOTEBOOK_RATIO = 50;
 const DEFAULT_MAIN_RATIO = 72;
+const DEFAULT_PALETTE_WIDTH_PX = 280;
 const KEYBOARD_RESIZE_STEP = 2;
+const TAG_ORDER = ["input", "transform", "output", "ai", "io"] as const;
 
 interface LoadedNotebook {
   name: string;
@@ -70,13 +73,22 @@ export function App(): ReactElement {
   const [definedByCell, setDefinedByCell] = useState<string[][]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [paletteNodes, setPaletteNodes] = useState<NodeManifestDef[]>([]);
+  const [paletteError, setPaletteError] = useState<string | null>(null);
   const [notebookRatio, setNotebookRatio] = useState(DEFAULT_NOTEBOOK_RATIO);
   const [mainRatio, setMainRatio] = useState(DEFAULT_MAIN_RATIO);
+  const [paletteWidth, setPaletteWidth] = useState(DEFAULT_PALETTE_WIDTH_PX);
+  const [isPaletteCollapsed, setIsPaletteCollapsed] = useState(false);
+  const [paletteDragState, setPaletteDragState] = useState<{
+    startCoord: number;
+    startWidth: number;
+  } | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const engineRef = useRef<SyncEngine | null>(null);
   const clientRef = useRef<EngineClient>(new EngineClient());
   const contentRef = useRef<HTMLDivElement | null>(null);
   const topPaneRef = useRef<HTMLDivElement | null>(null);
+  const canvasPaneRef = useRef<HTMLDivElement | null>(null);
 
   // Lazily construct the SyncEngine once. We re-call ingest whenever the
   // notebook's cell array changes (drop, edit-debounce, re-ingest button).
@@ -85,24 +97,7 @@ export function App(): ReactElement {
       onGraphUpdate: setGraph,
       onCellPatch: (patch: CellPatch): Promise<void> => {
         setPatches((prev) => [...prev, patch]);
-        // Keep our local cell state in sync with cell patches the engine emits.
-        // Patches are full-cell replacements; index into the current array.
-        setNotebook((prev) => {
-          if (patch.cellIndex < 0 || patch.cellIndex >= prev.cells.length) {
-            return prev;
-          }
-          const cell = prev.cells[patch.cellIndex];
-          if (cell === undefined) {
-            return prev;
-          }
-          const nextSource = patch.newSource ?? "";
-          if (cell.source === nextSource) {
-            return prev;
-          }
-          const nextCells = prev.cells.slice();
-          nextCells[patch.cellIndex] = { ...cell, source: nextSource };
-          return { ...prev, cells: nextCells };
-        });
+        setNotebook((prev) => applyCellPatch(prev, patch));
         return Promise.resolve();
       },
     });
@@ -149,6 +144,28 @@ export function App(): ReactElement {
     void engineRef.current?.setNodeOutputs(nodeId, nextOutputs, Date.now());
   }, []);
 
+  const handleAddNode = useCallback(
+    (manifest: NodeManifestDef): void => {
+      void engineRef.current?.createNode(
+        notebook.name,
+        {
+          name: manifest.name,
+          tag: manifest.tag as "input" | "transform" | "output" | "ai" | "io",
+          outputs: manifest.outputs.map((port) => port.name),
+          bodySource: manifest.template,
+          metadata: {
+            notebookflow: {
+              manifestId: manifest.id,
+              manifestVersion: manifest.version,
+            },
+          },
+        },
+        Date.now(),
+      );
+    },
+    [notebook.name],
+  );
+
   // Ask the engine to statically analyze cell sources so port autocomplete can
   // suggest real variable names. Debounced and re-run whenever cells change.
   useEffect(() => {
@@ -166,6 +183,29 @@ export function App(): ReactElement {
       window.clearTimeout(timer);
     };
   }, [notebook.cells]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void clientRef.current
+      .listNodes()
+      .then((nodes) => {
+        if (cancelled) {
+          return;
+        }
+        setPaletteNodes(sortPalette(nodes));
+        setPaletteError(null);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        const message = err instanceof Error ? err.message : "unknown error";
+        setPaletteError(`Could not load node registry: ${message}`);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Map each node to the variable names defined across its cell(s).
   const variablesByNode = useMemo<Record<string, string[]>>(() => {
@@ -233,16 +273,32 @@ export function App(): ReactElement {
   }, [notebook]);
 
   const nodeCount = Object.keys(graph.nodes).length;
+  const minCanvasPaneWidth = isPaletteCollapsed
+    ? MIN_CANVAS_BODY_WIDTH_PX
+    : MIN_PALETTE_WIDTH_PX + DIVIDER_SIZE_PX + MIN_CANVAS_BODY_WIDTH_PX;
 
-  const clampNotebookRatio = useCallback((value: number): number => {
-    const host = topPaneRef.current;
+  const clampNotebookRatio = useCallback(
+    (value: number): number => {
+      const host = topPaneRef.current;
+      if (host === null) {
+        return clamp(value, 0, 100);
+      }
+      const availableWidth = Math.max(host.clientWidth - DIVIDER_SIZE_PX, 1);
+      const minRatio = Math.min((MIN_NOTEBOOK_WIDTH_PX / availableWidth) * 100, 50);
+      const maxRatio = Math.max(100 - (minCanvasPaneWidth / availableWidth) * 100, 50);
+      return clamp(value, minRatio, maxRatio);
+    },
+    [minCanvasPaneWidth],
+  );
+
+  const clampPaletteWidth = useCallback((value: number): number => {
+    const host = canvasPaneRef.current;
     if (host === null) {
-      return clamp(value, 0, 100);
+      return Math.max(value, MIN_PALETTE_WIDTH_PX);
     }
-    const availableWidth = Math.max(host.clientWidth - DIVIDER_SIZE_PX, 1);
-    const minRatio = Math.min((MIN_NOTEBOOK_WIDTH_PX / availableWidth) * 100, 50);
-    const maxRatio = Math.max(100 - (MIN_CANVAS_WIDTH_PX / availableWidth) * 100, 50);
-    return clamp(value, minRatio, maxRatio);
+    const maxWidth = Math.max(host.clientWidth - DIVIDER_SIZE_PX - MIN_CANVAS_BODY_WIDTH_PX, 0);
+    const minWidth = Math.min(MIN_PALETTE_WIDTH_PX, maxWidth);
+    return clamp(value, minWidth, maxWidth);
   }, []);
 
   const clampMainRatio = useCallback((value: number): number => {
@@ -300,6 +356,48 @@ export function App(): ReactElement {
     };
   }, [clampMainRatio, clampNotebookRatio, dragState]);
 
+  useEffect(() => {
+    if (paletteDragState === null) {
+      return;
+    }
+
+    const handlePointerMove = (event: PointerEvent): void => {
+      const nextWidth = paletteDragState.startWidth - (event.clientX - paletteDragState.startCoord);
+      setPaletteWidth(clampPaletteWidth(nextWidth));
+    };
+
+    const handlePointerUp = (): void => {
+      setPaletteDragState(null);
+    };
+
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+
+    return () => {
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [clampPaletteWidth, paletteDragState]);
+
+  useEffect(() => {
+    if (isPaletteCollapsed) {
+      return;
+    }
+    const syncPaletteWidth = (): void => {
+      setPaletteWidth((current) => clampPaletteWidth(current));
+    };
+    syncPaletteWidth();
+    window.addEventListener("resize", syncPaletteWidth);
+    return () => {
+      window.removeEventListener("resize", syncPaletteWidth);
+    };
+  }, [clampPaletteWidth, isPaletteCollapsed]);
+
   const handleVerticalDividerPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>): void => {
       event.preventDefault();
@@ -322,6 +420,17 @@ export function App(): ReactElement {
       });
     },
     [mainRatio],
+  );
+
+  const handlePaletteDividerPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>): void => {
+      event.preventDefault();
+      setPaletteDragState({
+        startCoord: event.clientX,
+        startWidth: paletteWidth,
+      });
+    },
+    [paletteWidth],
   );
 
   const handleVerticalDividerKeyDown = useCallback(
@@ -362,6 +471,37 @@ export function App(): ReactElement {
     [clampMainRatio],
   );
 
+  const handlePaletteDividerKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLButtonElement>): void => {
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setPaletteWidth((current) => clampPaletteWidth(current + 16));
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setPaletteWidth((current) => clampPaletteWidth(current - 16));
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        setIsPaletteCollapsed(true);
+      } else if (event.key === "End") {
+        event.preventDefault();
+        setPaletteWidth(() => clampPaletteWidth(Number.POSITIVE_INFINITY));
+      }
+    },
+    [clampPaletteWidth],
+  );
+
+  const handleTogglePalette = useCallback((): void => {
+    if (isPaletteCollapsed) {
+      setIsPaletteCollapsed(false);
+      setPaletteWidth((current) => {
+        const fallbackWidth = current === 0 ? DEFAULT_PALETTE_WIDTH_PX : current;
+        return clampPaletteWidth(fallbackWidth);
+      });
+      return;
+    }
+    setIsPaletteCollapsed(true);
+  }, [clampPaletteWidth, isPaletteCollapsed]);
+
   const contentStyle = useMemo(
     () => ({
       gridTemplateRows: `minmax(${MIN_MAIN_HEIGHT_PX}px, ${mainRatio}%) ${DIVIDER_SIZE_PX}px minmax(${MIN_INSPECTOR_HEIGHT_PX}px, calc(${100 - mainRatio}% - ${DIVIDER_SIZE_PX}px))`,
@@ -371,9 +511,18 @@ export function App(): ReactElement {
 
   const topPaneStyle = useMemo(
     () => ({
-      gridTemplateColumns: `minmax(${MIN_NOTEBOOK_WIDTH_PX}px, ${notebookRatio}%) ${DIVIDER_SIZE_PX}px minmax(${MIN_CANVAS_WIDTH_PX}px, calc(${100 - notebookRatio}% - ${DIVIDER_SIZE_PX}px))`,
+      gridTemplateColumns: `minmax(${MIN_NOTEBOOK_WIDTH_PX}px, ${notebookRatio}%) ${DIVIDER_SIZE_PX}px minmax(${minCanvasPaneWidth}px, calc(${100 - notebookRatio}% - ${DIVIDER_SIZE_PX}px))`,
     }),
-    [notebookRatio],
+    [minCanvasPaneWidth, notebookRatio],
+  );
+
+  const canvasPaneStyle = useMemo(
+    () => ({
+      gridTemplateColumns: isPaletteCollapsed
+        ? "minmax(0, 1fr)"
+        : `minmax(${MIN_CANVAS_BODY_WIDTH_PX}px, 1fr) ${DIVIDER_SIZE_PX}px ${paletteWidth}px`,
+    }),
+    [isPaletteCollapsed, paletteWidth],
   );
 
   return (
@@ -431,16 +580,103 @@ export function App(): ReactElement {
             />
 
             <section className="flex min-h-0 min-w-0 flex-col">
-              <div className="border-b px-4 py-2 text-xs text-muted-foreground">Canvas</div>
-              <div className="relative min-h-0 flex-1 bg-background">
-                <Canvas
-                  graph={graph}
-                  onNodeRename={handleRename}
-                  onNodeSelect={setSelected}
-                  onInputsChange={handleInputsChange}
-                  onOutputsChange={handleOutputsChange}
-                  variablesByNode={variablesByNode}
-                />
+              <div className="flex items-center justify-between border-b px-4 py-2 text-xs text-muted-foreground">
+                <span>Canvas</span>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="font-mono text-[10px]">
+                    {paletteNodes.length}
+                  </Badge>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-[11px]"
+                    onClick={handleTogglePalette}
+                  >
+                    {isPaletteCollapsed ? "Show palette" : "Hide palette"}
+                  </Button>
+                </div>
+              </div>
+              <div
+                ref={canvasPaneRef}
+                className="grid min-h-0 flex-1 overflow-hidden bg-background"
+                style={canvasPaneStyle}
+              >
+                <div className="relative min-h-0 flex-1">
+                  <Canvas
+                    graph={graph}
+                    onNodeRename={handleRename}
+                    onNodeSelect={setSelected}
+                    onInputsChange={handleInputsChange}
+                    onOutputsChange={handleOutputsChange}
+                    variablesByNode={variablesByNode}
+                  />
+                </div>
+
+                {!isPaletteCollapsed && (
+                  <PaneDivider
+                    orientation="vertical"
+                    label="Resize palette and canvas panes"
+                    onPointerDown={handlePaletteDividerPointerDown}
+                    onKeyDown={handlePaletteDividerKeyDown}
+                  />
+                )}
+
+                {!isPaletteCollapsed && (
+                  <section className="flex min-h-0 min-w-0 flex-col border-l bg-muted/20">
+                    <div className="flex items-center gap-2 border-b px-4 py-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
+                      Palette
+                      <Badge variant="outline" className="font-mono text-[10px]">
+                        {paletteNodes.length}
+                      </Badge>
+                    </div>
+                    <ScrollArea className="min-h-0 flex-1">
+                      <div className="flex flex-col gap-3 p-3">
+                        {paletteError !== null ? (
+                          <p className="text-[11px] italic text-muted-foreground">{paletteError}</p>
+                        ) : paletteNodes.length === 0 ? (
+                          <p className="text-[11px] italic text-muted-foreground">
+                            Loading node registry…
+                          </p>
+                        ) : (
+                          groupPalette(paletteNodes).map(([tag, nodes]) => (
+                            <section key={tag} className="flex flex-col gap-2">
+                              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                                {tag}
+                              </div>
+                              <div className="flex flex-col gap-2">
+                                {nodes.map((manifest) => (
+                                  <button
+                                    key={manifest.id}
+                                    type="button"
+                                    onClick={() => {
+                                      handleAddNode(manifest);
+                                    }}
+                                    className="rounded-md border bg-background px-3 py-2 text-left transition-colors hover:bg-muted/70"
+                                  >
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="text-sm font-medium">{manifest.name}</span>
+                                      <Badge variant="secondary" className="font-mono text-[10px]">
+                                        {manifest.tag}
+                                      </Badge>
+                                    </div>
+                                    <div className="mt-1 font-mono text-[10px] text-muted-foreground">
+                                      {manifest.id}
+                                    </div>
+                                    {manifest.description !== "" && (
+                                      <p className="mt-2 whitespace-pre-wrap text-[11px] text-muted-foreground">
+                                        {manifest.description}
+                                      </p>
+                                    )}
+                                  </button>
+                                ))}
+                              </div>
+                            </section>
+                          ))
+                        )}
+                      </div>
+                    </ScrollArea>
+                  </section>
+                )}
               </div>
             </section>
           </div>
@@ -458,11 +694,9 @@ export function App(): ReactElement {
               count={selected === null ? 0 : 1}
               empty="Click a node."
             >
-              {selected !== null && (
-                <pre className="overflow-x-auto rounded-md border bg-background p-2 font-mono text-[11px]">
-                  {JSON.stringify(selected, null, 2)}
-                </pre>
-              )}
+              <pre className="overflow-x-auto rounded-md border bg-background p-2 font-mono text-[11px]">
+                {JSON.stringify(selected, null, 2)}
+              </pre>
             </InspectorPanel>
 
             <InspectorPanel
@@ -493,6 +727,9 @@ export function App(): ReactElement {
                   className="rounded border bg-background p-2"
                 >
                   <div className="mb-1 flex items-center gap-2 text-[10px] text-muted-foreground">
+                    <Badge variant="outline" className="font-mono uppercase">
+                      {patch.operation}
+                    </Badge>
                     <Badge variant="secondary" className="font-mono">
                       cell {patch.cellIndex}
                     </Badge>
@@ -648,4 +885,83 @@ function statusGlyph(status: string): string {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+function applyCellPatch(prev: LoadedNotebook, patch: CellPatch): LoadedNotebook {
+  if (patch.operation === "insert") {
+    if (patch.newSource === null || patch.cellIndex < 0 || patch.cellIndex > prev.cells.length) {
+      return prev;
+    }
+    const nextCell: NotebookCell = {
+      cellType: patch.cellType ?? "code",
+      source: patch.newSource,
+      ...(patch.metadata === undefined ? {} : { metadata: patch.metadata }),
+    };
+    const nextCells = prev.cells.slice();
+    nextCells.splice(patch.cellIndex, 0, nextCell);
+    const nextDocCells = prev.doc.cells.slice();
+    nextDocCells.splice(patch.cellIndex, 0, toIpynbCell(nextCell));
+    return { ...prev, cells: nextCells, doc: { ...prev.doc, cells: nextDocCells } };
+  }
+
+  if (patch.operation === "delete") {
+    if (patch.cellIndex < 0 || patch.cellIndex >= prev.cells.length) {
+      return prev;
+    }
+    const nextCells = prev.cells.slice();
+    nextCells.splice(patch.cellIndex, 1);
+    const nextDocCells = prev.doc.cells.slice();
+    nextDocCells.splice(patch.cellIndex, 1);
+    return { ...prev, cells: nextCells, doc: { ...prev.doc, cells: nextDocCells } };
+  }
+
+  if (patch.cellIndex < 0 || patch.cellIndex >= prev.cells.length || patch.newSource === null) {
+    return prev;
+  }
+  const cell = prev.cells[patch.cellIndex];
+  const docCell = prev.doc.cells[patch.cellIndex];
+  if (cell === undefined || docCell === undefined) {
+    return prev;
+  }
+  const nextMetadata = patch.metadata ?? cell.metadata;
+  if (cell.source === patch.newSource && nextMetadata === cell.metadata) {
+    return prev;
+  }
+  const nextCells = prev.cells.slice();
+  nextCells[patch.cellIndex] = {
+    ...cell,
+    source: patch.newSource,
+    ...(nextMetadata === undefined ? {} : { metadata: nextMetadata }),
+  };
+  const nextDocCells = prev.doc.cells.slice();
+  nextDocCells[patch.cellIndex] = {
+    ...docCell,
+    source: [patch.newSource],
+    metadata: nextMetadata ?? docCell.metadata ?? {},
+  };
+  return { ...prev, cells: nextCells, doc: { ...prev.doc, cells: nextDocCells } };
+}
+
+function groupPalette(
+  nodes: NodeManifestDef[],
+): Array<[NodeManifestDef["tag"], NodeManifestDef[]]> {
+  const groups: Array<[NodeManifestDef["tag"], NodeManifestDef[]]> = [];
+  for (const tag of TAG_ORDER) {
+    const groupNodes = nodes.filter((node) => node.tag === tag);
+    if (groupNodes.length > 0) {
+      groups.push([tag, groupNodes]);
+    }
+  }
+  return groups;
+}
+
+function sortPalette(nodes: NodeManifestDef[]): NodeManifestDef[] {
+  const rank = new Map(TAG_ORDER.map((tag, idx) => [tag, idx]));
+  return [...nodes].sort((left, right) => {
+    const tagDelta = (rank.get(left.tag) ?? 999) - (rank.get(right.tag) ?? 999);
+    if (tagDelta !== 0) {
+      return tagDelta;
+    }
+    return left.name.localeCompare(right.name);
+  });
 }

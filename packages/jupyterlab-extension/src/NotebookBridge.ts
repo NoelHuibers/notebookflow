@@ -11,7 +11,7 @@ import type * as nbformat from "@jupyterlab/nbformat";
 import type { NotebookPanel } from "@jupyterlab/notebook";
 import type { IDisposable } from "@lumino/disposable";
 import { Signal } from "@lumino/signaling";
-import type { NotebookCell } from "@notebookflow/graph-canvas/sync";
+import type { CellPatch, NotebookCell } from "@notebookflow/graph-canvas/sync";
 
 import type { NbOutput } from "./EngineClient";
 
@@ -46,27 +46,45 @@ export class NotebookBridge implements IDisposable {
       cells.push({
         cellType: cellKind(cell.type),
         source: cell.sharedModel.getSource(),
+        metadata: cell.sharedModel.getMetadata(),
       });
     }
     return cells;
   }
 
-  applyPatch(cellIndex: number, newSource: string | null): void {
+  applyPatch(patch: CellPatch): void {
     const model = this.panel.model;
     if (model === null) {
       throw new Error("NotebookBridge.applyPatch: notebook has no model");
     }
-    if (cellIndex < 0 || cellIndex >= model.cells.length) {
-      throw new Error(`NotebookBridge.applyPatch: cellIndex ${String(cellIndex)} out of range`);
-    }
 
-    if (newSource === null) {
-      model.sharedModel.deleteCell(cellIndex);
+    if (patch.operation === "insert") {
+      if (patch.newSource === null || patch.cellIndex < 0 || patch.cellIndex > model.cells.length) {
+        throw new Error(
+          `NotebookBridge.applyPatch: insert cellIndex ${String(patch.cellIndex)} out of range`,
+        );
+      }
+      model.sharedModel.insertCell(patch.cellIndex, {
+        cell_type: toNbformatCellType(patch.cellType ?? "code"),
+        source: patch.newSource,
+        metadata: toNbformatMetadata(patch.metadata),
+      });
       return;
     }
 
-    const cell = model.cells.get(cellIndex);
-    cell.sharedModel.setSource(newSource);
+    if (patch.cellIndex < 0 || patch.cellIndex >= model.cells.length) {
+      throw new Error(
+        `NotebookBridge.applyPatch: cellIndex ${String(patch.cellIndex)} out of range`,
+      );
+    }
+
+    if (patch.operation === "delete" || patch.newSource === null) {
+      model.sharedModel.deleteCell(patch.cellIndex);
+      return;
+    }
+
+    const cell = model.cells.get(patch.cellIndex);
+    cell.sharedModel.setSource(patch.newSource);
   }
 
   clearOutputs(cellIndices: number[]): void {
@@ -133,6 +151,28 @@ function cellKind(kind: string): NotebookCell["cellType"] {
     return "markdown";
   }
   return "raw";
+}
+
+function toNbformatCellType(kind: NotebookCell["cellType"]): string {
+  if (kind === "markdown") {
+    return "markdown";
+  }
+  if (kind === "raw") {
+    return "raw";
+  }
+  return "code";
+}
+
+function toNbformatMetadata(
+  metadata: Record<string, unknown> | undefined,
+):
+  | Partial<nbformat.ICellMetadata>
+  | Partial<nbformat.ICodeCellMetadata>
+  | Partial<nbformat.IRawCellMetadata> {
+  return (metadata ?? {}) as
+    | Partial<nbformat.ICellMetadata>
+    | Partial<nbformat.ICodeCellMetadata>
+    | Partial<nbformat.IRawCellMetadata>;
 }
 
 interface CodeCellSharedModel {

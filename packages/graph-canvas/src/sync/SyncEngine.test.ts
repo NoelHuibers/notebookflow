@@ -103,9 +103,9 @@ describe("SyncEngine.ingestNotebook", () => {
     const withoutRef: NotebookCell[] = cells.map((c, idx) =>
       idx === 2
         ? {
-            cellType: "code",
-            source: "# @node: Filter  [transform]  out=clean_df\nclean_df = df\n",
-          }
+          cellType: "code",
+          source: "# @node: Filter  [transform]  out=clean_df\nclean_df = df\n",
+        }
         : c,
     );
     await engine.ingestNotebook(TWO_NODE_PATH, withoutRef, 200);
@@ -262,6 +262,54 @@ describe("SyncEngine.createWire", () => {
 
     expect(adapter.patches).toHaveLength(0);
     expect(Object.keys(engine.getGraph().wires)).toHaveLength(wireCountBefore);
+  });
+});
+
+describe("SyncEngine.createNode", () => {
+  it("emits an insert patch with marker, body, and metadata", async () => {
+    const adapter = recordingAdapter();
+    const engine = new SyncEngine(adapter.options);
+    const cells = toNotebookCells(twoNode);
+    await engine.ingestNotebook(TWO_NODE_PATH, cells, 100);
+
+    await engine.createNode(
+      TWO_NODE_PATH,
+      {
+        name: "Parse CSV",
+        tag: "input",
+        outputs: ["df"],
+        bodySource: "import pandas as pd\ndf = pd.read_csv('data.csv')\n",
+        metadata: { notebookflow: { manifestId: "notebookflow.parse_csv" } },
+      },
+      200,
+    );
+
+    expect(adapter.patches).toHaveLength(1);
+    expect(adapter.patches[0]).toMatchObject({
+      notebookPath: TWO_NODE_PATH,
+      cellIndex: cells.length,
+      operation: "insert",
+      cellType: "code",
+      metadata: { notebookflow: { manifestId: "notebookflow.parse_csv" } },
+    });
+    expect(adapter.patches[0]?.newSource).toBe(
+      "# @node: Parse CSV  [input]  out=df\nimport pandas as pd\ndf = pd.read_csv('data.csv')\n",
+    );
+  });
+
+  it("dedupes a created node name within the same notebook", async () => {
+    const adapter = recordingAdapter();
+    const engine = new SyncEngine(adapter.options);
+    const cells = toNotebookCells(twoNode);
+    await engine.ingestNotebook(TWO_NODE_PATH, cells, 100);
+
+    await engine.createNode(
+      TWO_NODE_PATH,
+      { name: "Load CSV", tag: "input", outputs: ["df"], bodySource: "pass\n" },
+      200,
+    );
+
+    expect(adapter.patches[0]?.newSource).toMatch(/^# @node: Load CSV 2 {2}\[input] {2}out=df\n/);
   });
 });
 

@@ -46,9 +46,20 @@ export function parseNotebook(text: string): ParsedNotebook {
 }
 
 export function toNotebookCell(cell: IpynbCell): NotebookCell {
-  return {
+  const next = {
     cellType: normaliseCellType(cell.cell_type),
     source: Array.isArray(cell.source) ? cell.source.join("") : cell.source,
+  };
+  const metadata = cloneMetadata(cell.metadata);
+  return metadata === undefined ? next : { ...next, metadata };
+}
+
+export function toIpynbCell(cell: NotebookCell): IpynbCell {
+  return {
+    cell_type: cell.cellType,
+    source: splitSource(cell.source),
+    metadata: cloneMetadata(cell.metadata) ?? {},
+    ...(cell.cellType === "code" ? { execution_count: null, outputs: [] } : {}),
   };
 }
 
@@ -96,11 +107,12 @@ function mergeCell(updated: NotebookCell, original?: IpynbCell, outputs?: NbOutp
     ...base,
     cell_type: updated.cellType,
     source: splitSource(updated.source),
+    metadata: cloneMetadata(updated.metadata) ?? cloneMetadata(base.metadata) ?? {},
     ...(updated.cellType === "code"
       ? {
-          execution_count: base.execution_count ?? null,
-          outputs: outputs ?? base.outputs ?? [],
-        }
+        execution_count: base.execution_count ?? null,
+        outputs: outputs ?? base.outputs ?? [],
+      }
       : {}),
   };
 }
@@ -112,6 +124,12 @@ function splitSource(source: string): string[] {
   }
   const lines = source.split("\n");
   return lines.map((line, idx) => (idx < lines.length - 1 ? `${line}\n` : line));
+}
+
+function cloneMetadata(
+  metadata: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  return metadata === undefined ? undefined : { ...metadata };
 }
 
 /** Build a Blob and trigger a browser download of the assembled notebook. */

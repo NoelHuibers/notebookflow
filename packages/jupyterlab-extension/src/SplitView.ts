@@ -13,7 +13,7 @@ import type { ReactElement } from "react";
 import { createElement } from "react";
 
 import { App } from "./App";
-import type { EngineEvent, PipelineDef } from "./EngineClient";
+import type { EngineEvent, NodeManifestDef, PipelineDef } from "./EngineClient";
 import { EngineClient } from "./EngineClient";
 import { NotebookBridge } from "./NotebookBridge";
 
@@ -48,6 +48,7 @@ export class SplitView extends ReactWidget {
           pipeline,
           onEvent,
         }),
+      onListNodes: (): Promise<NodeManifestDef[]> => this.engine.listNodes(),
     });
   }
 

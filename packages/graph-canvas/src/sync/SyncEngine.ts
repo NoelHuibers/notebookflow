@@ -33,8 +33,26 @@ export interface SyncEvent {
 export interface CellPatch {
   notebookPath: string;
   cellIndex: number;
+  operation: "replace" | "insert" | "delete";
   /** New source for the cell, or null to delete the cell entirely. */
   newSource: string | null;
+  /** Cell type for inserted cells. Ignored for replace / delete patches. */
+  cellType?: NotebookCell["cellType"];
+  /** Metadata for inserted cells. Ignored for replace / delete patches. */
+  metadata?: Record<string, unknown>;
+}
+
+export interface CreateNodeOptions {
+  name: string;
+  tag: NodeTag;
+  /** Initial concrete upstream refs. Usually empty until the node is wired. */
+  inputs?: string[];
+  /** Declared output port names copied from the selected manifest. */
+  outputs?: string[];
+  /** Cell body inserted below the generated `# @node:` marker line. */
+  bodySource?: string;
+  /** Persisted notebook metadata for this node instance, e.g. manifest id. */
+  metadata?: Record<string, unknown>;
 }
 
 export interface SyncEngineOptions {
@@ -59,6 +77,7 @@ export class SyncEngine {
   private graph: GraphModel;
   private readonly lastCellEdit: Map<string, number>;
   private readonly sourceCache: Map<string, string>;
+  private readonly notebookCellCounts: Map<string, number>;
   private readonly opts: SyncEngineOptions;
   private readonly conflictResolution: ConflictResolution;
 
@@ -68,6 +87,7 @@ export class SyncEngine {
     this.graph = { nodes: {}, groups: {}, wires: {} };
     this.lastCellEdit = new Map();
     this.sourceCache = new Map();
+    this.notebookCellCounts = new Map();
   }
 
   /** Cell→graph: invoked when a notebook file changes on disk or in the editor. */
@@ -76,6 +96,7 @@ export class SyncEngine {
     cells: NotebookCell[],
     _timestamp: number,
   ): Promise<void> {
+    this.notebookCellCounts.set(notebookPath, cells.length);
     const parseResult: ParseResult = MarkerParser.parseNotebook(notebookPath, cells);
     const groupId = notebookPath;
 
@@ -253,6 +274,42 @@ export class SyncEngine {
     await this.applyPorts(node, node.inputs, normalizeOutputs(nextOutputs), timestamp);
   }
 
+  /** Graph→cell: append a brand-new node cell to the notebook. */
+  async createNode(
+    notebookPath: string,
+    options: CreateNodeOptions,
+    _timestamp: number,
+  ): Promise<void> {
+    const cellCount = this.notebookCellCounts.get(notebookPath);
+    if (cellCount === undefined) {
+      throw new Error(
+        `SyncEngine.createNode: notebook ${JSON.stringify(notebookPath)} has not been ingested`,
+      );
+    }
+
+    const name = this.uniqueNodeName(notebookPath, options.name);
+    const marker = MarkerParser.formatMarker({
+      name,
+      tag: options.tag,
+      inputs: normalizeInputs(options.inputs ?? []),
+      outputs: normalizeOutputs(options.outputs ?? []),
+    });
+    const bodySource = options.bodySource ?? "";
+    const newSource = bodySource === "" ? `${marker}\n` : `${marker}\n${bodySource}`;
+
+    this.sourceCache.set(cellKey(notebookPath, cellCount), newSource);
+    this.notebookCellCounts.set(notebookPath, cellCount + 1);
+
+    await this.opts.onCellPatch({
+      notebookPath,
+      cellIndex: cellCount,
+      operation: "insert",
+      cellType: "code",
+      newSource,
+      ...(options.metadata === undefined ? {} : { metadata: options.metadata }),
+    });
+  }
+
   /** Snapshot of the current derived graph. */
   getGraph(): GraphModel {
     return structuredClone(this.graph);
@@ -364,6 +421,28 @@ export class SyncEngine {
     return group?.notebookPath ?? node.groupId;
   }
 
+  private uniqueNodeName(notebookPath: string, baseName: string): string {
+    if (!NAME_RE.test(baseName)) {
+      throw new Error(`SyncEngine.createNode: invalid name ${JSON.stringify(baseName)}`);
+    }
+    const group = this.graph.groups[notebookPath];
+    const used = new Set(
+      (group?.nodeIds ?? [])
+        .map((nodeId) => this.graph.nodes[nodeId]?.name)
+        .filter((name): name is string => name !== undefined),
+    );
+    if (!used.has(baseName)) {
+      return baseName;
+    }
+    let suffix = 2;
+    let candidate = `${baseName} ${String(suffix)}`;
+    while (used.has(candidate)) {
+      suffix += 1;
+      candidate = `${baseName} ${String(suffix)}`;
+    }
+    return candidate;
+  }
+
   private async applyMarkerPatch(
     notebookPath: string,
     cellIndex: number,
@@ -378,7 +457,7 @@ export class SyncEngine {
     const newMarkerLine = MarkerParser.formatMarker(body);
     const newSource = spliceMarkerLine(oldSource, newMarkerLine);
     this.sourceCache.set(key, newSource);
-    await this.opts.onCellPatch({ notebookPath, cellIndex, newSource });
+    await this.opts.onCellPatch({ notebookPath, cellIndex, operation: "replace", newSource });
     return true;
   }
 

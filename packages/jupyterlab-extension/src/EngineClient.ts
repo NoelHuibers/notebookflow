@@ -25,6 +25,23 @@ interface EdgeDef {
   targetPort: string;
 }
 
+export interface NodePortDef {
+  name: string;
+  type: string;
+  required: boolean;
+}
+
+export interface NodeManifestDef {
+  id: string;
+  name: string;
+  tag: "input" | "transform" | "output" | "ai" | "io";
+  version: string;
+  description: string;
+  inputs: NodePortDef[];
+  outputs: NodePortDef[];
+  template: string;
+}
+
 export interface PipelineDef {
   nodes: NodeDef[];
   edges: EdgeDef[];
@@ -33,15 +50,15 @@ export interface PipelineDef {
 export type NbOutput =
   | { output_type: "stream"; name: "stdout" | "stderr"; text: string }
   | {
-      output_type: "display_data";
-      data: Record<string, string>;
-      metadata: Record<string, unknown>;
-    }
+    output_type: "display_data";
+    data: Record<string, string>;
+    metadata: Record<string, unknown>;
+  }
   | {
-      output_type: "execute_result";
-      data: Record<string, string>;
-      metadata: Record<string, unknown>;
-    }
+    output_type: "execute_result";
+    data: Record<string, string>;
+    metadata: Record<string, unknown>;
+  }
   | { output_type: "error"; ename: string; evalue: string; traceback: string[] };
 
 interface ExecutionResultMsg {
@@ -72,6 +89,10 @@ export class EngineClient {
 
   constructor(url: string = DEFAULT_ENGINE_URL) {
     this.url = url;
+  }
+
+  get baseUrl(): string {
+    return this.url;
   }
 
   runPipeline(opts: RunOptions): Promise<void> {
@@ -115,5 +136,14 @@ export class EngineClient {
         }
       });
     });
+  }
+
+  async listNodes(): Promise<NodeManifestDef[]> {
+    const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/nodes");
+    const res = await fetch(httpUrl);
+    if (!res.ok) {
+      throw new Error(`EngineClient.listNodes: ${res.status} ${res.statusText}`);
+    }
+    return (await res.json()) as NodeManifestDef[];
   }
 }

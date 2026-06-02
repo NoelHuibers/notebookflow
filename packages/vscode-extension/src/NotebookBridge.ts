@@ -6,21 +6,21 @@
  * back through a WorkspaceEdit so the user's undo stack stays intact.
  */
 
-import type { NotebookCell } from "@notebookflow/graph-canvas/sync";
+import type { CellPatch, NotebookCell } from "@notebookflow/graph-canvas/sync";
 import * as vscode from "vscode";
 
 export type NbOutput =
   | { output_type: "stream"; name: "stdout" | "stderr"; text: string }
   | {
-      output_type: "display_data";
-      data: Record<string, string>;
-      metadata: Record<string, unknown>;
-    }
+    output_type: "display_data";
+    data: Record<string, string>;
+    metadata: Record<string, unknown>;
+  }
   | {
-      output_type: "execute_result";
-      data: Record<string, string>;
-      metadata: Record<string, unknown>;
-    }
+    output_type: "execute_result";
+    data: Record<string, string>;
+    metadata: Record<string, unknown>;
+  }
   | { output_type: "error"; ename: string; evalue: string; traceback: string[] };
 
 export class NotebookBridge {
@@ -42,31 +42,59 @@ export class NotebookBridge {
     return this.doc.getCells().map((cell) => ({
       cellType: cellKind(cell.kind),
       source: cell.document.getText(),
+      metadata: cell.metadata,
     }));
   }
 
-  async applyPatch(cellIndex: number, newSource: string | null): Promise<void> {
-    if (cellIndex < 0 || cellIndex >= this.doc.cellCount) {
-      throw new Error(`NotebookBridge.applyPatch: cellIndex ${String(cellIndex)} out of range`);
-    }
+  async applyPatch(patch: CellPatch): Promise<void> {
     const edit = new vscode.WorkspaceEdit();
 
-    if (newSource === null) {
+    if (patch.operation === "insert") {
+      if (patch.newSource === null || patch.cellIndex < 0 || patch.cellIndex > this.doc.cellCount) {
+        throw new Error(
+          `NotebookBridge.applyPatch: insert cellIndex ${String(patch.cellIndex)} out of range`,
+        );
+      }
+      const data = new vscode.NotebookCellData(
+        toVsCodeCellKind(patch.cellType ?? "code"),
+        patch.newSource,
+        defaultLanguageId(patch.cellType ?? "code"),
+      );
+      data.metadata = { ...(patch.metadata ?? {}) };
       edit.set(this.doc.uri, [
-        vscode.NotebookEdit.deleteCells(new vscode.NotebookRange(cellIndex, cellIndex + 1)),
+        vscode.NotebookEdit.replaceCells(
+          new vscode.NotebookRange(patch.cellIndex, patch.cellIndex),
+          [data],
+        ),
+      ]);
+    } else if (patch.operation === "delete" || patch.newSource === null) {
+      if (patch.cellIndex < 0 || patch.cellIndex >= this.doc.cellCount) {
+        throw new Error(
+          `NotebookBridge.applyPatch: cellIndex ${String(patch.cellIndex)} out of range`,
+        );
+      }
+      edit.set(this.doc.uri, [
+        vscode.NotebookEdit.deleteCells(
+          new vscode.NotebookRange(patch.cellIndex, patch.cellIndex + 1),
+        ),
       ]);
     } else {
-      const cell = this.doc.cellAt(cellIndex);
+      if (patch.cellIndex < 0 || patch.cellIndex >= this.doc.cellCount) {
+        throw new Error(
+          `NotebookBridge.applyPatch: cellIndex ${String(patch.cellIndex)} out of range`,
+        );
+      }
+      const cell = this.doc.cellAt(patch.cellIndex);
       const lastLine = Math.max(0, cell.document.lineCount - 1);
       const lastChar = cell.document.lineAt(lastLine).range.end.character;
       const fullRange = new vscode.Range(0, 0, lastLine, lastChar);
-      edit.replace(cell.document.uri, fullRange, newSource);
+      edit.replace(cell.document.uri, fullRange, patch.newSource);
     }
 
     const applied = await vscode.workspace.applyEdit(edit);
     if (!applied) {
       throw new Error(
-        `NotebookBridge.applyPatch: WorkspaceEdit was rejected for cell ${String(cellIndex)}`,
+        `NotebookBridge.applyPatch: WorkspaceEdit was rejected for cell ${String(patch.cellIndex)}`,
       );
     }
   }
@@ -140,6 +168,20 @@ function cellKind(kind: vscode.NotebookCellKind): NotebookCell["cellType"] {
     default:
       return "raw";
   }
+}
+
+function toVsCodeCellKind(kind: NotebookCell["cellType"]): vscode.NotebookCellKind {
+  return kind === "markdown" ? vscode.NotebookCellKind.Markup : vscode.NotebookCellKind.Code;
+}
+
+function defaultLanguageId(kind: NotebookCell["cellType"]): string {
+  if (kind === "markdown") {
+    return "markdown";
+  }
+  if (kind === "raw") {
+    return "plaintext";
+  }
+  return "python";
 }
 
 function uniqueCellIndices(cellIndices: number[]): number[] {

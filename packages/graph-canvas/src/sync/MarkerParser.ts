@@ -38,9 +38,11 @@ export interface NotebookCell {
   cellType: "code" | "markdown" | "raw";
   /** Source as a single string (notebook-spec joins arrays with ""). */
   source: string;
+  /** Notebook-native metadata preserved across parse / serialize cycles. */
+  metadata?: Record<string, unknown>;
 }
 
-class MarkerParseError extends Error {}
+class MarkerParseError extends Error { }
 
 type MarkerBody = Omit<NodeMarker, "notebookPath" | "cellIndex">;
 

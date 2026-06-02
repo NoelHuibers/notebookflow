@@ -24,7 +24,10 @@ import { type NbOutput, NotebookBridge } from "./NotebookBridge.js";
 interface PatchMessage {
   type: "patch";
   cellIndex: number;
+  operation: "replace" | "insert" | "delete";
   newSource: string | null;
+  cellType?: "code" | "markdown" | "raw";
+  metadata?: Record<string, unknown>;
 }
 
 interface ReadyMessage {
@@ -48,11 +51,23 @@ function isPatchMessage(msg: unknown): msg is PatchMessage {
   if (typeof msg !== "object" || msg === null) {
     return false;
   }
-  const candidate = msg as { type?: unknown; cellIndex?: unknown; newSource?: unknown };
+  const candidate = msg as {
+    type?: unknown;
+    cellIndex?: unknown;
+    operation?: unknown;
+    newSource?: unknown;
+  };
   if (candidate.type !== "patch") {
     return false;
   }
   if (typeof candidate.cellIndex !== "number") {
+    return false;
+  }
+  if (
+    candidate.operation !== "replace" &&
+    candidate.operation !== "insert" &&
+    candidate.operation !== "delete"
+  ) {
     return false;
   }
   return typeof candidate.newSource === "string" || candidate.newSource === null;
@@ -208,7 +223,14 @@ export class CanvasWebviewPanel {
       return;
     }
     if (isPatchMessage(msg)) {
-      await this.bridge.applyPatch(msg.cellIndex, msg.newSource);
+      await this.bridge.applyPatch({
+        notebookPath: this.bridge.notebookPath,
+        cellIndex: msg.cellIndex,
+        operation: msg.operation,
+        newSource: msg.newSource,
+        ...(msg.cellType === undefined ? {} : { cellType: msg.cellType }),
+        ...(msg.metadata === undefined ? {} : { metadata: msg.metadata }),
+      });
     }
   }
 
@@ -223,7 +245,7 @@ export class CanvasWebviewPanel {
       const message = err instanceof Error ? err.message : "unknown error";
       return fallbackHtml(
         `Could not read the webview bundle at ${indexPath}. Did you run ` +
-          `\`pnpm --filter @notebookflow/vscode-extension build\`? Underlying error: ${message}`,
+        `\`pnpm --filter @notebookflow/vscode-extension build\`? Underlying error: ${message}`,
       );
     }
 

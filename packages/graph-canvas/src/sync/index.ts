@@ -10,6 +10,7 @@ export { MarkerParser } from "./MarkerParser";
 export type {
   CellPatch,
   ConflictResolution,
+  CreateNodeOptions,
   SyncDirection,
   SyncEngineOptions,
   SyncEvent,
