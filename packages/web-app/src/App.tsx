@@ -67,6 +67,7 @@ export function App(): ReactElement {
   const [patches, setPatches] = useState<CellPatch[]>([]);
   const [events, setEvents] = useState<EngineEvent[]>([]);
   const [outputsByCell, setOutputsByCell] = useState<Record<number, NbOutput[]>>({});
+  const [definedByCell, setDefinedByCell] = useState<string[][]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notebookRatio, setNotebookRatio] = useState(DEFAULT_NOTEBOOK_RATIO);
@@ -147,6 +148,39 @@ export function App(): ReactElement {
   const handleOutputsChange = useCallback((nodeId: string, nextOutputs: string[]): void => {
     void engineRef.current?.setNodeOutputs(nodeId, nextOutputs, Date.now());
   }, []);
+
+  // Ask the engine to statically analyze cell sources so port autocomplete can
+  // suggest real variable names. Debounced and re-run whenever cells change.
+  useEffect(() => {
+    let cancelled = false;
+    const sources = notebook.cells.map((cell) => cell.source);
+    const timer = window.setTimeout(() => {
+      void clientRef.current.analyzeCells(sources).then((result) => {
+        if (!cancelled) {
+          setDefinedByCell(result);
+        }
+      });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [notebook.cells]);
+
+  // Map each node to the variable names defined across its cell(s).
+  const variablesByNode = useMemo<Record<string, string[]>>(() => {
+    const result: Record<string, string[]> = {};
+    for (const node of Object.values(graph.nodes)) {
+      const names = new Set<string>();
+      for (const cellIndex of node.cellIndices) {
+        for (const name of definedByCell[cellIndex] ?? []) {
+          names.add(name);
+        }
+      }
+      result[node.id] = [...names];
+    }
+    return result;
+  }, [graph, definedByCell]);
 
   const pipelineDef = useMemo<PipelineDef>(
     () => buildPipelineDef(graph, notebook.cells, notebook.name),
@@ -405,6 +439,7 @@ export function App(): ReactElement {
                   onNodeSelect={setSelected}
                   onInputsChange={handleInputsChange}
                   onOutputsChange={handleOutputsChange}
+                  variablesByNode={variablesByNode}
                 />
               </div>
             </section>

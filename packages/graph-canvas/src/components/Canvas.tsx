@@ -56,6 +56,12 @@ export interface CanvasProps {
   onInputsChange?: (nodeId: string, nextInputs: string[]) => void;
   /** Replace a node's declared output port names. */
   onOutputsChange?: (nodeId: string, nextOutputs: string[]) => void;
+  /**
+   * Variable names defined in each node's cell(s), keyed by node id. Used to
+   * enrich port autocomplete with real identifiers from the code, not just
+   * already-declared ports. Typically sourced from the engine's analyzer.
+   */
+  variablesByNode?: Record<string, string[]>;
 }
 
 export function Canvas(props: CanvasProps): ReactElement {
@@ -68,11 +74,19 @@ export function Canvas(props: CanvasProps): ReactElement {
     onGroupToggle,
     onInputsChange,
     onOutputsChange,
+    variablesByNode,
   } = props;
 
   const rfNodes = useMemo<Node[]>(
-    () => buildNodes(graph, { onNodeRename, onGroupToggle, onInputsChange, onOutputsChange }),
-    [graph, onNodeRename, onGroupToggle, onInputsChange, onOutputsChange],
+    () =>
+      buildNodes(graph, {
+        onNodeRename,
+        onGroupToggle,
+        onInputsChange,
+        onOutputsChange,
+        variablesByNode,
+      }),
+    [graph, onNodeRename, onGroupToggle, onInputsChange, onOutputsChange, variablesByNode],
   );
 
   const rfEdges = useMemo<Edge<WireData>[]>(() => buildRfEdges(graph), [graph]);
@@ -159,10 +173,17 @@ function buildNodes(
     onGroupToggle: CanvasProps["onGroupToggle"];
     onInputsChange: CanvasProps["onInputsChange"];
     onOutputsChange: CanvasProps["onOutputsChange"];
+    variablesByNode: CanvasProps["variablesByNode"];
   },
 ): Node[] {
-  const { onNodeRename: onRename, onGroupToggle, onInputsChange, onOutputsChange } = callbacks;
-  const outputSuggestions = collectOutputNames(graph);
+  const {
+    onNodeRename: onRename,
+    onGroupToggle,
+    onInputsChange,
+    onOutputsChange,
+    variablesByNode,
+  } = callbacks;
+  const vars = variablesByNode ?? {};
   const rfNodes: Node[] = [];
   const groupIds = Object.keys(graph.groups).sort();
 
@@ -210,11 +231,11 @@ function buildNodes(
       }
       if (onInputsChange !== undefined) {
         nodeData.onInputsChange = onInputsChange;
-        nodeData.inputSuggestions = collectInputRefs(graph, node.id);
+        nodeData.inputSuggestions = collectInputRefs(graph, vars, node.id);
       }
       if (onOutputsChange !== undefined) {
         nodeData.onOutputsChange = onOutputsChange;
-        nodeData.outputSuggestions = outputSuggestions;
+        nodeData.outputSuggestions = collectOutputSuggestions(node, vars);
       }
       rfNodes.push({
         id: node.id,
@@ -251,27 +272,43 @@ function buildRfEdges(graph: GraphModel): Edge<WireData>[] {
   return edges;
 }
 
-/** All output port names across the graph, deduped, for output autocomplete. */
-function collectOutputNames(graph: GraphModel): string[] {
-  const names = new Set<string>();
-  for (const node of Object.values(graph.nodes)) {
-    for (const port of node.outputs) {
-      names.add(port);
+/** Valid output port name per the marker grammar (lowercase identifier). */
+const PORT_RE = /^[a-z][a-z0-9_]*$/;
+
+/** Output port suggestions for a node: its declared ports plus cell variables. */
+function collectOutputSuggestions(
+  node: NodeModel,
+  variablesByNode: Record<string, string[]>,
+): string[] {
+  const names = new Set<string>(node.outputs);
+  for (const name of variablesByNode[node.id] ?? []) {
+    if (PORT_RE.test(name)) {
+      names.add(name);
     }
   }
   return [...names].sort();
 }
 
 /** Upstream `nodeName.portName` refs a node can consume, for input autocomplete. */
-function collectInputRefs(graph: GraphModel, selfId: string): string[] {
-  const refs: string[] = [];
+function collectInputRefs(
+  graph: GraphModel,
+  variablesByNode: Record<string, string[]>,
+  selfId: string,
+): string[] {
+  const refs = new Set<string>();
   for (const node of Object.values(graph.nodes)) {
     if (node.id === selfId) {
       continue;
     }
-    for (const port of node.outputs) {
-      refs.push(`${node.name}.${port}`);
+    const ports = new Set<string>(node.outputs);
+    for (const name of variablesByNode[node.id] ?? []) {
+      if (PORT_RE.test(name)) {
+        ports.add(name);
+      }
+    }
+    for (const port of ports) {
+      refs.add(`${node.name}.${port}`);
     }
   }
-  return refs.sort();
+  return [...refs].sort();
 }

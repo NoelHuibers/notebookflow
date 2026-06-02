@@ -120,6 +120,33 @@ def test_list_nodes_returns_builtin_manifests(client: TestClient) -> None:
     } <= ids
 
 
+def test_analyze_cells_returns_top_level_names(client: TestClient) -> None:
+    r = client.post(
+        "/cells/analyze",
+        json={
+            "cells": [
+                {"source": "import pandas as pd\ndf = pd.read_csv('x.csv')\n"},
+                {"source": "a, *rest = [1, 2, 3]\nfor i in rest:\n    nested = i\n"},
+                {"source": "def helper():\n    pass\n"},
+            ]
+        },
+    )
+    assert r.status_code == 200
+    cells = r.json()["cells"]
+    assert cells[0]["definedNames"] == ["pd", "df"]
+    # Unpacking targets are captured; the nested assignment is not top level.
+    assert cells[1]["definedNames"] == ["a", "rest", "i"]
+    assert cells[2]["definedNames"] == ["helper"]
+
+
+def test_analyze_cells_reports_syntax_error_without_failing(client: TestClient) -> None:
+    r = client.post("/cells/analyze", json={"cells": [{"source": "df = (\n"}]})
+    assert r.status_code == 200
+    cell = r.json()["cells"][0]
+    assert cell["definedNames"] == []
+    assert cell["syntaxError"] is not None
+
+
 def test_run_pipeline_executes_in_topo_order(client: TestClient) -> None:
     r = client.post("/pipelines/demo/run", json=_linear_pipeline())
     assert r.status_code == 200

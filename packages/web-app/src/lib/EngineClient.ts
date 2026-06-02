@@ -175,4 +175,30 @@ export class EngineClient {
       return false;
     }
   }
+
+  /**
+   * Ask the engine to statically analyze cell sources and return, per cell,
+   * the names bound at module top level. Used to autocomplete port variable
+   * names on the canvas. Returns one entry per input cell, in order; falls
+   * back to empty arrays if the engine is unreachable.
+   */
+  async analyzeCells(sources: string[]): Promise<string[][]> {
+    const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/cells/analyze");
+    const empty = sources.map(() => []);
+    try {
+      const res = await fetch(httpUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cells: sources.map((source) => ({ source })) }),
+      });
+      if (!res.ok) {
+        return empty;
+      }
+      const body = (await res.json()) as { cells?: { definedNames?: string[] }[] };
+      const cells = body.cells ?? [];
+      return sources.map((_, idx) => cells[idx]?.definedNames ?? []);
+    } catch {
+      return empty;
+    }
+  }
 }

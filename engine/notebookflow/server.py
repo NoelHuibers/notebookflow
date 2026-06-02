@@ -15,6 +15,7 @@ Surface:
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import tempfile
@@ -63,6 +64,25 @@ class PipelineDef(_APIModel):
     edges: list[EdgeDef]
 
 
+class CellSource(_APIModel):
+    source: str = ""
+
+
+class AnalyzeRequest(_APIModel):
+    cells: list[CellSource] = Field(default_factory=list)
+
+
+class CellAnalysis(_APIModel):
+    # Names bound at module top level by the cell, in source order. Empty when
+    # the cell has a syntax error so partial edits never break the canvas.
+    defined_names: list[str] = Field(default_factory=list)
+    syntax_error: str | None = None
+
+
+class AnalyzeResponse(_APIModel):
+    cells: list[CellAnalysis] = Field(default_factory=list)
+
+
 class ExecutionResultModel(_APIModel):
     node_id: str
     status: str
@@ -106,6 +126,75 @@ def _registry(app_ref: FastAPI) -> Registry:
         registry = Registry.discover()
         app_ref.state.registry = registry
     return registry
+
+
+def _collect_target_names(target: ast.expr, into: list[str], seen: set[str]) -> None:
+    """Collect names bound by an assignment / loop / with target.
+
+    Handles plain names plus tuple / list unpacking and starred targets so
+    ``a, (b, *c) = ...`` contributes ``a``, ``b`` and ``c``.
+    """
+    if isinstance(target, ast.Name):
+        if target.id not in seen:
+            seen.add(target.id)
+            into.append(target.id)
+    elif isinstance(target, ast.Starred):
+        _collect_target_names(target.value, into, seen)
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for element in target.elts:
+            _collect_target_names(element, into, seen)
+
+
+def _defined_names(source: str) -> list[str]:
+    """Return the names a cell binds at module top level, in source order.
+
+    Mirrors how the executor injects cell outputs: only top-level bindings are
+    visible to downstream nodes, so nested assignments are intentionally
+    ignored. Walrus expressions are collected wherever they appear since they
+    leak into the enclosing scope.
+    """
+    module = ast.parse(source)
+    names: list[str] = []
+    seen: set[str] = set()
+
+    def add(name: str) -> None:
+        if name not in seen:
+            seen.add(name)
+            names.append(name)
+
+    for stmt in module.body:
+        if isinstance(stmt, ast.Assign):
+            for target in stmt.targets:
+                _collect_target_names(target, names, seen)
+        elif isinstance(stmt, (ast.AnnAssign, ast.AugAssign)):
+            _collect_target_names(stmt.target, names, seen)
+        elif isinstance(stmt, (ast.For, ast.AsyncFor)):
+            _collect_target_names(stmt.target, names, seen)
+        elif isinstance(stmt, (ast.With, ast.AsyncWith)):
+            for item in stmt.items:
+                if item.optional_vars is not None:
+                    _collect_target_names(item.optional_vars, names, seen)
+        elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            add(stmt.name)
+        elif isinstance(stmt, (ast.Import, ast.ImportFrom)):
+            for alias in stmt.names:
+                bound = alias.asname or alias.name.split(".", 1)[0]
+                add(bound)
+
+    # Walrus bindings can hide anywhere in the cell's expressions.
+    for node in ast.walk(module):
+        if isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+            add(node.target.id)
+
+    return names
+
+
+def _analyze_cell(source: str) -> CellAnalysis:
+    """Parse one cell, returning its top-level names or the syntax error."""
+    try:
+        return CellAnalysis(defined_names=_defined_names(source))
+    except SyntaxError as exc:
+        return CellAnalysis(defined_names=[], syntax_error=str(exc))
 
 
 def _build_dag(pipeline: PipelineDef) -> DAG:
@@ -167,6 +256,17 @@ async def health() -> dict[str, str]:
 @app.get("/nodes")
 async def list_nodes() -> list[dict[str, object]]:
     return [m.model_dump(mode="json") for m in _registry(app).all()]
+
+
+@app.post("/cells/analyze", response_model=AnalyzeResponse)
+async def analyze_cells(request: AnalyzeRequest) -> AnalyzeResponse:
+    """Static analysis used by the canvas to autocomplete port variable names.
+
+    Returns, per cell, the names bound at module top level. Cells with syntax
+    errors yield an empty list plus the error message rather than failing the
+    whole request, so the canvas keeps working while the user is mid-edit.
+    """
+    return AnalyzeResponse(cells=[_analyze_cell(cell.source) for cell in request.cells])
 
 
 @app.post("/pipelines/{pipeline_id}/run", response_model=RunResponse)
