@@ -140,6 +140,14 @@ export function App(): ReactElement {
     void engineRef.current?.renameNode(nodeId, nextName, Date.now());
   }, []);
 
+  const handleInputsChange = useCallback((nodeId: string, nextInputs: string[]): void => {
+    void engineRef.current?.setNodeInputs(nodeId, nextInputs, Date.now());
+  }, []);
+
+  const handleOutputsChange = useCallback((nodeId: string, nextOutputs: string[]): void => {
+    void engineRef.current?.setNodeOutputs(nodeId, nextOutputs, Date.now());
+  }, []);
+
   const pipelineDef = useMemo<PipelineDef>(
     () => buildPipelineDef(graph, notebook.cells, notebook.name),
     [graph, notebook],
@@ -391,7 +399,13 @@ export function App(): ReactElement {
             <section className="flex min-h-0 min-w-0 flex-col">
               <div className="border-b px-4 py-2 text-xs text-muted-foreground">Canvas</div>
               <div className="relative min-h-0 flex-1 bg-background">
-                <Canvas graph={graph} onNodeRename={handleRename} onNodeSelect={setSelected} />
+                <Canvas
+                  graph={graph}
+                  onNodeRename={handleRename}
+                  onNodeSelect={setSelected}
+                  onInputsChange={handleInputsChange}
+                  onOutputsChange={handleOutputsChange}
+                />
               </div>
             </section>
           </div>

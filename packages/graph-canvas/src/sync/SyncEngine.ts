@@ -53,6 +53,7 @@ interface MarkerBody {
 }
 
 const NAME_RE = /^[A-Za-z0-9 _-]+$/;
+const PORT_RE = /^[a-z][a-z0-9_]*$/;
 
 export class SyncEngine {
   private graph: GraphModel;
@@ -234,6 +235,24 @@ export class SyncEngine {
     this.opts.onGraphUpdate(this.getGraph());
   }
 
+  /** Graph→cell: replace a node's declared input refs and rewrite its marker. */
+  async setNodeInputs(nodeId: string, nextInputs: string[], timestamp: number): Promise<void> {
+    const node = this.graph.nodes[nodeId];
+    if (node === undefined) {
+      throw new Error(`SyncEngine.setNodeInputs: node ${JSON.stringify(nodeId)} not found`);
+    }
+    await this.applyPorts(node, normalizeInputs(nextInputs), node.outputs, timestamp);
+  }
+
+  /** Graph→cell: replace a node's declared output port names and rewrite its marker. */
+  async setNodeOutputs(nodeId: string, nextOutputs: string[], timestamp: number): Promise<void> {
+    const node = this.graph.nodes[nodeId];
+    if (node === undefined) {
+      throw new Error(`SyncEngine.setNodeOutputs: node ${JSON.stringify(nodeId)} not found`);
+    }
+    await this.applyPorts(node, node.inputs, normalizeOutputs(nextOutputs), timestamp);
+  }
+
   /** Snapshot of the current derived graph. */
   getGraph(): GraphModel {
     return structuredClone(this.graph);
@@ -394,6 +413,61 @@ export class SyncEngine {
       this.graph.wires[newId] = { ...wire, id: newId, targetPort: newPort };
     }
   }
+
+  private async applyPorts(
+    node: NodeModel,
+    nextInputs: string[],
+    nextOutputs: string[],
+    timestamp: number,
+  ): Promise<void> {
+    if (arraysEqual(nextInputs, node.inputs) && arraysEqual(nextOutputs, node.outputs)) {
+      return;
+    }
+    const notebookPath = this.notebookPathOf(node);
+    const cellIndex = node.cellIndices[0];
+    if (cellIndex === undefined) {
+      throw new Error(`SyncEngine.applyPorts: node ${node.id} has no cell index`);
+    }
+    const applied = await this.applyMarkerPatch(
+      notebookPath,
+      cellIndex,
+      { name: node.name, tag: node.tag, inputs: nextInputs, outputs: nextOutputs },
+      timestamp,
+    );
+    if (!applied) {
+      return;
+    }
+    node.inputs = nextInputs;
+    node.outputs = nextOutputs;
+    this.recomputeAllWires();
+    this.opts.onGraphUpdate(this.getGraph());
+  }
+
+  /** Rebuild every wire from the nodes' current input refs and declared outputs. */
+  private recomputeAllWires(): void {
+    this.graph.wires = {};
+    const nameIndex = this.buildNameIndex();
+    for (const target of Object.values(this.graph.nodes)) {
+      for (const ref of target.inputs) {
+        const parsed = splitRef(ref);
+        if (parsed === null) {
+          continue;
+        }
+        const source = nameIndex.get(parsed.nodeName);
+        if (source === undefined || !source.outputs.includes(parsed.portName)) {
+          continue;
+        }
+        const wireId = makeWireId(source.id, parsed.portName, target.id, ref);
+        this.graph.wires[wireId] = {
+          id: wireId,
+          sourceNodeId: source.id,
+          sourcePort: parsed.portName,
+          targetNodeId: target.id,
+          targetPort: ref,
+        };
+      }
+    }
+  }
 }
 
 function cellKey(notebookPath: string, cellIndex: number): string {
@@ -439,6 +513,45 @@ function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
     }
   }
   return true;
+}
+
+function normalizeInputs(inputs: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of inputs) {
+    const ref = raw.trim();
+    const parsed = splitRef(ref);
+    if (parsed === null) {
+      throw new Error(`SyncEngine: input ref ${JSON.stringify(ref)} must be nodeName.portName`);
+    }
+    const nodeName = parsed.nodeName.trim();
+    const portName = parsed.portName.trim();
+    if (!NAME_RE.test(nodeName) || !PORT_RE.test(portName)) {
+      throw new Error(`SyncEngine: invalid input ref ${JSON.stringify(ref)}`);
+    }
+    const normalized = `${nodeName}.${portName}`;
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      result.push(normalized);
+    }
+  }
+  return result;
+}
+
+function normalizeOutputs(outputs: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of outputs) {
+    const port = raw.trim();
+    if (!PORT_RE.test(port)) {
+      throw new Error(`SyncEngine: invalid output port name ${JSON.stringify(port)}`);
+    }
+    if (!seen.has(port)) {
+      seen.add(port);
+      result.push(port);
+    }
+  }
+  return result;
 }
 
 function spliceMarkerLine(source: string, newMarkerLine: string): string {

@@ -18,9 +18,18 @@ import type { NodeProps } from "reactflow";
 import { Handle, Position } from "reactflow";
 
 import type { NodeModel, NodeTag } from "../types";
+import { PortEditor } from "./PortEditor";
 
 export interface NotebookNodeData extends NodeModel {
   onRename?: (nodeId: string, nextName: string) => void;
+  /** Replace the node's declared input refs (nodeName.portName). */
+  onInputsChange?: (nodeId: string, nextInputs: string[]) => void;
+  /** Replace the node's declared output port names. */
+  onOutputsChange?: (nodeId: string, nextOutputs: string[]) => void;
+  /** Autocomplete suggestions for input refs (upstream nodeName.portName). */
+  inputSuggestions?: string[];
+  /** Autocomplete suggestions for output port names. */
+  outputSuggestions?: string[];
 }
 
 const TAG_HEADER_BG: Record<NodeTag, string> = {
@@ -72,6 +81,11 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
   const [isEditing, setIsEditing] = useState(false);
   const [draftName, setDraftName] = useState(data.name);
   const renameInputRef = useRef<HTMLInputElement>(null);
+
+  // Input nodes only emit values, output nodes only consume them. Everything
+  // else can do both.
+  const showInput = data.tag !== "input";
+  const showOutput = data.tag !== "output";
 
   useEffect(() => {
     if (!isEditing) {
@@ -169,22 +183,44 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
         <span style={styles.tagChip}>{data.tag}</span>
       </div>
       <div style={styles.meta}>
-        {data.inputs.length === 0 && data.outputs.length === 0 ? (
-          <span style={styles.emptyState}>no ports</span>
-        ) : (
-          <>
-            {data.inputs.length > 0 && (
+        {showInput &&
+          (data.onInputsChange !== undefined ? (
+            <PortEditor
+              kind="input"
+              ports={data.inputs}
+              suggestions={data.inputSuggestions ?? []}
+              onChange={(next) => {
+                data.onInputsChange?.(data.id, next);
+              }}
+            />
+          ) : (
+            data.inputs.length > 0 && (
               <div>
                 <strong>in:</strong> {data.inputs.join(", ")}
               </div>
-            )}
-            {data.outputs.length > 0 && (
+            )
+          ))}
+        {showOutput &&
+          (data.onOutputsChange !== undefined ? (
+            <PortEditor
+              kind="output"
+              ports={data.outputs}
+              suggestions={data.outputSuggestions ?? []}
+              onChange={(next) => {
+                data.onOutputsChange?.(data.id, next);
+              }}
+            />
+          ) : (
+            data.outputs.length > 0 && (
               <div>
                 <strong>out:</strong> {data.outputs.join(", ")}
               </div>
-            )}
-          </>
-        )}
+            )
+          ))}
+        {data.onInputsChange === undefined &&
+          data.onOutputsChange === undefined &&
+          data.inputs.length === 0 &&
+          data.outputs.length === 0 && <span style={styles.emptyState}>no ports</span>}
       </div>
       {data.inputs.map((ref, idx) => (
         <Handle
@@ -242,7 +278,8 @@ function nodeStyles(tag: NodeTag, selected: boolean): NotebookNodeStyles {
       boxShadow: selected
         ? `0 0 0 2px ${TAG_RING[tag]}, 0 1px 2px rgba(15, 23, 42, 0.14)`
         : "0 1px 2px rgba(15, 23, 42, 0.14)",
-      overflow: "hidden",
+      // Visible so an open port dropdown can float past the node edges.
+      overflow: "visible",
       boxSizing: "border-box",
     },
     header: {
@@ -253,6 +290,8 @@ function nodeStyles(tag: NodeTag, selected: boolean): NotebookNodeStyles {
       padding: "6px 8px",
       background: TAG_HEADER_BG[tag],
       color: "#ffffff",
+      borderTopLeftRadius: 6,
+      borderTopRightRadius: 6,
       boxSizing: "border-box",
     },
     titleRow: {
@@ -324,6 +363,9 @@ function nodeStyles(tag: NodeTag, selected: boolean): NotebookNodeStyles {
       boxSizing: "border-box",
     },
     meta: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 4,
       padding: "6px 8px",
       fontSize: 12,
       color: NODE_MUTED,

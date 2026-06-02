@@ -52,14 +52,27 @@ export interface CanvasProps {
   onWireDelete?: (wireId: string) => void;
   onNodeSelect?: (node: NodeModel | null) => void;
   onGroupToggle?: (groupId: string) => void;
+  /** Replace a node's declared input refs (nodeName.portName). */
+  onInputsChange?: (nodeId: string, nextInputs: string[]) => void;
+  /** Replace a node's declared output port names. */
+  onOutputsChange?: (nodeId: string, nextOutputs: string[]) => void;
 }
 
 export function Canvas(props: CanvasProps): ReactElement {
-  const { graph, onNodeRename, onWireCreate, onWireDelete, onNodeSelect, onGroupToggle } = props;
+  const {
+    graph,
+    onNodeRename,
+    onWireCreate,
+    onWireDelete,
+    onNodeSelect,
+    onGroupToggle,
+    onInputsChange,
+    onOutputsChange,
+  } = props;
 
   const rfNodes = useMemo<Node[]>(
-    () => buildNodes(graph, onNodeRename, onGroupToggle),
-    [graph, onNodeRename, onGroupToggle],
+    () => buildNodes(graph, { onNodeRename, onGroupToggle, onInputsChange, onOutputsChange }),
+    [graph, onNodeRename, onGroupToggle, onInputsChange, onOutputsChange],
   );
 
   const rfEdges = useMemo<Edge<WireData>[]>(() => buildRfEdges(graph), [graph]);
@@ -141,9 +154,15 @@ export function Canvas(props: CanvasProps): ReactElement {
 
 function buildNodes(
   graph: GraphModel,
-  onRename: CanvasProps["onNodeRename"],
-  onGroupToggle: CanvasProps["onGroupToggle"],
+  callbacks: {
+    onNodeRename: CanvasProps["onNodeRename"];
+    onGroupToggle: CanvasProps["onGroupToggle"];
+    onInputsChange: CanvasProps["onInputsChange"];
+    onOutputsChange: CanvasProps["onOutputsChange"];
+  },
 ): Node[] {
+  const { onNodeRename: onRename, onGroupToggle, onInputsChange, onOutputsChange } = callbacks;
+  const outputSuggestions = collectOutputNames(graph);
   const rfNodes: Node[] = [];
   const groupIds = Object.keys(graph.groups).sort();
 
@@ -189,6 +208,14 @@ function buildNodes(
       if (onRename !== undefined) {
         nodeData.onRename = onRename;
       }
+      if (onInputsChange !== undefined) {
+        nodeData.onInputsChange = onInputsChange;
+        nodeData.inputSuggestions = collectInputRefs(graph, node.id);
+      }
+      if (onOutputsChange !== undefined) {
+        nodeData.onOutputsChange = onOutputsChange;
+        nodeData.outputSuggestions = outputSuggestions;
+      }
       rfNodes.push({
         id: node.id,
         type: "notebook",
@@ -222,4 +249,29 @@ function buildRfEdges(graph: GraphModel): Edge<WireData>[] {
     });
   }
   return edges;
+}
+
+/** All output port names across the graph, deduped, for output autocomplete. */
+function collectOutputNames(graph: GraphModel): string[] {
+  const names = new Set<string>();
+  for (const node of Object.values(graph.nodes)) {
+    for (const port of node.outputs) {
+      names.add(port);
+    }
+  }
+  return [...names].sort();
+}
+
+/** Upstream `nodeName.portName` refs a node can consume, for input autocomplete. */
+function collectInputRefs(graph: GraphModel, selfId: string): string[] {
+  const refs: string[] = [];
+  for (const node of Object.values(graph.nodes)) {
+    if (node.id === selfId) {
+      continue;
+    }
+    for (const port of node.outputs) {
+      refs.push(`${node.name}.${port}`);
+    }
+  }
+  return refs.sort();
 }

@@ -265,6 +265,58 @@ describe("SyncEngine.createWire", () => {
   });
 });
 
+describe("SyncEngine.setNodeInputs / setNodeOutputs", () => {
+  it("rewrites the marker and rebuilds wires when inputs change", async () => {
+    const adapter = recordingAdapter();
+    const engine = new SyncEngine(adapter.options);
+    const cells: NotebookCell[] = [
+      { cellType: "code", source: "# @node: Source  [input]  out=df\n" },
+      { cellType: "code", source: "# @node: Sink  [transform]  out=clean\n" },
+    ];
+    await engine.ingestNotebook(TWO_NODE_PATH, cells, 100);
+    expect(Object.keys(engine.getGraph().wires)).toHaveLength(0);
+
+    await engine.setNodeInputs(`${TWO_NODE_PATH}::1`, ["Source.df"], 200);
+
+    expect(adapter.patches[0]?.cellIndex).toBe(1);
+    expect(adapter.patches[0]?.newSource).toContain("in=Source.df");
+    const wires = Object.values(engine.getGraph().wires);
+    expect(wires).toHaveLength(1);
+    expect(wires[0]?.targetPort).toBe("Source.df");
+    expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::1`]?.inputs).toEqual(["Source.df"]);
+  });
+
+  it("drops a downstream wire when the referenced output is removed", async () => {
+    const adapter = recordingAdapter();
+    const engine = new SyncEngine(adapter.options);
+    const cells = toNotebookCells(twoNode);
+    await engine.ingestNotebook(TWO_NODE_PATH, cells, 100);
+    expect(Object.keys(engine.getGraph().wires)).toHaveLength(1);
+
+    await engine.setNodeOutputs(`${TWO_NODE_PATH}::1`, [], 200);
+
+    expect(adapter.patches[0]?.newSource).not.toContain("out=");
+    expect(Object.keys(engine.getGraph().wires)).toHaveLength(0);
+    expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::1`]?.outputs).toEqual([]);
+  });
+
+  it("dedupes and rejects malformed refs", async () => {
+    const adapter = recordingAdapter();
+    const engine = new SyncEngine(adapter.options);
+    const cells: NotebookCell[] = [
+      { cellType: "code", source: "# @node: Source  [input]  out=df\n" },
+      { cellType: "code", source: "# @node: Sink  [transform]\n" },
+    ];
+    await engine.ingestNotebook(TWO_NODE_PATH, cells, 100);
+
+    await engine.setNodeInputs(`${TWO_NODE_PATH}::1`, ["Source.df", "Source.df"], 200);
+    expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::1`]?.inputs).toEqual(["Source.df"]);
+
+    await expect(engine.setNodeInputs(`${TWO_NODE_PATH}::1`, ["nope"], 300)).rejects.toThrow();
+    await expect(engine.setNodeOutputs(`${TWO_NODE_PATH}::1`, ["Bad Port"], 300)).rejects.toThrow();
+  });
+});
+
 describe("SyncEngine.getGraph", () => {
   it("returns a defensive copy that does not share state with the engine", async () => {
     const adapter = recordingAdapter();
