@@ -28,6 +28,11 @@
       "type": "string",
       "default": ""
     },
+    "generationMode": {
+      "type": "string",
+      "enum": ["template", "llm"],
+      "default": "template"
+    },
     "inputs": {
       "type": "array",
       "items": { "$ref": "#/$defs/Port" }
@@ -39,6 +44,11 @@
     "template": {
       "type": "string",
       "description": "Cell-source template inserted when the node is added to a notebook."
+    },
+    "configFields": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ConfigField" },
+      "default": []
     }
   },
   "$defs": {
@@ -54,6 +64,53 @@
           "default": "any"
         },
         "required": { "type": "boolean", "default": true }
+      }
+    },
+    "ConfigOption": {
+      "type": "object",
+      "required": ["value", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": "string" },
+        "label": { "type": "string" }
+      }
+    },
+    "ConfigField": {
+      "type": "object",
+      "required": ["key", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "label": { "type": "string" },
+        "kind": {
+          "type": "string",
+          "enum": ["text", "textarea", "select"],
+          "default": "text"
+        },
+        "description": {
+          "type": "string",
+          "default": ""
+        },
+        "placeholder": {
+          "type": "string",
+          "default": ""
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "defaultValue": {
+          "type": "string",
+          "default": ""
+        },
+        "options": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ConfigOption" },
+          "default": []
+        }
       }
     }
   }

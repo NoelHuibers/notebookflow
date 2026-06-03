@@ -31,6 +31,8 @@ export interface NodeModel {
   tag: NodeTag;
   inputs: string[];
   outputs: string[];
+  /** Notebook-native cell metadata carried by this node's first cell. */
+  metadata?: Record<string, unknown>;
   /** Cell indices that make up this node, in notebook order. */
   cellIndices: number[];
   /** The notebook (NodeGroup) this node belongs to. */

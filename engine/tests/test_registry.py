@@ -139,6 +139,7 @@ def test_discover_picks_up_builtins_and_sample_external_package(
     registry = Registry.discover()
     ids = {m.id for m in registry.all()}
     assert {
+        "notebookflow.ai_python_transform",
         "notebookflow.parse_csv",
         "notebookflow.filter_rows",
         "notebookflow.plot_chart",

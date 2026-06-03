@@ -38,7 +38,7 @@ export interface CellPatch {
   newSource: string | null;
   /** Cell type for inserted cells. Ignored for replace / delete patches. */
   cellType?: NotebookCell["cellType"];
-  /** Metadata for inserted cells. Ignored for replace / delete patches. */
+  /** Metadata for inserted or replaced cells. Ignored for delete patches. */
   metadata?: Record<string, unknown>;
 }
 
@@ -52,6 +52,13 @@ export interface CreateNodeOptions {
   /** Cell body inserted below the generated `# @node:` marker line. */
   bodySource?: string;
   /** Persisted notebook metadata for this node instance, e.g. manifest id. */
+  metadata?: Record<string, unknown>;
+}
+
+export interface UpdateNodeContentsOptions {
+  /** Cell body inserted below the generated `# @node:` marker line. */
+  bodySource: string;
+  /** Updated notebook metadata for this node instance. */
   metadata?: Record<string, unknown>;
 }
 
@@ -107,6 +114,8 @@ export class SyncEngine {
 
     const groupNodeIds: string[] = [];
     for (const marker of parseResult.markers) {
+      const cell = cells[marker.cellIndex];
+      const metadata = cloneMetadata(cell?.metadata);
       const nodeId = makeNodeId(groupId, marker.cellIndex);
       const node: NodeModel = {
         id: nodeId,
@@ -114,6 +123,7 @@ export class SyncEngine {
         tag: marker.tag,
         inputs: [...marker.inputs],
         outputs: [...marker.outputs],
+        ...(metadata === undefined ? {} : { metadata }),
         cellIndices: [marker.cellIndex],
         groupId,
       };
@@ -288,14 +298,13 @@ export class SyncEngine {
     }
 
     const name = this.uniqueNodeName(notebookPath, options.name);
-    const marker = MarkerParser.formatMarker({
+    const markerBody = {
       name,
       tag: options.tag,
       inputs: normalizeInputs(options.inputs ?? []),
       outputs: normalizeOutputs(options.outputs ?? []),
-    });
-    const bodySource = options.bodySource ?? "";
-    const newSource = bodySource === "" ? `${marker}\n` : `${marker}\n${bodySource}`;
+    } satisfies MarkerBody;
+    const newSource = composeNodeSource(markerBody, options.bodySource ?? "");
 
     this.sourceCache.set(cellKey(notebookPath, cellCount), newSource);
     this.notebookCellCounts.set(notebookPath, cellCount + 1);
@@ -308,6 +317,47 @@ export class SyncEngine {
       newSource,
       ...(options.metadata === undefined ? {} : { metadata: options.metadata }),
     });
+  }
+
+  /** Graph→cell: replace a node's body source and optional metadata. */
+  async updateNodeContents(
+    nodeId: string,
+    options: UpdateNodeContentsOptions,
+    timestamp: number,
+  ): Promise<void> {
+    const node = this.graph.nodes[nodeId];
+    if (node === undefined) {
+      throw new Error(`SyncEngine.updateNodeContents: node ${JSON.stringify(nodeId)} not found`);
+    }
+
+    const notebookPath = this.notebookPathOf(node);
+    const cellIndex = node.cellIndices[0];
+    if (cellIndex === undefined) {
+      throw new Error(`SyncEngine.updateNodeContents: node ${nodeId} has no cell index`);
+    }
+
+    const newSource = composeNodeSource(
+      { name: node.name, tag: node.tag, inputs: node.inputs, outputs: node.outputs },
+      options.bodySource,
+    );
+    const metadata = cloneMetadata(options.metadata);
+    const applied = await this.applySourcePatch(
+      notebookPath,
+      cellIndex,
+      newSource,
+      timestamp,
+      metadata,
+    );
+    if (!applied) {
+      return;
+    }
+
+    if (metadata === undefined) {
+      Reflect.deleteProperty(node, "metadata");
+    } else {
+      node.metadata = metadata;
+    }
+    this.opts.onGraphUpdate(this.getGraph());
   }
 
   /** Snapshot of the current derived graph. */
@@ -449,15 +499,32 @@ export class SyncEngine {
     body: MarkerBody,
     timestamp: number,
   ): Promise<boolean> {
-    if (this.shouldDeferToCell(notebookPath, cellIndex, timestamp)) {
-      return false;
-    }
     const key = cellKey(notebookPath, cellIndex);
     const oldSource = this.sourceCache.get(key) ?? "";
     const newMarkerLine = MarkerParser.formatMarker(body);
     const newSource = spliceMarkerLine(oldSource, newMarkerLine);
+    return this.applySourcePatch(notebookPath, cellIndex, newSource, timestamp);
+  }
+
+  private async applySourcePatch(
+    notebookPath: string,
+    cellIndex: number,
+    newSource: string,
+    timestamp: number,
+    metadata?: Record<string, unknown>,
+  ): Promise<boolean> {
+    if (this.shouldDeferToCell(notebookPath, cellIndex, timestamp)) {
+      return false;
+    }
+    const key = cellKey(notebookPath, cellIndex);
     this.sourceCache.set(key, newSource);
-    await this.opts.onCellPatch({ notebookPath, cellIndex, operation: "replace", newSource });
+    await this.opts.onCellPatch({
+      notebookPath,
+      cellIndex,
+      operation: "replace",
+      newSource,
+      ...(metadata === undefined ? {} : { metadata }),
+    });
     return true;
   }
 
@@ -646,4 +713,15 @@ function spliceMarkerLine(source: string, newMarkerLine: string): string {
     }
   }
   return `${newMarkerLine}\n${source}`;
+}
+
+function composeNodeSource(body: MarkerBody, bodySource: string): string {
+  const marker = MarkerParser.formatMarker(body);
+  return bodySource === "" ? `${marker}\n` : `${marker}\n${bodySource}`;
+}
+
+function cloneMetadata(
+  metadata: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  return metadata === undefined ? undefined : { ...metadata };
 }

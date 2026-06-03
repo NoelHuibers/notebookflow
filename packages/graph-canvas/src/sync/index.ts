@@ -14,5 +14,6 @@ export type {
   SyncDirection,
   SyncEngineOptions,
   SyncEvent,
+  UpdateNodeContentsOptions,
 } from "./SyncEngine";
 export { SyncEngine } from "./SyncEngine";

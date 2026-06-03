@@ -11,6 +11,7 @@ import { SyncEngine } from "./SyncEngine";
 interface IpynbCell {
   cell_type: string;
   source: string | string[];
+  metadata?: Record<string, unknown>;
 }
 interface IpynbDoc {
   cells: IpynbCell[];
@@ -20,6 +21,7 @@ function toNotebookCells(doc: IpynbDoc): NotebookCell[] {
   return doc.cells.map((c) => ({
     cellType: c.cell_type as NotebookCell["cellType"],
     source: Array.isArray(c.source) ? c.source.join("") : c.source,
+    ...(c.metadata === undefined ? {} : { metadata: c.metadata }),
   }));
 }
 
@@ -310,6 +312,57 @@ describe("SyncEngine.createNode", () => {
     );
 
     expect(adapter.patches[0]?.newSource).toMatch(/^# @node: Load CSV 2 {2}\[input] {2}out=df\n/);
+  });
+});
+
+describe("SyncEngine.updateNodeContents", () => {
+  it("replaces the node body, carries metadata, and updates the in-memory node", async () => {
+    const adapter = recordingAdapter();
+    const engine = new SyncEngine(adapter.options);
+    const cells: NotebookCell[] = [
+      {
+        cellType: "code",
+        source: "# @node: Source  [input]  out=df\ndf = load()\n",
+        metadata: { notebookflow: { manifestId: "notebookflow.parse_csv" } },
+      },
+    ];
+    await engine.ingestNotebook(TWO_NODE_PATH, cells, 100);
+
+    await engine.updateNodeContents(
+      `${TWO_NODE_PATH}::0`,
+      {
+        bodySource: "import pandas as pd\ndf = pd.read_csv('custom.csv')\n",
+        metadata: {
+          notebookflow: {
+            manifestId: "notebookflow.parse_csv",
+            config: { path: "custom.csv" },
+          },
+        },
+      },
+      200,
+    );
+
+    expect(adapter.patches).toHaveLength(1);
+    expect(adapter.patches[0]).toMatchObject({
+      notebookPath: TWO_NODE_PATH,
+      cellIndex: 0,
+      operation: "replace",
+      metadata: {
+        notebookflow: {
+          manifestId: "notebookflow.parse_csv",
+          config: { path: "custom.csv" },
+        },
+      },
+    });
+    expect(adapter.patches[0]?.newSource).toBe(
+      "# @node: Source  [input]  out=df\nimport pandas as pd\ndf = pd.read_csv('custom.csv')\n",
+    );
+    expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::0`]?.metadata).toEqual({
+      notebookflow: {
+        manifestId: "notebookflow.parse_csv",
+        config: { path: "custom.csv" },
+      },
+    });
   });
 });
 

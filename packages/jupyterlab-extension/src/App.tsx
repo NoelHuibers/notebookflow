@@ -7,8 +7,18 @@
  * this component stays platform-agnostic.
  */
 
-import type { GraphModel, NodeModel } from "@notebookflow/graph-canvas";
-import { Canvas } from "@notebookflow/graph-canvas";
+import type { GraphModel, NodeManifestDef, NodeModel } from "@notebookflow/graph-canvas";
+import {
+  Canvas,
+  NodeConfigEditor,
+  configValuesEqual,
+  defaultConfigForManifest,
+  hasMissingRequiredConfig,
+  readNotebookflowMetadata,
+  resolveNodeConfig,
+  sanitizeConfigForManifest,
+  writeNotebookflowMetadata,
+} from "@notebookflow/graph-canvas";
 import type { CellPatch } from "@notebookflow/graph-canvas/sync";
 import { SyncEngine } from "@notebookflow/graph-canvas/sync";
 import type {
@@ -18,13 +28,21 @@ import type {
 } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { EngineEvent, NodeManifestDef, PipelineDef } from "./EngineClient";
+import type { EngineEvent, PipelineDef } from "./EngineClient";
 import type { NotebookBridge } from "./NotebookBridge";
 
 export interface AppProps {
   bridge: NotebookBridge;
   onRun: (pipeline: PipelineDef, onEvent: (event: EngineEvent) => void) => Promise<void>;
   onListNodes: () => Promise<NodeManifestDef[]>;
+  onSynthesizeNode: (request: {
+    manifestId: string;
+    nodeName: string;
+    inputs: string[];
+    outputs: string[];
+    config: Record<string, string>;
+    currentSource: string;
+  }) => Promise<{ source: string; backend: string; warnings: string[] }>;
 }
 
 const EMPTY_GRAPH: GraphModel = { nodes: {}, groups: {}, wires: {} };
@@ -40,11 +58,16 @@ interface DragState {
   startWidth: number;
 }
 
-export function App({ bridge, onRun, onListNodes }: AppProps): ReactElement {
+export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps): ReactElement {
   const [graph, setGraph] = useState<GraphModel>(EMPTY_GRAPH);
   const [selected, setSelected] = useState<NodeModel | null>(null);
   const [events, setEvents] = useState<EngineEvent[]>([]);
   const [isRunning, setIsRunning] = useState(false);
+  const [configDraft, setConfigDraft] = useState<Record<string, string>>({});
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [configWarnings, setConfigWarnings] = useState<string[]>([]);
+  const [configStatus, setConfigStatus] = useState<string | null>(null);
+  const [isConfigSubmitting, setIsConfigSubmitting] = useState(false);
   const [paletteNodes, setPaletteNodes] = useState<NodeManifestDef[]>([]);
   const [paletteError, setPaletteError] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH_PX);
@@ -77,6 +100,10 @@ export function App({ bridge, onRun, onListNodes }: AppProps): ReactElement {
   }, [bridge, engine]);
 
   useEffect(() => {
+    setSelected((current) => (current === null ? null : graph.nodes[current.id] ?? null));
+  }, [graph]);
+
+  useEffect(() => {
     let cancelled = false;
     void onListNodes()
       .then((nodes) => {
@@ -103,23 +130,126 @@ export function App({ bridge, onRun, onListNodes }: AppProps): ReactElement {
   };
 
   const handleAddNode = (manifest: NodeManifestDef): void => {
-    void engine.createNode(
-      bridge.notebookPath,
-      {
-        name: manifest.name,
-        tag: manifest.tag as "input" | "transform" | "output" | "ai" | "io",
-        outputs: manifest.outputs.map((port) => port.name),
-        bodySource: manifest.template,
-        metadata: {
-          notebookflow: {
-            manifestId: manifest.id,
-            manifestVersion: manifest.version,
+    const config = defaultConfigForManifest(manifest);
+    void onSynthesizeNode({
+      manifestId: manifest.id,
+      nodeName: manifest.name,
+      inputs: [],
+      outputs: manifest.outputs.map((port) => port.name),
+      config,
+      currentSource: "",
+    })
+      .then(async (result) => {
+        const metadata = writeNotebookflowMetadata(undefined, {
+          manifestId: manifest.id,
+          manifestVersion: manifest.version,
+          config,
+          lastGeneratedAt: new Date().toISOString(),
+          lastGenerationBackend: result.backend,
+        });
+        await engine.createNode(
+          bridge.notebookPath,
+          {
+            name: manifest.name,
+            tag: manifest.tag,
+            outputs: manifest.outputs.map((port) => port.name),
+            bodySource: result.source,
+            metadata,
           },
-        },
-      },
-      Date.now(),
-    );
+          Date.now(),
+        );
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : "unknown error";
+        setEvents((prev) => [...prev, { type: "error", message: `add node failed: ${message}` }]);
+      });
   };
+
+  const manifestById = useMemo(
+    () => new Map(paletteNodes.map((manifest) => [manifest.id, manifest] as const)),
+    [paletteNodes],
+  );
+
+  const selectedManifest = useMemo(() => {
+    const manifestId = readNotebookflowMetadata(selected?.metadata).manifestId;
+    return manifestId === undefined ? null : manifestById.get(manifestId) ?? null;
+  }, [manifestById, selected?.metadata]);
+
+  const selectedAppliedConfig = useMemo(() => {
+    if (selected === null || selectedManifest === null) {
+      return {};
+    }
+    return resolveNodeConfig(selectedManifest, selected.metadata);
+  }, [selected, selectedManifest]);
+
+  const isConfigDirty =
+    selected !== null &&
+    selectedManifest !== null &&
+    !configValuesEqual(configDraft, selectedAppliedConfig);
+
+  const isConfigBlocked =
+    selectedManifest === null ||
+    hasMissingRequiredConfig(selectedManifest, configDraft) ||
+    !isConfigDirty;
+
+  useEffect(() => {
+    if (selected === null || selectedManifest === null || selectedManifest.configFields.length === 0) {
+      setConfigDraft({});
+      setConfigError(null);
+      setConfigWarnings([]);
+      setConfigStatus(null);
+      return;
+    }
+    setConfigDraft(resolveNodeConfig(selectedManifest, selected.metadata));
+    setConfigError(null);
+    setConfigWarnings([]);
+    setConfigStatus(buildGenerationStatus(readNotebookflowMetadata(selected.metadata)));
+  }, [selected?.id, selectedManifest]);
+
+  const handleApplySelectedConfig = useCallback((): void => {
+    if (selected === null || selectedManifest === null) {
+      return;
+    }
+
+    const nextConfig = sanitizeConfigForManifest(selectedManifest, configDraft);
+    const currentSource = stripMarkerLine(bridge.readCells()[selected.cellIndices[0] ?? 0]?.source ?? "");
+    setConfigError(null);
+    setConfigWarnings([]);
+    setIsConfigSubmitting(true);
+
+    void onSynthesizeNode({
+      manifestId: selectedManifest.id,
+      nodeName: selected.name,
+      inputs: selected.inputs,
+      outputs: selected.outputs,
+      config: nextConfig,
+      currentSource,
+    })
+      .then(async (result) => {
+        const metadata = writeNotebookflowMetadata(selected.metadata, {
+          manifestId: selectedManifest.id,
+          manifestVersion: selectedManifest.version,
+          config: nextConfig,
+          lastGeneratedAt: new Date().toISOString(),
+          lastGenerationBackend: result.backend,
+        });
+        await engine.updateNodeContents(
+          selected.id,
+          { bodySource: result.source, metadata },
+          Date.now(),
+        );
+        setConfigDraft(nextConfig);
+        setConfigWarnings(result.warnings);
+        setConfigStatus(buildGenerationStatus(readNotebookflowMetadata(metadata)));
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : "unknown error";
+        setConfigError(`Could not update ${selected.name}: ${message}`);
+      })
+      .finally(() => {
+        setIsConfigSubmitting(false);
+      });
+  }, [bridge, configDraft, engine, onSynthesizeNode, selected, selectedManifest]);
 
   const handleRun = (): void => {
     if (isRunning) {
@@ -357,6 +487,21 @@ export function App({ bridge, onRun, onListNodes }: AppProps): ReactElement {
             <h3 style={sectionTitleStyle}>Selected</h3>
             {selected === null ? (
               <p style={mutedStyle}>Click a node.</p>
+            ) : selectedManifest !== null && selectedManifest.configFields.length > 0 ? (
+              <NodeConfigEditor
+                manifest={selectedManifest}
+                values={configDraft}
+                isDirty={isConfigDirty}
+                isSubmitting={isConfigSubmitting}
+                isDisabled={isConfigBlocked}
+                error={configError}
+                warnings={configWarnings}
+                status={configStatus}
+                onChange={(key, value) => {
+                  setConfigDraft((current) => ({ ...current, [key]: value }));
+                }}
+                onSubmit={handleApplySelectedConfig}
+              />
             ) : (
               <pre style={preStyle}>{JSON.stringify(selected, null, 2)}</pre>
             )}
@@ -417,6 +562,20 @@ function stripMarkerLine(source: string): string {
     return source.slice(newline + 1);
   }
   return source;
+}
+
+function buildGenerationStatus(metadata: {
+  lastGeneratedAt?: string;
+  lastGenerationBackend?: string;
+}): string | null {
+  if (metadata.lastGenerationBackend === undefined && metadata.lastGeneratedAt === undefined) {
+    return null;
+  }
+  if (metadata.lastGeneratedAt === undefined) {
+    return `Last generated via ${metadata.lastGenerationBackend ?? "template"}.`;
+  }
+  const when = new Date(metadata.lastGeneratedAt).toLocaleString();
+  return `Last generated via ${metadata.lastGenerationBackend ?? "template"} at ${when}.`;
 }
 
 function renderEvent(event: EngineEvent): string {

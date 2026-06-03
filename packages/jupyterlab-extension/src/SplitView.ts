@@ -9,11 +9,12 @@
 
 import { ReactWidget } from "@jupyterlab/apputils";
 import type { NotebookPanel } from "@jupyterlab/notebook";
+import type { NodeManifestDef } from "@notebookflow/graph-canvas";
 import type { ReactElement } from "react";
 import { createElement } from "react";
 
 import { App } from "./App";
-import type { EngineEvent, NodeManifestDef, PipelineDef } from "./EngineClient";
+import type { EngineEvent, PipelineDef } from "./EngineClient";
 import { EngineClient } from "./EngineClient";
 import { NotebookBridge } from "./NotebookBridge";
 
@@ -49,6 +50,7 @@ export class SplitView extends ReactWidget {
           onEvent,
         }),
       onListNodes: (): Promise<NodeManifestDef[]> => this.engine.listNodes(),
+      onSynthesizeNode: (request) => this.engine.synthesizeNode(request),
     });
   }
 

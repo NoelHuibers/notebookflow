@@ -11,6 +11,12 @@
  * workspace package.
  */
 
+import type {
+  NodeManifestDef,
+  NodeSynthesisRequest,
+  NodeSynthesisResponse,
+} from "@notebookflow/graph-canvas";
+
 interface NodeDef {
   id: string;
   name: string;
@@ -27,23 +33,6 @@ interface EdgeDef {
   sourcePort: string;
   targetNodeId: string;
   targetPort: string;
-}
-
-export interface NodePortDef {
-  name: string;
-  type: string;
-  required: boolean;
-}
-
-export interface NodeManifestDef {
-  id: string;
-  name: string;
-  tag: "input" | "transform" | "output" | "ai" | "io";
-  version: string;
-  description: string;
-  inputs: NodePortDef[];
-  outputs: NodePortDef[];
-  template: string;
 }
 
 export interface PipelineDef {
@@ -227,5 +216,28 @@ export class EngineClient {
       throw new Error(`EngineClient.listNodes: ${res.status} ${res.statusText}`);
     }
     return (await res.json()) as NodeManifestDef[];
+  }
+
+  async synthesizeNode(request: NodeSynthesisRequest): Promise<NodeSynthesisResponse> {
+    const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/nodes/synthesize");
+    const res = await fetch(httpUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    if (!res.ok) {
+      const message = await readErrorMessage(res);
+      throw new Error(`EngineClient.synthesizeNode: ${message}`);
+    }
+    return (await res.json()) as NodeSynthesisResponse;
+  }
+}
+
+async function readErrorMessage(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { detail?: string };
+    return body.detail ?? `${response.status} ${response.statusText}`;
+  } catch {
+    return `${response.status} ${response.statusText}`;
   }
 }

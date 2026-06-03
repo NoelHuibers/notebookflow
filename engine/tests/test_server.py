@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from notebookflow.server import app
+from notebookflow import server
+
+app = server.app
 
 
 @pytest.fixture
@@ -108,16 +113,70 @@ def test_health_returns_ok(client: TestClient) -> None:
     assert r.json() == {"status": "ok"}
 
 
+def test_load_engine_env_prefers_existing_env_and_local_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root = tmp_path / "repo"
+    engine_root = repo_root / "engine"
+    repo_root.mkdir()
+    engine_root.mkdir()
+
+    (repo_root / ".env.local").write_text(
+        "NOTEBOOKFLOW_OPENAI_MODEL=local-model\n",
+        encoding="utf-8",
+    )
+    (repo_root / ".env").write_text(
+        "OPENAI_API_KEY=repo-file-key\nNOTEBOOKFLOW_OPENAI_MODEL=base-model\n",
+        encoding="utf-8",
+    )
+    (engine_root / ".env").write_text(
+        "OPENAI_API_KEY=engine-file-key\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "process-key")
+    monkeypatch.delenv("NOTEBOOKFLOW_OPENAI_MODEL", raising=False)
+
+    loaded = server.load_engine_env((repo_root, engine_root))
+
+    assert loaded == [repo_root / ".env.local", repo_root / ".env", engine_root / ".env"]
+    assert os.environ["OPENAI_API_KEY"] == "process-key"
+    assert os.environ["NOTEBOOKFLOW_OPENAI_MODEL"] == "local-model"
+
+
+def test_load_engine_env_uses_repo_root_env_before_engine_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root = tmp_path / "repo"
+    engine_root = repo_root / "engine"
+    repo_root.mkdir()
+    engine_root.mkdir()
+
+    (repo_root / ".env").write_text("OPENAI_API_KEY=repo-file-key\n", encoding="utf-8")
+    (engine_root / ".env").write_text("OPENAI_API_KEY=engine-file-key\n", encoding="utf-8")
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    server.load_engine_env((repo_root, engine_root))
+
+    assert os.environ["OPENAI_API_KEY"] == "repo-file-key"
+
+
 def test_list_nodes_returns_builtin_manifests(client: TestClient) -> None:
     r = client.get("/nodes")
     assert r.status_code == 200
     body = r.json()
     ids = {entry["id"] for entry in body}
     assert {
+        "notebookflow.ai_python_transform",
         "notebookflow.parse_csv",
         "notebookflow.filter_rows",
         "notebookflow.plot_chart",
     } <= ids
+
+    parse_csv = next(entry for entry in body if entry["id"] == "notebookflow.parse_csv")
+    assert parse_csv["configFields"][0]["key"] == "path"
+    assert parse_csv["generationMode"] == "template"
 
 
 def test_analyze_cells_returns_top_level_names(client: TestClient) -> None:
@@ -145,6 +204,78 @@ def test_analyze_cells_reports_syntax_error_without_failing(client: TestClient) 
     cell = r.json()["cells"][0]
     assert cell["definedNames"] == []
     assert cell["syntaxError"] is not None
+
+
+def test_synthesize_node_renders_template_manifest(client: TestClient) -> None:
+    r = client.post(
+        "/nodes/synthesize",
+        json={
+            "manifestId": "notebookflow.parse_csv",
+            "nodeName": "Parse CSV",
+            "inputs": [],
+            "outputs": ["table"],
+            "config": {"path": "sales.csv"},
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["backend"] == "template"
+    assert "table = pd.read_csv(\"sales.csv\")" in body["source"]
+    assert body["warnings"] == []
+
+
+def test_synthesize_node_falls_back_to_template_when_openai_missing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("NOTEBOOKFLOW_OPENAI_API_KEY", raising=False)
+
+    r = client.post(
+        "/nodes/synthesize",
+        json={
+            "manifestId": "notebookflow.ai_python_transform",
+            "nodeName": "AI Python Transform",
+            "inputs": ["Load CSV.df"],
+            "outputs": ["result"],
+            "config": {"instruction": "Calculate the top 5 customers by revenue."},
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["backend"] == "template"
+    assert "OPENAI_API_KEY" in body["source"]
+    assert body["warnings"] != []
+
+
+def test_synthesize_node_falls_back_to_template_when_openai_request_fails(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+    response = httpx.Response(status_code=401, request=request)
+
+    async def failing_openai(*args: Any, **kwargs: Any) -> str:
+        raise httpx.HTTPStatusError("401 Unauthorized", request=request, response=response)
+
+    monkeypatch.setenv("OPENAI_API_KEY", "invalid-test-key")
+    monkeypatch.delenv("NOTEBOOKFLOW_OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(server.CodeSynth, "_synthesize_with_openai", failing_openai)
+
+    r = client.post(
+        "/nodes/synthesize",
+        json={
+            "manifestId": "notebookflow.ai_python_transform",
+            "nodeName": "AI Python Transform",
+            "inputs": ["Load CSV.df"],
+            "outputs": ["result"],
+            "config": {"instruction": "Calculate the top 5 customers by revenue."},
+        },
+    )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["backend"] == "template"
+    assert "result = None" in body["source"]
+    assert any("OpenAI rejected the configured API key" in warning for warning in body["warnings"])
 
 
 def test_run_pipeline_executes_in_topo_order(client: TestClient) -> None:

@@ -85,6 +85,9 @@ export class NotebookBridge implements IDisposable {
 
     const cell = model.cells.get(patch.cellIndex);
     cell.sharedModel.setSource(patch.newSource);
+    if (patch.metadata !== undefined) {
+      cell.sharedModel.setMetadata(toNbformatMetadata(patch.metadata));
+    }
   }
 
   clearOutputs(cellIndices: number[]): void {
@@ -178,6 +181,12 @@ function toNbformatMetadata(
 interface CodeCellSharedModel {
   execution_count: nbformat.ExecutionCount;
   setOutputs(outputs: nbformat.IOutput[]): void;
+  setMetadata(
+    metadata:
+      | Partial<nbformat.ICellMetadata>
+      | Partial<nbformat.ICodeCellMetadata>
+      | Partial<nbformat.IRawCellMetadata>,
+  ): void;
 }
 
 function uniqueCellIndices(cellIndices: number[]): number[] {

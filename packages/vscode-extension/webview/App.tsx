@@ -15,8 +15,24 @@
  *   { type: "replaceOutputs", cellIndex, outputs, status, durationMs }
  */
 
-import type { GraphModel, NodeModel } from "@notebookflow/graph-canvas";
-import { Canvas } from "@notebookflow/graph-canvas";
+import type {
+  GraphModel,
+  NodeManifestDef,
+  NodeModel,
+  NodeSynthesisRequest,
+  NodeSynthesisResponse,
+} from "@notebookflow/graph-canvas";
+import {
+  Canvas,
+  NodeConfigEditor,
+  configValuesEqual,
+  defaultConfigForManifest,
+  hasMissingRequiredConfig,
+  readNotebookflowMetadata,
+  resolveNodeConfig,
+  sanitizeConfigForManifest,
+  writeNotebookflowMetadata,
+} from "@notebookflow/graph-canvas";
 import type { CellPatch, NotebookCell } from "@notebookflow/graph-canvas/sync";
 import { SyncEngine } from "@notebookflow/graph-canvas/sync";
 import type {
@@ -88,23 +104,6 @@ type NbOutput =
   }
   | { output_type: "error"; ename: string; evalue: string; traceback: string[] };
 
-interface NodePortDef {
-  name: string;
-  type: string;
-  required: boolean;
-}
-
-interface NodeManifestDef {
-  id: string;
-  name: string;
-  tag: "input" | "transform" | "output" | "ai" | "io";
-  version: string;
-  description: string;
-  inputs: NodePortDef[];
-  outputs: NodePortDef[];
-  template: string;
-}
-
 interface ExecutionResultMsg {
   nodeId: string;
   status: string;
@@ -140,6 +139,11 @@ export function App(): ReactElement {
   const [events, setEvents] = useState<EngineEvent[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [selected, setSelected] = useState<NodeModel | null>(null);
+  const [configDraft, setConfigDraft] = useState<Record<string, string>>({});
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [configWarnings, setConfigWarnings] = useState<string[]>([]);
+  const [configStatus, setConfigStatus] = useState<string | null>(null);
+  const [isConfigSubmitting, setIsConfigSubmitting] = useState(false);
   const [paletteNodes, setPaletteNodes] = useState<NodeManifestDef[]>([]);
   const [paletteError, setPaletteError] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH_PX);
@@ -189,33 +193,55 @@ export function App(): ReactElement {
     };
   }, []);
 
+  useEffect(() => {
+    setSelected((current) => (current === null ? null : graph.nodes[current.id] ?? null));
+  }, [graph]);
+
   const handleRename = (nodeId: string, nextName: string): void => {
     void engineRef.current?.renameNode(nodeId, nextName, Date.now());
   };
 
   const handleAddNode = useCallback(
     (manifest: NodeManifestDef): void => {
-      if (notebookPath === "") {
+      const engine = engineRef.current;
+      if (notebookPath === "" || engineUrl === null || engine === null) {
         return;
       }
-      void engineRef.current?.createNode(
-        notebookPath,
-        {
-          name: manifest.name,
-          tag: manifest.tag,
-          outputs: manifest.outputs.map((port) => port.name),
-          bodySource: manifest.template,
-          metadata: {
-            notebookflow: {
-              manifestId: manifest.id,
-              manifestVersion: manifest.version,
+      const config = defaultConfigForManifest(manifest);
+      void synthesizeNode(engineUrl, {
+        manifestId: manifest.id,
+        nodeName: manifest.name,
+        inputs: [],
+        outputs: manifest.outputs.map((port) => port.name),
+        config,
+        currentSource: "",
+      })
+        .then(async (result) => {
+          const metadata = writeNotebookflowMetadata(undefined, {
+            manifestId: manifest.id,
+            manifestVersion: manifest.version,
+            config,
+            lastGeneratedAt: new Date().toISOString(),
+            lastGenerationBackend: result.backend,
+          });
+          await engine.createNode(
+            notebookPath,
+            {
+              name: manifest.name,
+              tag: manifest.tag,
+              outputs: manifest.outputs.map((port) => port.name),
+              bodySource: result.source,
+              metadata,
             },
-          },
-        },
-        Date.now(),
-      );
+            Date.now(),
+          );
+        })
+        .catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : "unknown error";
+          setEvents((prev) => [...prev, { type: "error", message: `add node failed: ${message}` }]);
+        });
     },
-    [notebookPath],
+    [engineUrl, notebookPath],
   );
 
   useEffect(() => {
@@ -252,6 +278,93 @@ export function App(): ReactElement {
       cancelled = true;
     };
   }, [engineUrl]);
+
+  const manifestById = useMemo(
+    () => new Map(paletteNodes.map((manifest) => [manifest.id, manifest] as const)),
+    [paletteNodes],
+  );
+
+  const selectedManifest = useMemo(() => {
+    const manifestId = readNotebookflowMetadata(selected?.metadata).manifestId;
+    return manifestId === undefined ? null : manifestById.get(manifestId) ?? null;
+  }, [manifestById, selected?.metadata]);
+
+  const selectedAppliedConfig = useMemo(() => {
+    if (selected === null || selectedManifest === null) {
+      return {};
+    }
+    return resolveNodeConfig(selectedManifest, selected.metadata);
+  }, [selected, selectedManifest]);
+
+  const isConfigDirty =
+    selected !== null &&
+    selectedManifest !== null &&
+    !configValuesEqual(configDraft, selectedAppliedConfig);
+
+  const isConfigBlocked =
+    selectedManifest === null ||
+    hasMissingRequiredConfig(selectedManifest, configDraft) ||
+    !isConfigDirty;
+
+  useEffect(() => {
+    if (selected === null || selectedManifest === null || selectedManifest.configFields.length === 0) {
+      setConfigDraft({});
+      setConfigError(null);
+      setConfigWarnings([]);
+      setConfigStatus(null);
+      return;
+    }
+    setConfigDraft(resolveNodeConfig(selectedManifest, selected.metadata));
+    setConfigError(null);
+    setConfigWarnings([]);
+    setConfigStatus(buildGenerationStatus(readNotebookflowMetadata(selected.metadata)));
+  }, [selected?.id, selectedManifest]);
+
+  const handleApplySelectedConfig = useCallback((): void => {
+    const engine = engineRef.current;
+    if (engine === null || engineUrl === null || selected === null || selectedManifest === null) {
+      return;
+    }
+
+    const nextConfig = sanitizeConfigForManifest(selectedManifest, configDraft);
+    const currentSource = stripMarkerLine(cells[selected.cellIndices[0] ?? 0]?.source ?? "");
+    setConfigError(null);
+    setConfigWarnings([]);
+    setIsConfigSubmitting(true);
+
+    void synthesizeNode(engineUrl, {
+      manifestId: selectedManifest.id,
+      nodeName: selected.name,
+      inputs: selected.inputs,
+      outputs: selected.outputs,
+      config: nextConfig,
+      currentSource,
+    })
+      .then(async (result) => {
+        const metadata = writeNotebookflowMetadata(selected.metadata, {
+          manifestId: selectedManifest.id,
+          manifestVersion: selectedManifest.version,
+          config: nextConfig,
+          lastGeneratedAt: new Date().toISOString(),
+          lastGenerationBackend: result.backend,
+        });
+        await engine.updateNodeContents(
+          selected.id,
+          { bodySource: result.source, metadata },
+          Date.now(),
+        );
+        setConfigDraft(nextConfig);
+        setConfigWarnings(result.warnings);
+        setConfigStatus(buildGenerationStatus(readNotebookflowMetadata(metadata)));
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : "unknown error";
+        setConfigError(`Could not update ${selected.name}: ${message}`);
+      })
+      .finally(() => {
+        setIsConfigSubmitting(false);
+      });
+  }, [cells, configDraft, engineUrl, selected, selectedManifest]);
 
   const clampSidebarWidth = useCallback((value: number): number => {
     const host = bodyRef.current;
@@ -531,6 +644,21 @@ export function App(): ReactElement {
             </h2>
             {selected === null ? (
               <p className="text-muted-foreground">Click a node to inspect.</p>
+            ) : selectedManifest !== null && selectedManifest.configFields.length > 0 ? (
+              <NodeConfigEditor
+                manifest={selectedManifest}
+                values={configDraft}
+                isDirty={isConfigDirty}
+                isSubmitting={isConfigSubmitting}
+                isDisabled={isConfigBlocked}
+                error={configError}
+                warnings={configWarnings}
+                status={configStatus}
+                onChange={(key, value) => {
+                  setConfigDraft((current) => ({ ...current, [key]: value }));
+                }}
+                onSubmit={handleApplySelectedConfig}
+              />
             ) : (
               <pre className="overflow-auto rounded border bg-background p-2 font-mono text-[11px]">
                 {JSON.stringify(selected, null, 2)}
@@ -605,6 +733,45 @@ function stripMarkerLine(source: string): string {
     return source.slice(newline + 1);
   }
   return source;
+}
+
+async function synthesizeNode(
+  engineUrl: string,
+  request: NodeSynthesisRequest,
+): Promise<NodeSynthesisResponse> {
+  const response = await fetch(`${engineUrl}/nodes/synthesize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const message = await readErrorMessage(response);
+    throw new Error(message);
+  }
+  return (await response.json()) as NodeSynthesisResponse;
+}
+
+async function readErrorMessage(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { detail?: string };
+    return body.detail ?? `${response.status} ${response.statusText}`;
+  } catch {
+    return `${response.status} ${response.statusText}`;
+  }
+}
+
+function buildGenerationStatus(metadata: {
+  lastGeneratedAt?: string;
+  lastGenerationBackend?: string;
+}): string | null {
+  if (metadata.lastGenerationBackend === undefined && metadata.lastGeneratedAt === undefined) {
+    return null;
+  }
+  if (metadata.lastGeneratedAt === undefined) {
+    return `Last generated via ${metadata.lastGenerationBackend ?? "template"}.`;
+  }
+  const when = new Date(metadata.lastGeneratedAt).toLocaleString();
+  return `Last generated via ${metadata.lastGenerationBackend ?? "template"} at ${when}.`;
 }
 
 function renderEvent(event: EngineEvent): string {

@@ -85,10 +85,29 @@ export class NotebookBridge {
         );
       }
       const cell = this.doc.cellAt(patch.cellIndex);
-      const lastLine = Math.max(0, cell.document.lineCount - 1);
-      const lastChar = cell.document.lineAt(lastLine).range.end.character;
-      const fullRange = new vscode.Range(0, 0, lastLine, lastChar);
-      edit.replace(cell.document.uri, fullRange, patch.newSource);
+      if (patch.metadata === undefined) {
+        const lastLine = Math.max(0, cell.document.lineCount - 1);
+        const lastChar = cell.document.lineAt(lastLine).range.end.character;
+        const fullRange = new vscode.Range(0, 0, lastLine, lastChar);
+        edit.replace(cell.document.uri, fullRange, patch.newSource);
+      } else {
+        const data = new vscode.NotebookCellData(
+          cell.kind,
+          patch.newSource,
+          cell.document.languageId,
+        );
+        data.metadata = { ...patch.metadata };
+        data.outputs = [...cell.outputs];
+        if (cell.executionSummary !== undefined) {
+          data.executionSummary = cell.executionSummary;
+        }
+        edit.set(this.doc.uri, [
+          vscode.NotebookEdit.replaceCells(
+            new vscode.NotebookRange(patch.cellIndex, patch.cellIndex + 1),
+            [data],
+          ),
+        ]);
+      }
     }
 
     const applied = await vscode.workspace.applyEdit(edit);

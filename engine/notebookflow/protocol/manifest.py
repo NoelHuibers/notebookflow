@@ -8,12 +8,17 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 NodeTag = Literal["input", "transform", "output", "ai", "io"]
+NodeGenerationMode = Literal["template", "llm"]
+NodeConfigFieldKind = Literal["text", "textarea", "select"]
 
 
 class NodePort(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
     name: str
     """Port identifier, used as the dict key on input/output payload maps."""
 
@@ -23,8 +28,30 @@ class NodePort(BaseModel):
     required: bool = True
 
 
+class NodeConfigOption(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    value: str
+    label: str
+
+
+class NodeConfigField(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    key: str = Field(..., pattern=r"^[a-z][a-z0-9_]*$")
+    label: str
+    kind: NodeConfigFieldKind = "text"
+    description: str = ""
+    placeholder: str = ""
+    required: bool = False
+    default_value: str = ""
+    options: list[NodeConfigOption] = Field(default_factory=list)
+
+
 class NodeManifest(BaseModel):
     """Public extension manifest contract."""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     id: str = Field(..., description="Globally unique node id, e.g. notebookflow.parse_csv")
     name: str
@@ -37,3 +64,5 @@ class NodeManifest(BaseModel):
     )
     version: str = "0.0.0"
     description: str = ""
+    generation_mode: NodeGenerationMode = "template"
+    config_fields: list[NodeConfigField] = Field(default_factory=list)

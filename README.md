@@ -43,6 +43,26 @@ It's idempotent — re-run after pulling.
 
 Ctrl+C in any `start:*` command tears down all child processes via `concurrently`'s `--kill-others-on-fail`.
 
+### 4. Optional AI config
+
+If you want the AI nodes to use OpenAI, the engine now auto-loads `.env.local` and `.env`
+from the repo root and from `engine/` on startup. Already-exported shell environment variables
+still win.
+
+Minimal repo-root `.env`:
+
+```dotenv
+OPENAI_API_KEY=your-openai-api-key
+```
+
+Optional overrides:
+
+- `NOTEBOOKFLOW_OPENAI_API_KEY` — engine-specific alias for the same key.
+- `NOTEBOOKFLOW_OPENAI_MODEL` — defaults to `gpt-4o-mini`.
+- `NOTEBOOKFLOW_OPENAI_BASE_URL` — defaults to `https://api.openai.com/v1`.
+
+A sample file is included at `.env.example`.
+
 ### What each one shows you
 
 - **Web app** — SyncEngine + Canvas only (the web-app fixture is in-browser; no notebook write-back, no execution).

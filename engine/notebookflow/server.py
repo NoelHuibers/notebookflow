@@ -24,6 +24,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import httpx
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
@@ -32,7 +34,42 @@ from pydantic.alias_generators import to_camel
 from notebookflow.core.dag import DAG, DAGEdge, DAGNode
 from notebookflow.core.databus import DataBus
 from notebookflow.core.executor import ExecutionResult, Executor
+from notebookflow.llm.code_synth import CodeSynth
 from notebookflow.protocol.registry import Registry
+
+
+def _default_env_roots() -> tuple[Path, Path]:
+    package_dir = Path(__file__).resolve().parent
+    engine_root = package_dir.parent
+    repo_root = engine_root.parent
+    return repo_root, engine_root
+
+
+def load_engine_env(search_roots: tuple[Path, ...] | None = None) -> list[Path]:
+    """Load local `.env` files for engine startup.
+
+    Precedence is:
+    1. already-exported process env vars
+    2. `.env.local`
+    3. `.env`
+
+    Files are searched in the provided roots order, defaulting to repo root
+    first and `engine/` second.
+    """
+
+    loaded: list[Path] = []
+    roots = search_roots if search_roots is not None else _default_env_roots()
+    for root in roots:
+        for filename in (".env.local", ".env"):
+            path = root / filename
+            if not path.is_file():
+                continue
+            load_dotenv(path, override=False)
+            loaded.append(path)
+    return loaded
+
+
+_LOADED_ENV_FILES = load_engine_env()
 
 
 class _APIModel(BaseModel):
@@ -99,10 +136,27 @@ class RunResponse(_APIModel):
     results: list[ExecutionResultModel]
 
 
+class SynthesizeNodeRequest(_APIModel):
+    manifest_id: str
+    node_name: str
+    inputs: list[str] = Field(default_factory=list)
+    outputs: list[str] = Field(default_factory=list)
+    config: dict[str, str] = Field(default_factory=dict)
+    current_source: str = ""
+
+
+class SynthesizeNodeResponse(_APIModel):
+    source: str
+    backend: str
+    warnings: list[str] = Field(default_factory=list)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Discover available node manifests on startup."""
-    _app.state.registry = Registry.discover()
+    registry = Registry.discover()
+    _app.state.registry = registry
+    _app.state.code_synth = CodeSynth(registry)
     yield
 
 
@@ -126,6 +180,15 @@ def _registry(app_ref: FastAPI) -> Registry:
         registry = Registry.discover()
         app_ref.state.registry = registry
     return registry
+
+
+def _code_synth(app_ref: FastAPI) -> CodeSynth:
+    synth = getattr(app_ref.state, "code_synth", None)
+    if not isinstance(synth, CodeSynth):
+        registry = _registry(app_ref)
+        synth = CodeSynth(registry)
+        app_ref.state.code_synth = synth
+    return synth
 
 
 def _collect_target_names(target: ast.expr, into: list[str], seen: set[str]) -> None:
@@ -255,7 +318,38 @@ async def health() -> dict[str, str]:
 
 @app.get("/nodes")
 async def list_nodes() -> list[dict[str, object]]:
-    return [m.model_dump(mode="json") for m in _registry(app).all()]
+    return [m.model_dump(mode="json", by_alias=True) for m in _registry(app).all()]
+
+
+@app.post("/nodes/synthesize", response_model=SynthesizeNodeResponse)
+async def synthesize_node(request: SynthesizeNodeRequest) -> SynthesizeNodeResponse:
+    registry = _registry(app)
+    try:
+        manifest = registry.get(request.manifest_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"unknown manifest id: {request.manifest_id}") from exc
+
+    try:
+        result = await _code_synth(app).synthesize(
+            manifest,
+            node_name=request.node_name,
+            inputs=request.inputs,
+            outputs=request.outputs,
+            config=request.config,
+            current_source=request.current_source,
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"OpenAI request failed: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return SynthesizeNodeResponse(
+        source=result.source,
+        backend=result.backend,
+        warnings=result.warnings,
+    )
 
 
 @app.post("/cells/analyze", response_model=AnalyzeResponse)

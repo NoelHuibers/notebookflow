@@ -7,9 +7,30 @@
  */
 
 export { Canvas } from "./components/Canvas";
+export { NodeConfigEditor } from "./components/NodeConfigEditor";
 export { NotebookNode } from "./components/Node";
 export { NodeGroup } from "./components/NodeGroup";
 export { Wire } from "./components/Wire";
+export type {
+  NodeConfigFieldDef,
+  NodeConfigFieldKind,
+  NodeConfigOptionDef,
+  NodeGenerationMode,
+  NodeManifestDef,
+  NodePortDef,
+  NodeSynthesisRequest,
+  NodeSynthesisResponse,
+  NotebookflowNodeMetadata,
+} from "./node-config";
+export {
+  configValuesEqual,
+  defaultConfigForManifest,
+  hasMissingRequiredConfig,
+  readNotebookflowMetadata,
+  resolveNodeConfig,
+  sanitizeConfigForManifest,
+  writeNotebookflowMetadata,
+} from "./node-config";
 export * as sync from "./sync";
 export type {
   GraphModel,
