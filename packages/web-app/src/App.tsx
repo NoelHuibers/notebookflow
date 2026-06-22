@@ -88,6 +88,9 @@ export function App(): ReactElement {
   const [outputsByCell, setOutputsByCell] = useState<Record<number, NbOutput[]>>({});
   const [runtimeByNode, setRuntimeByNode] = useState<Record<string, RuntimeState>>({});
   const [timingByNode, setTimingByNode] = useState<Record<string, number>>({});
+  const [baselineSources, setBaselineSources] = useState<string[]>(() =>
+    bootstrapBaselineSources(),
+  );
   const [definedByCell, setDefinedByCell] = useState<string[][]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -150,6 +153,7 @@ export function App(): ReactElement {
     try {
       const parsed = parseNotebook(text);
       setNotebook({ name, cells: parsed.cells, doc: parsed.doc });
+      setBaselineSources(parsed.cells.map((cell) => cell.source));
       setSelected(null);
       setPatches([]);
       setEvents([]);
@@ -463,6 +467,7 @@ export function App(): ReactElement {
 
   const handleDownload = useCallback((): void => {
     downloadNotebook(notebook.cells, notebook.doc, notebook.name, outputsByCell);
+    setBaselineSources(notebook.cells.map((cell) => cell.source));
   }, [notebook, outputsByCell]);
 
   const handleSave = useCallback(async (): Promise<void> => {
@@ -491,6 +496,7 @@ export function App(): ReactElement {
       }
       const json = serializeNotebook(notebook.cells, notebook.doc, outputsByCell);
       await writeFileHandle(handle, json);
+      setBaselineSources(notebook.cells.map((cell) => cell.source));
       setSaveStatus("saved");
       window.setTimeout(() => {
         setSaveStatus("idle");
@@ -516,6 +522,17 @@ export function App(): ReactElement {
   }, [notebook]);
 
   const nodeCount = Object.keys(graph.nodes).length;
+  const isDirty = useMemo(() => {
+    if (notebook.cells.length !== baselineSources.length) {
+      return true;
+    }
+    for (let i = 0; i < notebook.cells.length; i++) {
+      if (notebook.cells[i]?.source !== baselineSources[i]) {
+        return true;
+      }
+    }
+    return false;
+  }, [notebook.cells, baselineSources]);
   const minCanvasPaneWidth = isPaletteCollapsed
     ? MIN_CANVAS_BODY_WIDTH_PX
     : MIN_PALETTE_WIDTH_PX + DIVIDER_SIZE_PX + MIN_CANVAS_BODY_WIDTH_PX;
@@ -773,7 +790,12 @@ export function App(): ReactElement {
       <div className="flex h-screen overflow-hidden flex-col bg-background text-foreground font-sans">
         <header className="flex items-center gap-3 border-b bg-card px-4 py-2.5">
           <span className="font-semibold tracking-tight">NotebookFlow</span>
-          <Badge variant="secondary" className="font-mono">
+          <Badge variant="secondary" className="font-mono" title={notebook.name}>
+            {isDirty && (
+              <span role="img" aria-label="Unsaved changes" className="mr-1 text-foreground">
+                ●
+              </span>
+            )}
             {notebook.name}
           </Badge>
           <Badge variant="outline" className="font-mono">
@@ -1150,6 +1172,10 @@ function InspectorPanel({ title, count, empty, children }: InspectorPanelProps):
 function bootstrapFromFixture(): LoadedNotebook {
   const parsed = parseNotebook(JSON.stringify(twoNode));
   return { name: "two-node.ipynb", cells: parsed.cells, doc: parsed.doc };
+}
+
+function bootstrapBaselineSources(): string[] {
+  return parseNotebook(JSON.stringify(twoNode)).cells.map((cell) => cell.source);
 }
 
 function buildPipelineDef(
