@@ -29,7 +29,7 @@ import {
 } from "@notebookflow/graph-canvas";
 import type { CellPatch, NotebookCell } from "@notebookflow/graph-canvas/sync";
 import { SyncEngine } from "@notebookflow/graph-canvas/sync";
-import { Download, Play, RotateCcw, Save } from "lucide-react";
+import { Download, ExternalLink, Play, RotateCcw, Save } from "lucide-react";
 import type {
   ReactElement,
   KeyboardEvent as ReactKeyboardEvent,
@@ -64,6 +64,15 @@ const DEFAULT_MAIN_RATIO = 72;
 const DEFAULT_PALETTE_WIDTH_PX = 280;
 const KEYBOARD_RESIZE_STEP = 2;
 const TAG_ORDER = ["input", "transform", "output", "ai", "io"] as const;
+const DEFAULT_JUPYTER_URL = "http://localhost:8888";
+const JUPYTER_URL: string = (() => {
+  const raw = import.meta.env.VITE_NOTEBOOKFLOW_JUPYTER_URL;
+  // Undefined env var -> use default. Explicitly empty string -> opt-out, no button.
+  if (raw === undefined) {
+    return DEFAULT_JUPYTER_URL;
+  }
+  return raw.trim();
+})();
 
 interface LoadedNotebook {
   name: string;
@@ -803,6 +812,19 @@ export function App(): ReactElement {
           </Badge>
           <EngineStatus client={clientRef.current} />
           <div className="ml-auto flex items-center gap-2">
+            {JUPYTER_URL !== "" && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  openInJupyterLab(JUPYTER_URL, notebook.name);
+                }}
+                title={`Open ${notebook.name} in JupyterLab at ${JUPYTER_URL}`}
+              >
+                <ExternalLink className="mr-1.5 size-3.5" />
+                Edit in JupyterLab
+              </Button>
+            )}
             <Button variant="ghost" size="sm" onClick={handleReingest}>
               <RotateCcw className="mr-1.5 size-3.5" />
               Re-ingest
@@ -1176,6 +1198,13 @@ function bootstrapFromFixture(): LoadedNotebook {
 
 function bootstrapBaselineSources(): string[] {
   return parseNotebook(JSON.stringify(twoNode)).cells.map((cell) => cell.source);
+}
+
+function openInJupyterLab(baseUrl: string, notebookName: string): void {
+  const trimmedBase = baseUrl.replace(/\/+$/, "");
+  const safeName = notebookName.split("/").map(encodeURIComponent).join("/");
+  const target = `${trimmedBase}/lab/tree/${safeName}`;
+  window.open(target, "_blank", "noopener,noreferrer");
 }
 
 function buildPipelineDef(
