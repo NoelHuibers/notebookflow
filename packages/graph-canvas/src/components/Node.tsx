@@ -32,6 +32,8 @@ export interface NotebookNodeData extends NodeModel {
   outputSuggestions?: string[];
   /** Execution state from the host; absent means "idle". */
   runtimeState?: RuntimeState;
+  /** Last-run duration in milliseconds. Shown next to the status dot. */
+  runtimeDurationMs?: number;
 }
 
 interface RuntimeBadge {
@@ -159,6 +161,7 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
   };
 
   const runtime = RUNTIME_BADGES[data.runtimeState ?? "idle"];
+  const durationLabel = formatDuration(data.runtimeDurationMs);
 
   return (
     <div style={styles.wrapper}>
@@ -178,6 +181,19 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
               boxShadow: runtime.glow === null ? "none" : `0 0 6px ${runtime.glow}`,
             }}
           />
+          {durationLabel !== null && (
+            <span
+              title={`Last run: ${durationLabel}`}
+              style={{
+                fontSize: 10,
+                color: NODE_MUTED,
+                fontVariantNumeric: "tabular-nums",
+                flexShrink: 0,
+              }}
+            >
+              {durationLabel}
+            </span>
+          )}
           {isEditing ? (
             <input
               ref={renameInputRef}
@@ -295,6 +311,19 @@ function portOffset(index: number, total: number): string {
   }
   const pct = 30 + (index / (total - 1)) * 40;
   return `${String(pct)}%`;
+}
+
+function formatDuration(ms: number | undefined): string | null {
+  if (ms === undefined || !Number.isFinite(ms) || ms < 0) {
+    return null;
+  }
+  if (ms < 1) {
+    return "<1ms";
+  }
+  if (ms < 1000) {
+    return `${String(Math.round(ms))}ms`;
+  }
+  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 function nodeStyles(tag: NodeTag, selected: boolean): NotebookNodeStyles {

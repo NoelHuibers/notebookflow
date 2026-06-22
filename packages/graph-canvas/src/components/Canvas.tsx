@@ -67,6 +67,11 @@ export interface CanvasProps {
    * from engine WebSocket events; nodes not present default to "idle".
    */
   runtimeByNode?: Record<string, RuntimeState>;
+  /**
+   * Per-node last-run duration in milliseconds. Rendered next to the status
+   * dot once the node enters a terminal state.
+   */
+  timingByNode?: Record<string, number>;
 }
 
 export function Canvas(props: CanvasProps): ReactElement {
@@ -81,6 +86,7 @@ export function Canvas(props: CanvasProps): ReactElement {
     onOutputsChange,
     variablesByNode,
     runtimeByNode,
+    timingByNode,
   } = props;
 
   const rfNodes = useMemo<Node[]>(
@@ -92,6 +98,7 @@ export function Canvas(props: CanvasProps): ReactElement {
         onOutputsChange,
         variablesByNode,
         runtimeByNode,
+        timingByNode,
       }),
     [
       graph,
@@ -101,6 +108,7 @@ export function Canvas(props: CanvasProps): ReactElement {
       onOutputsChange,
       variablesByNode,
       runtimeByNode,
+      timingByNode,
     ],
   );
 
@@ -190,6 +198,7 @@ function buildNodes(
     onOutputsChange: CanvasProps["onOutputsChange"];
     variablesByNode: CanvasProps["variablesByNode"];
     runtimeByNode: CanvasProps["runtimeByNode"];
+    timingByNode: CanvasProps["timingByNode"];
   },
 ): Node[] {
   const {
@@ -199,9 +208,11 @@ function buildNodes(
     onOutputsChange,
     variablesByNode,
     runtimeByNode,
+    timingByNode,
   } = callbacks;
   const vars = variablesByNode ?? {};
   const runtime = runtimeByNode ?? {};
+  const timing = timingByNode ?? {};
   const rfNodes: Node[] = [];
   const groupIds = Object.keys(graph.groups).sort();
 
@@ -247,6 +258,10 @@ function buildNodes(
         ...node,
         runtimeState: runtime[node.id] ?? "idle",
       };
+      const duration = timing[node.id];
+      if (duration !== undefined) {
+        nodeData.runtimeDurationMs = duration;
+      }
       if (onRename !== undefined) {
         nodeData.onRename = onRename;
       }

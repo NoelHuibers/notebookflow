@@ -86,6 +86,7 @@ export function App(): ReactElement {
   const [events, setEvents] = useState<EngineEvent[]>([]);
   const [outputsByCell, setOutputsByCell] = useState<Record<number, NbOutput[]>>({});
   const [runtimeByNode, setRuntimeByNode] = useState<Record<string, RuntimeState>>({});
+  const [timingByNode, setTimingByNode] = useState<Record<string, number>>({});
   const [definedByCell, setDefinedByCell] = useState<string[][]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -151,6 +152,7 @@ export function App(): ReactElement {
       setEvents([]);
       setOutputsByCell({});
       setRuntimeByNode({});
+      setTimingByNode({});
       setError(null);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "unknown error";
@@ -414,6 +416,7 @@ export function App(): ReactElement {
     }
     setEvents([]);
     setOutputsByCell({});
+    setTimingByNode({});
     const initialRuntime: Record<string, RuntimeState> = {};
     for (const nodeId of Object.keys(graph.nodes)) {
       initialRuntime[nodeId] = "queued";
@@ -437,6 +440,10 @@ export function App(): ReactElement {
             if (status === "ok" || status === "error" || status === "skipped") {
               setRuntimeByNode((prev) => ({ ...prev, [event.result.nodeId]: status }));
             }
+            setTimingByNode((prev) => ({
+              ...prev,
+              [event.result.nodeId]: event.result.durationMs,
+            }));
           }
         },
       })
@@ -802,6 +809,7 @@ export function App(): ReactElement {
                     onOutputsChange={handleOutputsChange}
                     variablesByNode={variablesByNode}
                     runtimeByNode={runtimeByNode}
+                    timingByNode={timingByNode}
                   />
                 </div>
 
