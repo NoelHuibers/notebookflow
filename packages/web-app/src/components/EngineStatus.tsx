@@ -1,13 +1,16 @@
 /**
- * EngineStatus — small badge showing whether the engine is reachable.
+ * EngineStatus — top-bar badge showing engine reachability + host + latency.
  *
- * Pings `/health` on mount and on demand; surfaces the configured URL
- * so users can sanity-check what they're hitting.
+ * Pings `/health` on mount and on demand. The badge surfaces the host:port
+ * the client is talking to and the round-trip latency of the last probe so
+ * users can sanity-check what they're hitting at a glance.
  */
 
 import type { ReactElement } from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
 import type { EngineClient } from "../lib/EngineClient";
+
 import { Badge } from "./ui/badge";
 
 export type EngineState = "checking" | "ready" | "down";
@@ -18,10 +21,14 @@ export interface EngineStatusProps {
 
 export function EngineStatus({ client }: EngineStatusProps): ReactElement {
   const [state, setState] = useState<EngineState>("checking");
+  const [latencyMs, setLatencyMs] = useState<number | null>(null);
 
   const probe = useCallback(async (): Promise<void> => {
     setState("checking");
+    const start = performance.now();
     const ok = await client.ping();
+    const elapsed = performance.now() - start;
+    setLatencyMs(Math.round(elapsed));
     setState(ok ? "ready" : "down");
   }, [client]);
 
@@ -29,9 +36,15 @@ export function EngineStatus({ client }: EngineStatusProps): ReactElement {
     void probe();
   }, [probe]);
 
+  const host = useMemo(() => extractHost(client.baseUrl), [client.baseUrl]);
+
   const variant = state === "ready" ? "default" : state === "down" ? "destructive" : "secondary";
-  const label =
-    state === "ready" ? "engine: ready" : state === "down" ? "engine: down" : "engine: …";
+  const trailing =
+    state === "ready" && latencyMs !== null
+      ? ` · ${String(latencyMs)}ms`
+      : state === "down"
+        ? " · unreachable"
+        : " · …";
 
   return (
     <button
@@ -43,8 +56,18 @@ export function EngineStatus({ client }: EngineStatusProps): ReactElement {
       className="cursor-pointer"
     >
       <Badge variant={variant} className="font-mono">
-        {label}
+        engine · {host}
+        {trailing}
       </Badge>
     </button>
   );
+}
+
+function extractHost(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return parsed.host === "" ? url : parsed.host;
+  } catch {
+    return url;
+  }
 }
