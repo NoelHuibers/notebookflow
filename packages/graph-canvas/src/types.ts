@@ -8,6 +8,18 @@
 
 export type NodeTag = "input" | "transform" | "output" | "ai" | "io";
 
+/**
+ * Per-node execution state surfaced on the canvas. Populated by the host from
+ * engine events; not part of the persisted graph model.
+ *
+ * - idle: never run, or reset after a file load
+ * - queued: pipeline started, this node hasn't finished yet (also used as
+ *   the in-flight indicator until the engine emits a discrete nodeStarted)
+ * - running: actively executing (reserved for future nodeStarted event)
+ * - ok / error / skipped: terminal states mirroring ExecutionResult.status
+ */
+export type RuntimeState = "idle" | "queued" | "running" | "ok" | "error" | "skipped";
+
 /** A single `# @node` marker as parsed from a notebook cell. */
 export interface NodeMarker {
   /** Node display name from the marker. */

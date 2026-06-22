@@ -14,7 +14,7 @@ import { useCallback, useMemo } from "react";
 import type { Connection, Edge, EdgeTypes, Node, NodeTypes } from "reactflow";
 import { Background, Controls, ReactFlow } from "reactflow";
 
-import type { GraphModel, NodeModel, WireModel } from "../types";
+import type { GraphModel, NodeModel, RuntimeState, WireModel } from "../types";
 import type { NotebookNodeData } from "./Node";
 import { NotebookNode } from "./Node";
 import type { NodeGroupData } from "./NodeGroup";
@@ -62,6 +62,11 @@ export interface CanvasProps {
    * already-declared ports. Typically sourced from the engine's analyzer.
    */
   variablesByNode?: Record<string, string[]>;
+  /**
+   * Per-node execution state for the run-status indicator. Hosts populate this
+   * from engine WebSocket events; nodes not present default to "idle".
+   */
+  runtimeByNode?: Record<string, RuntimeState>;
 }
 
 export function Canvas(props: CanvasProps): ReactElement {
@@ -75,6 +80,7 @@ export function Canvas(props: CanvasProps): ReactElement {
     onInputsChange,
     onOutputsChange,
     variablesByNode,
+    runtimeByNode,
   } = props;
 
   const rfNodes = useMemo<Node[]>(
@@ -85,8 +91,17 @@ export function Canvas(props: CanvasProps): ReactElement {
         onInputsChange,
         onOutputsChange,
         variablesByNode,
+        runtimeByNode,
       }),
-    [graph, onNodeRename, onGroupToggle, onInputsChange, onOutputsChange, variablesByNode],
+    [
+      graph,
+      onNodeRename,
+      onGroupToggle,
+      onInputsChange,
+      onOutputsChange,
+      variablesByNode,
+      runtimeByNode,
+    ],
   );
 
   const rfEdges = useMemo<Edge<WireData>[]>(() => buildRfEdges(graph), [graph]);
@@ -174,6 +189,7 @@ function buildNodes(
     onInputsChange: CanvasProps["onInputsChange"];
     onOutputsChange: CanvasProps["onOutputsChange"];
     variablesByNode: CanvasProps["variablesByNode"];
+    runtimeByNode: CanvasProps["runtimeByNode"];
   },
 ): Node[] {
   const {
@@ -182,8 +198,10 @@ function buildNodes(
     onInputsChange,
     onOutputsChange,
     variablesByNode,
+    runtimeByNode,
   } = callbacks;
   const vars = variablesByNode ?? {};
+  const runtime = runtimeByNode ?? {};
   const rfNodes: Node[] = [];
   const groupIds = Object.keys(graph.groups).sort();
 
@@ -225,7 +243,10 @@ function buildNodes(
       if (node === undefined) {
         continue;
       }
-      const nodeData: NotebookNodeData = { ...node };
+      const nodeData: NotebookNodeData = {
+        ...node,
+        runtimeState: runtime[node.id] ?? "idle",
+      };
       if (onRename !== undefined) {
         nodeData.onRename = onRename;
       }

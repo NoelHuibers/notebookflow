@@ -38,5 +38,6 @@ export type {
   NodeMarker,
   NodeModel,
   NodeTag,
+  RuntimeState,
   WireModel,
 } from "./types";

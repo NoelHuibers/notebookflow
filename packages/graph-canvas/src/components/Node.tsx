@@ -17,7 +17,7 @@ import { useEffect, useRef, useState } from "react";
 import type { NodeProps } from "reactflow";
 import { Handle, Position } from "reactflow";
 
-import type { NodeModel, NodeTag } from "../types";
+import type { NodeModel, NodeTag, RuntimeState } from "../types";
 import { PortEditor } from "./PortEditor";
 
 export interface NotebookNodeData extends NodeModel {
@@ -30,7 +30,24 @@ export interface NotebookNodeData extends NodeModel {
   inputSuggestions?: string[];
   /** Autocomplete suggestions for output port names. */
   outputSuggestions?: string[];
+  /** Execution state from the host; absent means "idle". */
+  runtimeState?: RuntimeState;
 }
+
+interface RuntimeBadge {
+  label: string;
+  color: string;
+  glow: string | null;
+}
+
+const RUNTIME_BADGES: Record<RuntimeState, RuntimeBadge> = {
+  idle: { label: "idle", color: "#9ca3af", glow: null },
+  queued: { label: "queued", color: "#2dd4bf", glow: "rgba(45, 212, 191, 0.55)" },
+  running: { label: "running", color: "#2dd4bf", glow: "rgba(45, 212, 191, 0.85)" },
+  ok: { label: "ok", color: "#10b981", glow: null },
+  error: { label: "error", color: "#ef4444", glow: null },
+  skipped: { label: "skipped", color: "#f59e0b", glow: null },
+};
 
 const TAG_HEADER_BG: Record<NodeTag, string> = {
   input: "#3b82f6",
@@ -141,10 +158,26 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
     }
   };
 
+  const runtime = RUNTIME_BADGES[data.runtimeState ?? "idle"];
+
   return (
     <div style={styles.wrapper}>
       <div style={styles.header}>
         <div style={styles.titleRow}>
+          <span
+            role="img"
+            aria-label={`Status: ${runtime.label}`}
+            title={`Status: ${runtime.label}`}
+            style={{
+              display: "inline-block",
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              flexShrink: 0,
+              background: runtime.color,
+              boxShadow: runtime.glow === null ? "none" : `0 0 6px ${runtime.glow}`,
+            }}
+          />
           {isEditing ? (
             <input
               ref={renameInputRef}

@@ -10,7 +10,12 @@
  * - Click Download to save the patched `.ipynb` back to disk.
  */
 
-import type { GraphModel, NodeManifestDef, NodeModel } from "@notebookflow/graph-canvas";
+import type {
+  GraphModel,
+  NodeManifestDef,
+  NodeModel,
+  RuntimeState,
+} from "@notebookflow/graph-canvas";
 import {
   Canvas,
   configValuesEqual,
@@ -80,6 +85,7 @@ export function App(): ReactElement {
   const [patches, setPatches] = useState<CellPatch[]>([]);
   const [events, setEvents] = useState<EngineEvent[]>([]);
   const [outputsByCell, setOutputsByCell] = useState<Record<number, NbOutput[]>>({});
+  const [runtimeByNode, setRuntimeByNode] = useState<Record<string, RuntimeState>>({});
   const [definedByCell, setDefinedByCell] = useState<string[][]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -144,6 +150,7 @@ export function App(): ReactElement {
       setPatches([]);
       setEvents([]);
       setOutputsByCell({});
+      setRuntimeByNode({});
       setError(null);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "unknown error";
@@ -407,6 +414,11 @@ export function App(): ReactElement {
     }
     setEvents([]);
     setOutputsByCell({});
+    const initialRuntime: Record<string, RuntimeState> = {};
+    for (const nodeId of Object.keys(graph.nodes)) {
+      initialRuntime[nodeId] = "queued";
+    }
+    setRuntimeByNode(initialRuntime);
     setIsRunning(true);
     setError(null);
     clientRef.current
@@ -420,6 +432,10 @@ export function App(): ReactElement {
             const cellIndex = node?.cellIndices[0];
             if (cellIndex !== undefined) {
               setOutputsByCell((prev) => ({ ...prev, [cellIndex]: event.result.outputs }));
+            }
+            const status = event.result.status;
+            if (status === "ok" || status === "error" || status === "skipped") {
+              setRuntimeByNode((prev) => ({ ...prev, [event.result.nodeId]: status }));
             }
           }
         },
@@ -785,6 +801,7 @@ export function App(): ReactElement {
                     onInputsChange={handleInputsChange}
                     onOutputsChange={handleOutputsChange}
                     variablesByNode={variablesByNode}
+                    runtimeByNode={runtimeByNode}
                   />
                 </div>
 
