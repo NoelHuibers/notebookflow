@@ -15,11 +15,14 @@ AI_PYTHON_TRANSFORM = NodeManifest(
     name="AI Python Transform",
     tag="ai",
     version="0.1.0",
-    description="Use OpenAI to draft a Python transformation cell from a natural-language instruction.",
+    description=(
+        "Use OpenAI to draft a Python transformation cell from a natural-language instruction."
+    ),
     inputs=[NodePort(name="df", type="dataframe", required=False)],
     outputs=[NodePort(name="result", type="any")],
     template=(
-        "# TODO: configure OPENAI_API_KEY or NOTEBOOKFLOW_OPENAI_API_KEY in .env or the shell to enable AI synthesis.\n"
+        "# TODO: configure OPENAI_API_KEY or NOTEBOOKFLOW_OPENAI_API_KEY in .env or the\n"
+        "# shell to enable AI synthesis.\n"
         "# Instruction: {instruction}\n"
         "{primary_output} = None\n"
     ),

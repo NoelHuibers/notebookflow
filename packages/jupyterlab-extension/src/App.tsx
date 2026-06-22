@@ -10,10 +10,10 @@
 import type { GraphModel, NodeManifestDef, NodeModel } from "@notebookflow/graph-canvas";
 import {
   Canvas,
-  NodeConfigEditor,
   configValuesEqual,
   defaultConfigForManifest,
   hasMissingRequiredConfig,
+  NodeConfigEditor,
   readNotebookflowMetadata,
   resolveNodeConfig,
   sanitizeConfigForManifest,
@@ -100,7 +100,7 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
   }, [bridge, engine]);
 
   useEffect(() => {
-    setSelected((current) => (current === null ? null : graph.nodes[current.id] ?? null));
+    setSelected((current) => (current === null ? null : (graph.nodes[current.id] ?? null)));
   }, [graph]);
 
   useEffect(() => {
@@ -172,7 +172,7 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
 
   const selectedManifest = useMemo(() => {
     const manifestId = readNotebookflowMetadata(selected?.metadata).manifestId;
-    return manifestId === undefined ? null : manifestById.get(manifestId) ?? null;
+    return manifestId === undefined ? null : (manifestById.get(manifestId) ?? null);
   }, [manifestById, selected?.metadata]);
 
   const selectedAppliedConfig = useMemo(() => {
@@ -193,7 +193,11 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
     !isConfigDirty;
 
   useEffect(() => {
-    if (selected === null || selectedManifest === null || selectedManifest.configFields.length === 0) {
+    if (
+      selected === null ||
+      selectedManifest === null ||
+      selectedManifest.configFields.length === 0
+    ) {
       setConfigDraft({});
       setConfigError(null);
       setConfigWarnings([]);
@@ -204,7 +208,7 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
     setConfigError(null);
     setConfigWarnings([]);
     setConfigStatus(buildGenerationStatus(readNotebookflowMetadata(selected.metadata)));
-  }, [selected?.id, selectedManifest]);
+  }, [selected?.id, selectedManifest, selected?.metadata, selected]);
 
   const handleApplySelectedConfig = useCallback((): void => {
     if (selected === null || selectedManifest === null) {
@@ -212,7 +216,9 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
     }
 
     const nextConfig = sanitizeConfigForManifest(selectedManifest, configDraft);
-    const currentSource = stripMarkerLine(bridge.readCells()[selected.cellIndices[0] ?? 0]?.source ?? "");
+    const currentSource = stripMarkerLine(
+      bridge.readCells()[selected.cellIndices[0] ?? 0]?.source ?? "",
+    );
     setConfigError(null);
     setConfigWarnings([]);
     setIsConfigSubmitting(true);

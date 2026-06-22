@@ -105,9 +105,9 @@ describe("SyncEngine.ingestNotebook", () => {
     const withoutRef: NotebookCell[] = cells.map((c, idx) =>
       idx === 2
         ? {
-          cellType: "code",
-          source: "# @node: Filter  [transform]  out=clean_df\nclean_df = df\n",
-        }
+            cellType: "code",
+            source: "# @node: Filter  [transform]  out=clean_df\nclean_df = df\n",
+          }
         : c,
     );
     await engine.ingestNotebook(TWO_NODE_PATH, withoutRef, 200);

@@ -39,15 +39,15 @@ export interface PipelineDef {
 export type NbOutput =
   | { output_type: "stream"; name: "stdout" | "stderr"; text: string }
   | {
-    output_type: "display_data";
-    data: Record<string, string>;
-    metadata: Record<string, unknown>;
-  }
+      output_type: "display_data";
+      data: Record<string, string>;
+      metadata: Record<string, unknown>;
+    }
   | {
-    output_type: "execute_result";
-    data: Record<string, string>;
-    metadata: Record<string, unknown>;
-  }
+      output_type: "execute_result";
+      data: Record<string, string>;
+      metadata: Record<string, unknown>;
+    }
   | { output_type: "error"; ename: string; evalue: string; traceback: string[] };
 
 interface ExecutionResultMsg {

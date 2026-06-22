@@ -7,8 +7,8 @@
  */
 
 export { Canvas } from "./components/Canvas";
-export { NodeConfigEditor } from "./components/NodeConfigEditor";
 export { NotebookNode } from "./components/Node";
+export { NodeConfigEditor } from "./components/NodeConfigEditor";
 export { NodeGroup } from "./components/NodeGroup";
 export { Wire } from "./components/Wire";
 export type {

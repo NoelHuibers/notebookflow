@@ -245,7 +245,7 @@ export class CanvasWebviewPanel {
       const message = err instanceof Error ? err.message : "unknown error";
       return fallbackHtml(
         `Could not read the webview bundle at ${indexPath}. Did you run ` +
-        `\`pnpm --filter @notebookflow/vscode-extension build\`? Underlying error: ${message}`,
+          `\`pnpm --filter @notebookflow/vscode-extension build\`? Underlying error: ${message}`,
       );
     }
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
+from typing import Any
 
 import httpx
 
@@ -229,7 +230,7 @@ def _openai_api_key() -> str | None:
     return os.environ.get("NOTEBOOKFLOW_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
 
 
-def _extract_message_text(payload: dict[str, object]) -> str:
+def _extract_message_text(payload: dict[str, Any]) -> str:
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices:
         return ""

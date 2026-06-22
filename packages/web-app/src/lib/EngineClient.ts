@@ -48,15 +48,15 @@ export interface PipelineDef {
 export type NbOutput =
   | { output_type: "stream"; name: "stdout" | "stderr"; text: string }
   | {
-    output_type: "display_data";
-    data: Record<string, string>;
-    metadata: Record<string, unknown>;
-  }
+      output_type: "display_data";
+      data: Record<string, string>;
+      metadata: Record<string, unknown>;
+    }
   | {
-    output_type: "execute_result";
-    data: Record<string, string>;
-    metadata: Record<string, unknown>;
-  }
+      output_type: "execute_result";
+      data: Record<string, string>;
+      metadata: Record<string, unknown>;
+    }
   | { output_type: "error"; ename: string; evalue: string; traceback: string[] };
 
 export interface ExecutionResultMsg {
@@ -96,8 +96,8 @@ function resolveEngineUrl(): string {
   if (!/^wss?:\/\//.test(trimmed)) {
     console.warn(
       `VITE_NOTEBOOKFLOW_ENGINE_URL is "${trimmed}" — expected ws:// or wss:// URL. ` +
-      `Check the Value field in your Vercel env vars: it should be the URL only, ` +
-      `not "KEY=VALUE". Falling back to ${FALLBACK_ENGINE_URL}.`,
+        `Check the Value field in your Vercel env vars: it should be the URL only, ` +
+        `not "KEY=VALUE". Falling back to ${FALLBACK_ENGINE_URL}.`,
     );
     return FALLBACK_ENGINE_URL;
   }

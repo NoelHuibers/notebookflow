@@ -13,10 +13,10 @@
 import type { GraphModel, NodeManifestDef, NodeModel } from "@notebookflow/graph-canvas";
 import {
   Canvas,
-  NodeConfigEditor,
   configValuesEqual,
   defaultConfigForManifest,
   hasMissingRequiredConfig,
+  NodeConfigEditor,
   readNotebookflowMetadata,
   resolveNodeConfig,
   sanitizeConfigForManifest,
@@ -129,7 +129,7 @@ export function App(): ReactElement {
   }, [notebook]);
 
   useEffect(() => {
-    setSelected((current) => (current === null ? null : graph.nodes[current.id] ?? null));
+    setSelected((current) => (current === null ? null : (graph.nodes[current.id] ?? null)));
   }, [graph]);
 
   const handleFile = useCallback((text: string, name: string): void => {
@@ -276,7 +276,7 @@ export function App(): ReactElement {
 
   const selectedManifest = useMemo(() => {
     const manifestId = readNotebookflowMetadata(selected?.metadata).manifestId;
-    return manifestId === undefined ? null : manifestById.get(manifestId) ?? null;
+    return manifestId === undefined ? null : (manifestById.get(manifestId) ?? null);
   }, [manifestById, selected?.metadata]);
 
   const selectedAppliedConfig = useMemo(() => {
@@ -297,7 +297,11 @@ export function App(): ReactElement {
     !isConfigDirty;
 
   useEffect(() => {
-    if (selected === null || selectedManifest === null || selectedManifest.configFields.length === 0) {
+    if (
+      selected === null ||
+      selectedManifest === null ||
+      selectedManifest.configFields.length === 0
+    ) {
       setConfigDraft({});
       setConfigError(null);
       setConfigWarnings([]);
@@ -308,7 +312,7 @@ export function App(): ReactElement {
     setConfigError(null);
     setConfigWarnings([]);
     setConfigStatus(buildGenerationStatus(readNotebookflowMetadata(selected.metadata)));
-  }, [selected?.id, selectedManifest]);
+  }, [selected?.id, selectedManifest, selected?.metadata, selected]);
 
   const handleApplySelectedConfig = useCallback((): void => {
     const engine = engineRef.current;
@@ -317,7 +321,9 @@ export function App(): ReactElement {
     }
 
     const nextConfig = sanitizeConfigForManifest(selectedManifest, configDraft);
-    const currentSource = stripMarkerLine(notebook.cells[selected.cellIndices[0] ?? 0]?.source ?? "");
+    const currentSource = stripMarkerLine(
+      notebook.cells[selected.cellIndices[0] ?? 0]?.source ?? "",
+    );
     setConfigError(null);
     setConfigWarnings([]);
     setIsConfigSubmitting(true);

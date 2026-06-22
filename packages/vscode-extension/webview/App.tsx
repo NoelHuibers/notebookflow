@@ -24,10 +24,10 @@ import type {
 } from "@notebookflow/graph-canvas";
 import {
   Canvas,
-  NodeConfigEditor,
   configValuesEqual,
   defaultConfigForManifest,
   hasMissingRequiredConfig,
+  NodeConfigEditor,
   readNotebookflowMetadata,
   resolveNodeConfig,
   sanitizeConfigForManifest,
@@ -93,15 +93,15 @@ interface EdgeDef {
 type NbOutput =
   | { output_type: "stream"; name: "stdout" | "stderr"; text: string }
   | {
-    output_type: "display_data";
-    data: Record<string, string>;
-    metadata: Record<string, unknown>;
-  }
+      output_type: "display_data";
+      data: Record<string, string>;
+      metadata: Record<string, unknown>;
+    }
   | {
-    output_type: "execute_result";
-    data: Record<string, string>;
-    metadata: Record<string, unknown>;
-  }
+      output_type: "execute_result";
+      data: Record<string, string>;
+      metadata: Record<string, unknown>;
+    }
   | { output_type: "error"; ename: string; evalue: string; traceback: string[] };
 
 interface ExecutionResultMsg {
@@ -194,7 +194,7 @@ export function App(): ReactElement {
   }, []);
 
   useEffect(() => {
-    setSelected((current) => (current === null ? null : graph.nodes[current.id] ?? null));
+    setSelected((current) => (current === null ? null : (graph.nodes[current.id] ?? null)));
   }, [graph]);
 
   const handleRename = (nodeId: string, nextName: string): void => {
@@ -286,7 +286,7 @@ export function App(): ReactElement {
 
   const selectedManifest = useMemo(() => {
     const manifestId = readNotebookflowMetadata(selected?.metadata).manifestId;
-    return manifestId === undefined ? null : manifestById.get(manifestId) ?? null;
+    return manifestId === undefined ? null : (manifestById.get(manifestId) ?? null);
   }, [manifestById, selected?.metadata]);
 
   const selectedAppliedConfig = useMemo(() => {
@@ -307,7 +307,11 @@ export function App(): ReactElement {
     !isConfigDirty;
 
   useEffect(() => {
-    if (selected === null || selectedManifest === null || selectedManifest.configFields.length === 0) {
+    if (
+      selected === null ||
+      selectedManifest === null ||
+      selectedManifest.configFields.length === 0
+    ) {
       setConfigDraft({});
       setConfigError(null);
       setConfigWarnings([]);
@@ -318,7 +322,7 @@ export function App(): ReactElement {
     setConfigError(null);
     setConfigWarnings([]);
     setConfigStatus(buildGenerationStatus(readNotebookflowMetadata(selected.metadata)));
-  }, [selected?.id, selectedManifest]);
+  }, [selected?.id, selectedManifest, selected?.metadata, selected]);
 
   const handleApplySelectedConfig = useCallback((): void => {
     const engine = engineRef.current;

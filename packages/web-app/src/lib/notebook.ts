@@ -110,9 +110,9 @@ function mergeCell(updated: NotebookCell, original?: IpynbCell, outputs?: NbOutp
     metadata: cloneMetadata(updated.metadata) ?? cloneMetadata(base.metadata) ?? {},
     ...(updated.cellType === "code"
       ? {
-        execution_count: base.execution_count ?? null,
-        outputs: outputs ?? base.outputs ?? [],
-      }
+          execution_count: base.execution_count ?? null,
+          outputs: outputs ?? base.outputs ?? [],
+        }
       : {}),
   };
 }

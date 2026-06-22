@@ -42,7 +42,7 @@ export interface NotebookCell {
   metadata?: Record<string, unknown>;
 }
 
-class MarkerParseError extends Error { }
+class MarkerParseError extends Error {}
 
 type MarkerBody = Omit<NodeMarker, "notebookPath" | "cellIndex">;
 

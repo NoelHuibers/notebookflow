@@ -108,7 +108,9 @@ export function hasMissingRequiredConfig(
   manifest: NodeManifestDef,
   values: Record<string, string>,
 ): boolean {
-  return manifest.configFields.some((field) => field.required && (values[field.key] ?? "").trim() === "");
+  return manifest.configFields.some(
+    (field) => field.required && (values[field.key] ?? "").trim() === "",
+  );
 }
 
 export function readNotebookflowMetadata(

@@ -327,7 +327,10 @@ async def synthesize_node(request: SynthesizeNodeRequest) -> SynthesizeNodeRespo
     try:
         manifest = registry.get(request.manifest_id)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=f"unknown manifest id: {request.manifest_id}") from exc
+        raise HTTPException(
+            status_code=404,
+            detail=f"unknown manifest id: {request.manifest_id}",
+        ) from exc
 
     try:
         result = await _code_synth(app).synthesize(

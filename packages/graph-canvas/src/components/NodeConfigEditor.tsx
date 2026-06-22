@@ -20,8 +20,7 @@ const PANEL_BORDER = "var(--notebookflow-config-border, var(--border, #d1d5db))"
 const PANEL_FG = "var(--notebookflow-config-fg, var(--foreground, #111827))";
 const PANEL_MUTED = "var(--notebookflow-config-muted, var(--muted-foreground, #6b7280))";
 const PANEL_ACCENT = "var(--notebookflow-config-accent, var(--primary, #2563eb))";
-const PANEL_ACCENT_FG =
-  "var(--notebookflow-config-accent-fg, var(--primary-foreground, #ffffff))";
+const PANEL_ACCENT_FG = "var(--notebookflow-config-accent-fg, var(--primary-foreground, #ffffff))";
 const PANEL_FONT =
   "var(--notebookflow-font-family, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif)";
 
@@ -46,7 +45,9 @@ export function NodeConfigEditor(props: NodeConfigEditorProps): ReactElement {
       <div style={styles.headerRow}>
         <div>
           <div style={styles.title}>Config</div>
-          <div style={styles.subtitle}>Managed separately from the node's input and output ports.</div>
+          <div style={styles.subtitle}>
+            Managed separately from the node's input and output ports.
+          </div>
         </div>
         <span style={styles.modeBadge}>{manifest.generationMode}</span>
       </div>
@@ -56,17 +57,21 @@ export function NodeConfigEditor(props: NodeConfigEditorProps): ReactElement {
       <div style={styles.fields}>
         {manifest.configFields.map((field) => {
           const value = values[field.key] ?? "";
+          const inputId = `nodeconfig-${field.key}`;
 
           return (
-            <label key={field.key} style={styles.fieldLabel}>
+            <label key={field.key} htmlFor={inputId} style={styles.fieldLabel}>
               <span style={styles.fieldTitle}>
                 {field.label}
                 {field.required ? <span style={styles.requiredMark}> *</span> : null}
               </span>
-              {field.description !== "" && <span style={styles.fieldDescription}>{field.description}</span>}
+              {field.description !== "" && (
+                <span style={styles.fieldDescription}>{field.description}</span>
+              )}
 
               {field.kind === "textarea" ? (
                 <textarea
+                  id={inputId}
                   value={value}
                   rows={4}
                   disabled={isSubmitting}
@@ -78,6 +83,7 @@ export function NodeConfigEditor(props: NodeConfigEditorProps): ReactElement {
                 />
               ) : field.kind === "select" ? (
                 <select
+                  id={inputId}
                   value={value}
                   disabled={isSubmitting}
                   onChange={(event) => {
@@ -93,6 +99,7 @@ export function NodeConfigEditor(props: NodeConfigEditorProps): ReactElement {
                 </select>
               ) : (
                 <input
+                  id={inputId}
                   type="text"
                   value={value}
                   disabled={isSubmitting}
