@@ -29,7 +29,7 @@ import {
 } from "@notebookflow/graph-canvas";
 import type { CellPatch, NotebookCell } from "@notebookflow/graph-canvas/sync";
 import { SyncEngine } from "@notebookflow/graph-canvas/sync";
-import { Download, Play, RotateCcw } from "lucide-react";
+import { Download, Play, RotateCcw, Save } from "lucide-react";
 import type {
   ReactElement,
   KeyboardEvent as ReactKeyboardEvent,
@@ -45,8 +45,9 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { EngineEvent, NbOutput, PipelineDef } from "@/lib/EngineClient";
 import { EngineClient } from "@/lib/EngineClient";
+import { canSaveInPlace, pickSaveFileHandle, writeFileHandle } from "@/lib/fileSystemAccess";
 import type { IpynbDoc } from "@/lib/notebook";
-import { downloadNotebook, parseNotebook, toIpynbCell } from "@/lib/notebook";
+import { downloadNotebook, parseNotebook, serializeNotebook, toIpynbCell } from "@/lib/notebook";
 import { cn } from "@/lib/utils";
 
 import twoNode from "./fixtures/two-node.ipynb.json";
@@ -112,6 +113,8 @@ export function App(): ReactElement {
   const [dragState, setDragState] = useState<DragState | null>(null);
   const engineRef = useRef<SyncEngine | null>(null);
   const clientRef = useRef<EngineClient>(new EngineClient());
+  const fileHandleRef = useRef<FileSystemFileHandle | null>(null);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const contentRef = useRef<HTMLDivElement | null>(null);
   const topPaneRef = useRef<HTMLDivElement | null>(null);
   const canvasPaneRef = useRef<HTMLDivElement | null>(null);
@@ -153,6 +156,8 @@ export function App(): ReactElement {
       setOutputsByCell({});
       setRuntimeByNode({});
       setTimingByNode({});
+      fileHandleRef.current = null;
+      setSaveStatus("idle");
       setError(null);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "unknown error";
@@ -460,6 +465,47 @@ export function App(): ReactElement {
     downloadNotebook(notebook.cells, notebook.doc, notebook.name, outputsByCell);
   }, [notebook, outputsByCell]);
 
+  const handleSave = useCallback(async (): Promise<void> => {
+    setSaveStatus("saving");
+    try {
+      let handle = fileHandleRef.current;
+      if (handle === null) {
+        const suggestedName = notebook.name.endsWith(".ipynb")
+          ? notebook.name
+          : `${notebook.name}.ipynb`;
+        const picked = await pickSaveFileHandle({
+          suggestedName,
+          types: [
+            {
+              description: "Jupyter notebook",
+              accept: { "application/x-ipynb+json": [".ipynb"] },
+            },
+          ],
+        });
+        if (picked === null) {
+          setSaveStatus("idle");
+          return;
+        }
+        handle = picked;
+        fileHandleRef.current = picked;
+      }
+      const json = serializeNotebook(notebook.cells, notebook.doc, outputsByCell);
+      await writeFileHandle(handle, json);
+      setSaveStatus("saved");
+      window.setTimeout(() => {
+        setSaveStatus("idle");
+      }, 1500);
+    } catch (err: unknown) {
+      setSaveStatus("idle");
+      // User-cancelled picker raises AbortError -- treat as a no-op, not an error.
+      if (err instanceof Error && err.name === "AbortError") {
+        return;
+      }
+      const message = err instanceof Error ? err.message : "unknown error";
+      setError(`Save failed: ${message}`);
+    }
+  }, [notebook, outputsByCell]);
+
   const handleReingest = useCallback((): void => {
     const engine = engineRef.current;
     if (engine === null) {
@@ -739,6 +785,24 @@ export function App(): ReactElement {
               <RotateCcw className="mr-1.5 size-3.5" />
               Re-ingest
             </Button>
+            {canSaveInPlace && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  void handleSave();
+                }}
+                disabled={saveStatus === "saving"}
+                title={
+                  fileHandleRef.current === null
+                    ? "Pick a file once; subsequent saves overwrite it"
+                    : "Save changes back to disk"
+                }
+              >
+                <Save className="mr-1.5 size-3.5" />
+                {saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "Saved" : "Save"}
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={handleDownload}>
               <Download className="mr-1.5 size-3.5" />
               Download
