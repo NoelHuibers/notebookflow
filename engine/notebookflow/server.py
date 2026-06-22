@@ -18,6 +18,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import secrets
 import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -26,7 +27,7 @@ from typing import Any
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -70,6 +71,31 @@ def load_engine_env(search_roots: tuple[Path, ...] | None = None) -> list[Path]:
 
 
 _LOADED_ENV_FILES = load_engine_env()
+
+
+def _expected_token() -> str:
+    """Look up the shared secret each request. Reading per-request lets tests
+    monkeypatch the env var without restarting the app."""
+    return os.environ.get("NOTEBOOKFLOW_AUTH_TOKEN", "")
+
+
+def require_auth(request: Request) -> None:
+    """FastAPI dependency: require a matching `Authorization: Bearer ...` header.
+
+    No-op when the token env var is unset or empty, so local development and
+    self-hosted single-user deploys don't need any config. When the variable
+    is set, every protected route rejects missing or mismatched tokens with
+    401. Tokens compared via secrets.compare_digest to dodge timing attacks.
+    """
+    expected = _expected_token()
+    if expected == "":
+        return
+    header = request.headers.get("Authorization", "")
+    if not header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="missing bearer token")
+    presented = header.removeprefix("Bearer ").strip()
+    if not secrets.compare_digest(presented, expected):
+        raise HTTPException(status_code=401, detail="invalid bearer token")
 
 
 class _APIModel(BaseModel):
@@ -316,12 +342,16 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/nodes")
+@app.get("/nodes", dependencies=[Depends(require_auth)])
 async def list_nodes() -> list[dict[str, object]]:
     return [m.model_dump(mode="json", by_alias=True) for m in _registry(app).all()]
 
 
-@app.post("/nodes/synthesize", response_model=SynthesizeNodeResponse)
+@app.post(
+    "/nodes/synthesize",
+    response_model=SynthesizeNodeResponse,
+    dependencies=[Depends(require_auth)],
+)
 async def synthesize_node(request: SynthesizeNodeRequest) -> SynthesizeNodeResponse:
     registry = _registry(app)
     try:
@@ -355,7 +385,11 @@ async def synthesize_node(request: SynthesizeNodeRequest) -> SynthesizeNodeRespo
     )
 
 
-@app.post("/cells/analyze", response_model=AnalyzeResponse)
+@app.post(
+    "/cells/analyze",
+    response_model=AnalyzeResponse,
+    dependencies=[Depends(require_auth)],
+)
 async def analyze_cells(request: AnalyzeRequest) -> AnalyzeResponse:
     """Static analysis used by the canvas to autocomplete port variable names.
 
@@ -366,7 +400,11 @@ async def analyze_cells(request: AnalyzeRequest) -> AnalyzeResponse:
     return AnalyzeResponse(cells=[_analyze_cell(cell.source) for cell in request.cells])
 
 
-@app.post("/pipelines/{pipeline_id}/run", response_model=RunResponse)
+@app.post(
+    "/pipelines/{pipeline_id}/run",
+    response_model=RunResponse,
+    dependencies=[Depends(require_auth)],
+)
 async def run_pipeline(pipeline_id: str, pipeline: PipelineDef) -> RunResponse:
     results = await _run_pipeline(pipeline)
     return RunResponse(
@@ -387,7 +425,19 @@ async def ws(websocket: WebSocket) -> None:
 
     Bad input echoes back as ``{"type": "error", "message": "..."}`` and the
     connection stays open so the client can recover.
+
+    Auth: when NOTEBOOKFLOW_AUTH_TOKEN is set, the client must present the
+    same token as a ``?token=...`` query parameter (browsers can't attach
+    Authorization headers to WebSocket connections, so a URL parameter is
+    the lowest-friction option). The handshake is rejected with code 1008
+    (Policy Violation) when the token is missing or mismatched.
     """
+    expected = _expected_token()
+    if expected != "":
+        presented = websocket.query_params.get("token", "")
+        if not secrets.compare_digest(presented, expected):
+            await websocket.close(code=1008, reason="unauthorized")
+            return
     await websocket.accept()
     try:
         while True:

@@ -106,6 +106,21 @@ function resolveEngineUrl(): string {
 
 export const DEFAULT_ENGINE_URL = resolveEngineUrl();
 
+/**
+ * Optional shared-secret token for engines deployed with
+ * NOTEBOOKFLOW_AUTH_TOKEN set. Empty means "auth disabled" -- the client
+ * sends no Authorization header and skips the WS token query param.
+ */
+function resolveEngineToken(): string {
+  const raw = import.meta.env.VITE_NOTEBOOKFLOW_ENGINE_TOKEN;
+  if (raw === undefined) {
+    return "";
+  }
+  return raw.trim();
+}
+
+export const DEFAULT_ENGINE_TOKEN = resolveEngineToken();
+
 export interface RunOptions {
   pipelineId: string;
   pipeline: PipelineDef;
@@ -115,17 +130,31 @@ export interface RunOptions {
 
 export class EngineClient {
   private readonly url: string;
+  private readonly token: string;
 
-  constructor(url: string = DEFAULT_ENGINE_URL) {
+  constructor(url: string = DEFAULT_ENGINE_URL, token: string = DEFAULT_ENGINE_TOKEN) {
     this.url = url;
+    this.token = token;
   }
 
   get baseUrl(): string {
     return this.url;
   }
 
+  private authHeaders(): Record<string, string> {
+    return this.token === "" ? {} : { Authorization: `Bearer ${this.token}` };
+  }
+
+  private wsUrlWithToken(base: string): string {
+    if (this.token === "") {
+      return base;
+    }
+    const joiner = base.includes("?") ? "&" : "?";
+    return `${base}${joiner}token=${encodeURIComponent(this.token)}`;
+  }
+
   runPipeline(opts: RunOptions): Promise<void> {
-    const wsUrl = opts.url ?? this.url;
+    const wsUrl = this.wsUrlWithToken(opts.url ?? this.url);
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(wsUrl);
 
@@ -194,7 +223,7 @@ export class EngineClient {
     try {
       const res = await fetch(httpUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...this.authHeaders() },
         body: JSON.stringify({ cells: sources.map((source) => ({ source })) }),
       });
       if (!res.ok) {
@@ -211,7 +240,7 @@ export class EngineClient {
   /** Fetch the node registry for the manifest-driven add-node palette. */
   async listNodes(): Promise<NodeManifestDef[]> {
     const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/nodes");
-    const res = await fetch(httpUrl);
+    const res = await fetch(httpUrl, { headers: this.authHeaders() });
     if (!res.ok) {
       throw new Error(`EngineClient.listNodes: ${res.status} ${res.statusText}`);
     }
@@ -222,7 +251,7 @@ export class EngineClient {
     const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/nodes/synthesize");
     const res = await fetch(httpUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...this.authHeaders() },
       body: JSON.stringify(request),
     });
     if (!res.ok) {

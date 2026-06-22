@@ -2,6 +2,7 @@
 
 interface ImportMetaEnv {
   readonly VITE_NOTEBOOKFLOW_ENGINE_URL?: string;
+  readonly VITE_NOTEBOOKFLOW_ENGINE_TOKEN?: string;
 }
 
 interface ImportMeta {

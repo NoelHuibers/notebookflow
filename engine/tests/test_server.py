@@ -356,3 +356,92 @@ def test_ws_run_failure_streams_skipped_for_downstream(client: TestClient) -> No
                 break
             statuses.append(msg["result"]["status"])
         assert statuses == ["ok", "error", "skipped"]
+
+
+# ---------------------------------------------------------------------------
+# Bearer-token auth (NOTEBOOKFLOW_AUTH_TOKEN)
+# ---------------------------------------------------------------------------
+
+
+def test_health_remains_unauthenticated_when_token_set(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    r = client.get("/health")
+    assert r.status_code == 200
+
+
+def test_list_nodes_rejects_request_without_bearer_when_token_set(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    r = client.get("/nodes")
+    assert r.status_code == 401
+    assert "bearer" in r.json()["detail"].lower()
+
+
+def test_list_nodes_rejects_request_with_wrong_token(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    r = client.get("/nodes", headers={"Authorization": "Bearer not-the-right-one"})
+    assert r.status_code == 401
+
+
+def test_list_nodes_accepts_request_with_matching_token(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    r = client.get("/nodes", headers={"Authorization": "Bearer shh-secret"})
+    assert r.status_code == 200
+    assert isinstance(r.json(), list)
+
+
+def test_run_pipeline_rejects_request_without_bearer_when_token_set(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    r = client.post("/pipelines/demo/run", json=_linear_pipeline())
+    assert r.status_code == 401
+
+
+def test_run_pipeline_accepts_request_with_matching_token(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    r = client.post(
+        "/pipelines/demo/run",
+        json=_linear_pipeline(),
+        headers={"Authorization": "Bearer shh-secret"},
+    )
+    assert r.status_code == 200
+
+
+def test_ws_rejects_handshake_without_token_query_param_when_token_set(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from starlette.websockets import WebSocketDisconnect as StarletteWSDisconnect
+
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    with pytest.raises(StarletteWSDisconnect):
+        with client.websocket_connect("/ws") as ws:
+            ws.receive_json()
+
+
+def test_ws_accepts_handshake_with_matching_token_query_param(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    with client.websocket_connect("/ws?token=shh-secret") as ws:
+        ws.send_json({"type": "run", "pipelineId": "auth", "pipeline": _linear_pipeline()})
+        started = ws.receive_json()
+        assert started["type"] == "executionStarted"
+
+
+def test_empty_token_env_var_disables_auth(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "")
+    # No Authorization header -- should still succeed.
+    r = client.get("/nodes")
+    assert r.status_code == 200
