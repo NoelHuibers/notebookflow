@@ -90,6 +90,10 @@ export function App(): ReactElement {
   const [isConfigSubmitting, setIsConfigSubmitting] = useState(false);
   const [paletteNodes, setPaletteNodes] = useState<NodeManifestDef[]>([]);
   const [paletteError, setPaletteError] = useState<string | null>(null);
+  const [paletteSearch, setPaletteSearch] = useState("");
+  const [paletteTagFilter, setPaletteTagFilter] = useState<Set<NodeManifestDef["tag"]>>(
+    () => new Set(),
+  );
   const [notebookRatio, setNotebookRatio] = useState(DEFAULT_NOTEBOOK_RATIO);
   const [mainRatio, setMainRatio] = useState(DEFAULT_MAIN_RATIO);
   const [paletteWidth, setPaletteWidth] = useState(DEFAULT_PALETTE_WIDTH_PX);
@@ -273,6 +277,40 @@ export function App(): ReactElement {
     () => new Map(paletteNodes.map((manifest) => [manifest.id, manifest] as const)),
     [paletteNodes],
   );
+
+  const filteredPaletteNodes = useMemo(() => {
+    const query = paletteSearch.trim().toLowerCase();
+    return paletteNodes.filter((manifest) => {
+      if (paletteTagFilter.size > 0 && !paletteTagFilter.has(manifest.tag)) {
+        return false;
+      }
+      if (query === "") {
+        return true;
+      }
+      return (
+        manifest.name.toLowerCase().includes(query) ||
+        manifest.id.toLowerCase().includes(query) ||
+        manifest.description.toLowerCase().includes(query)
+      );
+    });
+  }, [paletteNodes, paletteSearch, paletteTagFilter]);
+
+  const togglePaletteTag = useCallback((tag: NodeManifestDef["tag"]) => {
+    setPaletteTagFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) {
+        next.delete(tag);
+      } else {
+        next.add(tag);
+      }
+      return next;
+    });
+  }, []);
+
+  const clearPaletteFilters = useCallback(() => {
+    setPaletteTagFilter(new Set());
+    setPaletteSearch("");
+  }, []);
 
   const selectedManifest = useMemo(() => {
     const manifestId = readNotebookflowMetadata(selected?.metadata).manifestId;
@@ -720,7 +758,9 @@ export function App(): ReactElement {
                 <span>Canvas</span>
                 <div className="flex items-center gap-2">
                   <Badge variant="outline" className="font-mono text-[10px]">
-                    {paletteNodes.length}
+                    {filteredPaletteNodes.length === paletteNodes.length
+                      ? paletteNodes.length
+                      : `${String(filteredPaletteNodes.length)}/${String(paletteNodes.length)}`}
                   </Badge>
                   <Button
                     variant="ghost"
@@ -762,9 +802,56 @@ export function App(): ReactElement {
                     <div className="flex items-center gap-2 border-b px-4 py-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
                       Palette
                       <Badge variant="outline" className="font-mono text-[10px]">
-                        {paletteNodes.length}
+                        {filteredPaletteNodes.length === paletteNodes.length
+                          ? paletteNodes.length
+                          : `${String(filteredPaletteNodes.length)}/${String(paletteNodes.length)}`}
                       </Badge>
                     </div>
+                    {paletteNodes.length > 0 && (
+                      <div className="flex flex-col gap-2 border-b px-3 py-2">
+                        <input
+                          type="text"
+                          value={paletteSearch}
+                          onChange={(event) => {
+                            setPaletteSearch(event.target.value);
+                          }}
+                          placeholder="Search nodes…"
+                          aria-label="Search nodes"
+                          className="rounded border bg-background px-2 py-1 text-[11px] outline-none focus:ring-1 focus:ring-ring"
+                        />
+                        <div className="flex flex-wrap gap-1">
+                          <button
+                            type="button"
+                            onClick={clearPaletteFilters}
+                            className={cn(
+                              "rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors",
+                              paletteTagFilter.size === 0
+                                ? "border-foreground bg-foreground text-background"
+                                : "bg-background text-muted-foreground hover:bg-muted/70",
+                            )}
+                          >
+                            all
+                          </button>
+                          {TAG_ORDER.map((tag) => (
+                            <button
+                              key={tag}
+                              type="button"
+                              onClick={() => {
+                                togglePaletteTag(tag);
+                              }}
+                              className={cn(
+                                "rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors",
+                                paletteTagFilter.has(tag)
+                                  ? "border-foreground bg-foreground text-background"
+                                  : "bg-background text-muted-foreground hover:bg-muted/70",
+                              )}
+                            >
+                              {tag}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <ScrollArea className="min-h-0 flex-1">
                       <div className="flex flex-col gap-3 p-3">
                         {paletteError !== null ? (
@@ -773,8 +860,12 @@ export function App(): ReactElement {
                           <p className="text-[11px] italic text-muted-foreground">
                             Loading node registry…
                           </p>
+                        ) : filteredPaletteNodes.length === 0 ? (
+                          <p className="text-[11px] italic text-muted-foreground">
+                            No nodes match the current search or filter.
+                          </p>
                         ) : (
-                          groupPalette(paletteNodes).map(([tag, nodes]) => (
+                          groupPalette(filteredPaletteNodes).map(([tag, nodes]) => (
                             <section key={tag} className="flex flex-col gap-2">
                               <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
                                 {tag}
