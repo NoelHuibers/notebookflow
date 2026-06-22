@@ -12,9 +12,9 @@
 import type { ReactElement } from "react";
 import { useCallback, useMemo } from "react";
 import type { Connection, Edge, EdgeTypes, Node, NodeTypes } from "reactflow";
-import { Background, Controls, ReactFlow } from "reactflow";
+import { Background, Controls, MiniMap, Panel, ReactFlow } from "reactflow";
 
-import type { GraphModel, NodeModel, RuntimeState, WireModel } from "../types";
+import type { GraphModel, NodeModel, NodeTag, RuntimeState, WireModel } from "../types";
 import type { NotebookNodeData } from "./Node";
 import { NotebookNode } from "./Node";
 import type { NodeGroupData } from "./NodeGroup";
@@ -26,6 +26,23 @@ const NODE_TYPES = {
   notebook: NotebookNode,
   group: NodeGroup,
 } satisfies NodeTypes;
+
+const MINIMAP_TAG_COLOR: Record<NodeTag, string> = {
+  input: "#3b82f6",
+  transform: "#10b981",
+  output: "#ef4444",
+  ai: "#a855f7",
+  io: "#f97316",
+};
+
+function miniMapNodeColor(node: Node): string {
+  if (node.type === "group") {
+    return "#9ca3af";
+  }
+  const data = node.data as NotebookNodeData | undefined;
+  const tag = data?.tag;
+  return tag === undefined ? "#9ca3af" : MINIMAP_TAG_COLOR[tag];
+}
 
 const EDGE_TYPES = {
   wire: Wire,
@@ -185,6 +202,17 @@ export function Canvas(props: CanvasProps): ReactElement {
     >
       <Background />
       <Controls />
+      <MiniMap
+        nodeColor={miniMapNodeColor}
+        nodeStrokeWidth={2}
+        pannable
+        zoomable
+        position="bottom-right"
+        ariaLabel="Canvas minimap"
+      />
+      <Panel position="top-left">
+        <KeyboardLegend />
+      </Panel>
     </ReactFlow>
   );
 }
@@ -285,6 +313,48 @@ function buildNodes(
   }
 
   return rfNodes;
+}
+
+const LEGEND_STYLE = {
+  display: "flex",
+  gap: 12,
+  alignItems: "center",
+  padding: "4px 10px",
+  borderRadius: 6,
+  background: "var(--notebookflow-legend-bg, rgba(255, 255, 255, 0.86))",
+  color: "var(--notebookflow-legend-fg, #4b5563)",
+  fontSize: 10,
+  fontFamily: "var(--notebookflow-font-family, ui-sans-serif, system-ui, sans-serif)",
+  letterSpacing: "0.02em",
+  border: "1px solid var(--notebookflow-legend-border, #e5e7eb)",
+  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.05)",
+  pointerEvents: "none",
+} as const;
+
+const LEGEND_KEY_STYLE = {
+  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+  fontSize: 9.5,
+  color: "var(--notebookflow-legend-fg, #1f2937)",
+  marginRight: 4,
+} as const;
+
+function KeyboardLegend(): ReactElement {
+  return (
+    <div role="img" aria-label="Canvas gesture hints" style={LEGEND_STYLE}>
+      <span>
+        <span style={LEGEND_KEY_STYLE}>drag</span>pan
+      </span>
+      <span>
+        <span style={LEGEND_KEY_STYLE}>⌘ + wheel</span>zoom
+      </span>
+      <span>
+        <span style={LEGEND_KEY_STYLE}>click</span>select
+      </span>
+      <span>
+        <span style={LEGEND_KEY_STYLE}>dblclick</span>rename
+      </span>
+    </div>
+  );
 }
 
 function buildRfEdges(graph: GraphModel): Edge<WireData>[] {
