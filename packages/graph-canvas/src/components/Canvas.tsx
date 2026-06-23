@@ -10,10 +10,19 @@
  */
 
 import dagre from "dagre";
-import type { ChangeEvent, ReactElement } from "react";
+import type { ChangeEvent, DragEvent, ReactElement } from "react";
 import { useCallback, useMemo, useState } from "react";
 import type { Connection, Edge, EdgeTypes, Node, NodeTypes } from "reactflow";
-import { Background, Controls, MiniMap, Panel, ReactFlow, useStore } from "reactflow";
+import {
+  Background,
+  Controls,
+  MiniMap,
+  Panel,
+  ReactFlow,
+  ReactFlowProvider,
+  useReactFlow,
+  useStore,
+} from "reactflow";
 
 import type { GraphModel, NodeModel, NodeTag, RunSummary, RuntimeState, WireModel } from "../types";
 import type { NotebookNodeData } from "./Node";
@@ -65,6 +74,13 @@ const DAGRE_NODESEP = 50;
 
 export type CanvasLayout = "manual" | "dagre";
 
+/**
+ * MIME type used by the node-library palette to ship a manifest id through
+ * the drag-and-drop dataTransfer payload. Hosts that render a palette set
+ * this on `onDragStart`; Canvas reads it on `onDrop`.
+ */
+export const NODE_DRAG_MIME = "application/notebookflow-manifest";
+
 const FLOW_STYLE = {
   width: "100%",
   height: "100%",
@@ -106,9 +122,25 @@ export interface CanvasProps {
    * overlay. Hosts compute it from pipelineCompleted events.
    */
   runSummary?: RunSummary | null;
+  /**
+   * Fired when the user drops a palette item onto the canvas. The position
+   * is in React Flow coordinates (already projected from screen space).
+   * Hosts typically look the manifest up and call their createNode flow.
+   */
+  onPaneDrop?: (manifestId: string, position: { x: number; y: number }) => void;
 }
 
 export function Canvas(props: CanvasProps): ReactElement {
+  // Wrap in a Provider so useReactFlow() works inside CanvasInner -- without
+  // this, the drop coordinate projection (screenToFlowPosition) would throw.
+  return (
+    <ReactFlowProvider>
+      <CanvasInner {...props} />
+    </ReactFlowProvider>
+  );
+}
+
+function CanvasInner(props: CanvasProps): ReactElement {
   const {
     graph,
     onNodeRename,
@@ -122,6 +154,7 @@ export function Canvas(props: CanvasProps): ReactElement {
     runtimeByNode,
     timingByNode,
     runSummary,
+    onPaneDrop,
   } = props;
 
   const [layout, setLayout] = useState<CanvasLayout>("manual");
@@ -208,47 +241,80 @@ export function Canvas(props: CanvasProps): ReactElement {
     [onWireDelete],
   );
 
+  // Drop-target wiring so the palette can drag manifests onto the canvas.
+  // Screen coordinates from the DragEvent are projected into React Flow's
+  // own coordinate space so the host can record the drop position.
+  const reactFlow = useReactFlow();
+  const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>): void => {
+    if (!event.dataTransfer.types.includes(NODE_DRAG_MIME)) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }, []);
+  const handleDrop = useCallback(
+    (event: DragEvent<HTMLDivElement>): void => {
+      if (onPaneDrop === undefined) {
+        return;
+      }
+      const manifestId = event.dataTransfer.getData(NODE_DRAG_MIME);
+      if (manifestId === "") {
+        return;
+      }
+      event.preventDefault();
+      const position = reactFlow.screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      });
+      onPaneDrop(manifestId, position);
+    },
+    [onPaneDrop, reactFlow],
+  );
+
   return (
-    <ReactFlow
-      nodes={rfNodes}
-      edges={rfEdges}
-      nodeTypes={NODE_TYPES}
-      edgeTypes={EDGE_TYPES}
-      className="notebookflow-canvas"
-      style={FLOW_STYLE}
-      onConnect={handleConnect}
-      onNodeClick={handleNodeClick}
-      onPaneClick={handlePaneClick}
-      onEdgesDelete={handleEdgesDelete}
-      nodesDraggable={false}
-      fitView
-      proOptions={{ hideAttribution: true }}
-    >
-      <Background />
-      <Controls />
-      <MiniMap
-        nodeColor={miniMapNodeColor}
-        nodeStrokeWidth={2}
-        pannable
-        zoomable
-        position="bottom-right"
-        ariaLabel="Canvas minimap"
-      />
-      <Panel position="top-left">
-        <KeyboardLegend />
-      </Panel>
-      <Panel position="top-center">
-        <LayoutSelector value={layout} onChange={setLayout} />
-      </Panel>
-      <Panel position="top-right">
-        <CanvasBreadcrumbs graph={graph} />
-      </Panel>
-      {runSummary !== undefined && runSummary !== null && (
-        <Panel position="bottom-center">
-          <RunSummaryOverlay summary={runSummary} />
+    // biome-ignore lint/a11y/noStaticElementInteractions: drop target for the palette drag-and-drop flow; keyboard equivalent is the palette's click-to-add
+    <div style={{ width: "100%", height: "100%" }} onDragOver={handleDragOver} onDrop={handleDrop}>
+      <ReactFlow
+        nodes={rfNodes}
+        edges={rfEdges}
+        nodeTypes={NODE_TYPES}
+        edgeTypes={EDGE_TYPES}
+        className="notebookflow-canvas"
+        style={FLOW_STYLE}
+        onConnect={handleConnect}
+        onNodeClick={handleNodeClick}
+        onPaneClick={handlePaneClick}
+        onEdgesDelete={handleEdgesDelete}
+        nodesDraggable={false}
+        fitView
+        proOptions={{ hideAttribution: true }}
+      >
+        <Background />
+        <Controls />
+        <MiniMap
+          nodeColor={miniMapNodeColor}
+          nodeStrokeWidth={2}
+          pannable
+          zoomable
+          position="bottom-right"
+          ariaLabel="Canvas minimap"
+        />
+        <Panel position="top-left">
+          <KeyboardLegend />
         </Panel>
-      )}
-    </ReactFlow>
+        <Panel position="top-center">
+          <LayoutSelector value={layout} onChange={setLayout} />
+        </Panel>
+        <Panel position="top-right">
+          <CanvasBreadcrumbs graph={graph} />
+        </Panel>
+        {runSummary !== undefined && runSummary !== null && (
+          <Panel position="bottom-center">
+            <RunSummaryOverlay summary={runSummary} />
+          </Panel>
+        )}
+      </ReactFlow>
+    </div>
   );
 }
 
