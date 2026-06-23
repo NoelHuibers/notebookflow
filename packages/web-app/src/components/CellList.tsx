@@ -26,6 +26,10 @@ export interface CellListProps {
    * the canvas selection-to-cells handoff.
    */
   scrollToCellIndex?: number | null;
+  /** Currently focused cell index (driven by the toolbar). */
+  focusedCellIndex?: number | null;
+  /** Notify the parent when a cell wrapper is clicked. */
+  onFocusCell?: (index: number) => void;
 }
 
 export function CellList({
@@ -33,6 +37,8 @@ export function CellList({
   onCellsChange,
   outputsByCell,
   scrollToCellIndex,
+  focusedCellIndex,
+  onFocusCell,
 }: CellListProps): ReactElement {
   const [draft, setDraft] = useState<NotebookCell[]>(cells);
   const incomingRef = useRef(cells);
@@ -104,18 +110,33 @@ export function CellList({
       {draft.length === 0 ? (
         <p className="text-sm italic text-muted-foreground">No cells yet — drop a notebook.</p>
       ) : (
-        draft.map((cell, idx) => (
-          <div key={`cell-${String(idx)}`} data-cell-index={idx}>
-            <CellEditor
-              cell={cell}
-              index={idx}
-              outputs={outputsByCell?.[idx] ?? []}
-              onChange={(next) => {
-                handleChange(idx, next);
+        draft.map((cell, idx) => {
+          const isFocused = focusedCellIndex === idx;
+          return (
+            // biome-ignore lint/a11y/noStaticElementInteractions: focus indicator on click; CellEditor itself remains keyboard-accessible
+            <div
+              key={`cell-${String(idx)}`}
+              data-cell-index={idx}
+              onMouseDown={() => {
+                onFocusCell?.(idx);
               }}
-            />
-          </div>
-        ))
+              className={
+                isFocused
+                  ? "rounded-md ring-2 ring-ring/60 ring-offset-2 ring-offset-background transition-shadow"
+                  : "transition-shadow"
+              }
+            >
+              <CellEditor
+                cell={cell}
+                index={idx}
+                outputs={outputsByCell?.[idx] ?? []}
+                onChange={(next) => {
+                  handleChange(idx, next);
+                }}
+              />
+            </div>
+          );
+        })
       )}
     </div>
   );

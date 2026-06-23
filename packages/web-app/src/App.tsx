@@ -39,6 +39,8 @@ import type {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { CellList } from "@/components/CellList";
+import type { CellKind } from "@/components/CellToolbar";
+import { CellToolbar } from "@/components/CellToolbar";
 import { EngineStatus } from "@/components/EngineStatus";
 import { FileDropZone } from "@/components/FileDropZone";
 import { Badge } from "@/components/ui/badge";
@@ -99,6 +101,9 @@ export function App(): ReactElement {
   const [runtimeByNode, setRuntimeByNode] = useState<Record<string, RuntimeState>>({});
   const [timingByNode, setTimingByNode] = useState<Record<string, number>>({});
   const [runSummary, setRunSummary] = useState<RunSummary | null>(null);
+  const [focusedCellIndex, setFocusedCellIndex] = useState<number | null>(null);
+  const [cellClipboard, setCellClipboard] = useState<NotebookCell | null>(null);
+  const [isAddCellMenuOpen, setIsAddCellMenuOpen] = useState(false);
   const [baselineSources, setBaselineSources] = useState<string[]>(() =>
     bootstrapBaselineSources(),
   );
@@ -172,6 +177,7 @@ export function App(): ReactElement {
       setRuntimeByNode({});
       setTimingByNode({});
       setRunSummary(null);
+      setFocusedCellIndex(null);
       fileHandleRef.current = null;
       setSaveStatus("idle");
       setError(null);
@@ -184,6 +190,84 @@ export function App(): ReactElement {
   const handleCellsChange = useCallback((next: NotebookCell[]): void => {
     setNotebook((prev) => ({ ...prev, cells: next }));
   }, []);
+
+  const handleAddCell = useCallback((kind: CellKind): void => {
+    const fresh: NotebookCell = { cellType: kind, source: "" };
+    setNotebook((prev) => {
+      const nextCells = [...prev.cells, fresh];
+      const nextDocCells = [...prev.doc.cells, toIpynbCell(fresh)];
+      setFocusedCellIndex(nextCells.length - 1);
+      return { ...prev, cells: nextCells, doc: { ...prev.doc, cells: nextDocCells } };
+    });
+  }, []);
+
+  const handleDeleteFocusedCell = useCallback((): void => {
+    if (focusedCellIndex === null) {
+      return;
+    }
+    setNotebook((prev) => {
+      if (focusedCellIndex < 0 || focusedCellIndex >= prev.cells.length) {
+        return prev;
+      }
+      const nextCells = prev.cells.slice();
+      nextCells.splice(focusedCellIndex, 1);
+      const nextDocCells = prev.doc.cells.slice();
+      nextDocCells.splice(focusedCellIndex, 1);
+      return { ...prev, cells: nextCells, doc: { ...prev.doc, cells: nextDocCells } };
+    });
+    setFocusedCellIndex(null);
+  }, [focusedCellIndex]);
+
+  const handleCopyFocusedCell = useCallback((): void => {
+    if (focusedCellIndex === null) {
+      return;
+    }
+    const cell = notebook.cells[focusedCellIndex];
+    if (cell !== undefined) {
+      setCellClipboard({ ...cell });
+    }
+  }, [focusedCellIndex, notebook.cells]);
+
+  const handleCutFocusedCell = useCallback((): void => {
+    handleCopyFocusedCell();
+    handleDeleteFocusedCell();
+  }, [handleCopyFocusedCell, handleDeleteFocusedCell]);
+
+  const handlePasteCell = useCallback((): void => {
+    if (cellClipboard === null) {
+      return;
+    }
+    const insertAt = focusedCellIndex === null ? notebook.cells.length : focusedCellIndex + 1;
+    setNotebook((prev) => {
+      const nextCells = prev.cells.slice();
+      nextCells.splice(insertAt, 0, { ...cellClipboard });
+      const nextDocCells = prev.doc.cells.slice();
+      nextDocCells.splice(insertAt, 0, toIpynbCell(cellClipboard));
+      return { ...prev, cells: nextCells, doc: { ...prev.doc, cells: nextDocCells } };
+    });
+    setFocusedCellIndex(insertAt);
+  }, [cellClipboard, focusedCellIndex, notebook.cells.length]);
+
+  const handleChangeFocusedCellType = useCallback(
+    (kind: CellKind): void => {
+      if (focusedCellIndex === null) {
+        return;
+      }
+      setNotebook((prev) => {
+        const cell = prev.cells[focusedCellIndex];
+        if (cell === undefined) {
+          return prev;
+        }
+        const updated: NotebookCell = { ...cell, cellType: kind };
+        const nextCells = prev.cells.slice();
+        nextCells[focusedCellIndex] = updated;
+        const nextDocCells = prev.doc.cells.slice();
+        nextDocCells[focusedCellIndex] = toIpynbCell(updated);
+        return { ...prev, cells: nextCells, doc: { ...prev.doc, cells: nextDocCells } };
+      });
+    },
+    [focusedCellIndex],
+  );
 
   const handleRename = useCallback((nodeId: string, nextName: string): void => {
     void engineRef.current?.renameNode(nodeId, nextName, Date.now());
@@ -909,12 +993,29 @@ export function App(): ReactElement {
                   />
                 )}
               </div>
+              <CellToolbar
+                focusedCellIndex={focusedCellIndex}
+                focusedCell={
+                  focusedCellIndex === null ? null : (notebook.cells[focusedCellIndex] ?? null)
+                }
+                hasClipboard={cellClipboard !== null}
+                onAddCell={handleAddCell}
+                onDeleteCell={handleDeleteFocusedCell}
+                onCutCell={handleCutFocusedCell}
+                onCopyCell={handleCopyFocusedCell}
+                onPasteCell={handlePasteCell}
+                onChangeCellType={handleChangeFocusedCellType}
+                isAddMenuOpen={isAddCellMenuOpen}
+                onAddCellMenuOpenChange={setIsAddCellMenuOpen}
+              />
               <ScrollArea className="min-h-0 flex-1">
                 <CellList
                   cells={notebook.cells}
                   onCellsChange={handleCellsChange}
                   outputsByCell={outputsByCell}
                   scrollToCellIndex={selected?.cellIndices[0] ?? null}
+                  focusedCellIndex={focusedCellIndex}
+                  onFocusCell={setFocusedCellIndex}
                 />
               </ScrollArea>
               <CellPaneFooter cells={notebook.cells} isDirty={isDirty} />
