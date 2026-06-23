@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from notebookflow.nodes import register as register_builtins
-from notebookflow.nodes.ai import AI_PYTHON_TRANSFORM
+from notebookflow.nodes.ai import AI_PYTHON_TRANSFORM, CLASSIFY, EMBED, LLM_GENERATE
 from notebookflow.nodes.input import PARSE_CSV
 from notebookflow.nodes.io import KAFKA_PRODUCE, SQL_QUERY, WEBHOOK_POST
 from notebookflow.nodes.output import PLOT_CHART
@@ -12,6 +12,9 @@ from notebookflow.protocol.registry import Registry
 
 _EXPECTED_IDS = {
     "notebookflow.ai_python_transform",
+    "notebookflow.llm_generate",
+    "notebookflow.embed",
+    "notebookflow.classify",
     "notebookflow.parse_csv",
     "notebookflow.filter_rows",
     "notebookflow.plot_chart",
@@ -94,6 +97,34 @@ def test_webhook_post_manifest_shape() -> None:
     method_field = next(f for f in WEBHOOK_POST.config_fields if f.key == "method")
     assert method_field.kind == "select"
     assert {opt.value for opt in method_field.options} == {"POST", "PUT", "PATCH"}
+
+
+def test_llm_generate_manifest_shape() -> None:
+    assert LLM_GENERATE.tag == "ai"
+    assert LLM_GENERATE.outputs[0].name == "text"
+    assert "anthropic" in LLM_GENERATE.template
+    assert "messages.create" in LLM_GENERATE.template
+    assert {f.key for f in LLM_GENERATE.config_fields} == {"model", "prompt", "max_tokens"}
+
+
+def test_embed_manifest_shape() -> None:
+    assert EMBED.tag == "ai"
+    assert EMBED.outputs[0].name == "vectors"
+    assert "embeddings.create" in EMBED.template
+    assert {f.key for f in EMBED.config_fields} == {"model", "seed_text"}
+
+
+def test_classify_manifest_shape() -> None:
+    assert CLASSIFY.tag == "ai"
+    assert CLASSIFY.inputs[0].name == "df"
+    assert CLASSIFY.outputs[0].name == "df"
+    assert "Classify the text into exactly one of:" in CLASSIFY.template
+    assert {f.key for f in CLASSIFY.config_fields} == {
+        "model",
+        "text_column",
+        "label_column",
+        "labels",
+    }
 
 
 def test_register_is_idempotent_against_fresh_registry() -> None:

@@ -114,6 +114,53 @@ def test_render_template_falls_back_to_first_port_name() -> None:
     assert out == "result = 1\n"
 
 
+def test_render_template_substitutes_primary_input_and_output_literals() -> None:
+    registry = Registry()
+    manifest = NodeManifest(
+        id="test.t_lit",
+        name="T",
+        tag="transform",
+        template=(
+            "x = locals().get({primary_input_literal})\n"
+            "result = {primary_output_literal}\n"
+        ),
+        inputs=[],
+        outputs=[],
+    )
+    registry.register(manifest)
+    out = Loader(registry).render_template(
+        manifest,
+        {"input_vars": ["upstream.df"], "output_vars": ["downstream"]},
+    )
+    assert 'locals().get("upstream.df")' in out
+    assert 'result = "downstream"' in out
+
+
+def test_render_template_works_for_every_builtin_ai_manifest() -> None:
+    """Smoke check: every ai/* template renders cleanly with sample params."""
+    from notebookflow.nodes.ai import AI_PYTHON_TRANSFORM, CLASSIFY, EMBED, LLM_GENERATE
+
+    registry = Registry()
+    for manifest in (AI_PYTHON_TRANSFORM, LLM_GENERATE, EMBED, CLASSIFY):
+        registry.register(manifest)
+        loader = Loader(registry)
+        # Default config values are enough -- they're set on every required field.
+        config = {f.key: f.default_value for f in manifest.config_fields}
+        rendered = loader.render_template(
+            manifest,
+            {
+                "input_vars": [p.name for p in manifest.inputs],
+                "output_vars": [p.name for p in manifest.outputs],
+                "config": config,
+            },
+        )
+        # format_map() would already have raised ValueError on a missing
+        # placeholder; this asserts the template body is non-empty and
+        # terminated. Literal { in the source escapes as {{, which is fine.
+        assert rendered.endswith("\n")
+        assert len(rendered) > 0
+
+
 def test_render_template_raises_on_unknown_placeholder() -> None:
     registry = Registry()
     manifest = NodeManifest(

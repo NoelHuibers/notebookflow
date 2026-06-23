@@ -74,7 +74,9 @@ class Loader:
             "node_name": str(params.get("node_name") or manifest.name),
             "manifest_id": manifest.id,
             "primary_input": primary_input,
+            "primary_input_literal": json.dumps(primary_input),
             "primary_output": primary_output,
+            "primary_output_literal": json.dumps(primary_output),
             "input_count": len(input_vars),
             "output_count": len(output_vars),
         }
