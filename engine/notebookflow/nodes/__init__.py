@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from notebookflow.nodes import ai as ai_nodes
 from notebookflow.nodes import input as input_nodes
+from notebookflow.nodes import io as io_nodes
 from notebookflow.nodes import output as output_nodes
 from notebookflow.nodes import transform as transform_nodes
 
@@ -25,3 +26,4 @@ def register(registry: Registry) -> None:
     transform_nodes.register_all(registry)
     output_nodes.register_all(registry)
     ai_nodes.register_all(registry)
+    io_nodes.register_all(registry)
