@@ -81,6 +81,11 @@ export class KernelBridge {
         continue;
       }
 
+      opts.onEvent({
+        type: "nodeStarted",
+        pipelineId: opts.pipelineId,
+        nodeId: node.id,
+      });
       const result = await executeNodeOnKernel(kernel, node);
       results.push(result);
       opts.onEvent({

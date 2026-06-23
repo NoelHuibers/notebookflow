@@ -21,10 +21,17 @@ export interface CellEditorProps {
   cell: NotebookCell;
   index: number;
   outputs?: NbOutput[];
+  isStreaming?: boolean;
   onChange: (next: string) => void;
 }
 
-export function CellEditor({ cell, index, outputs = [], onChange }: CellEditorProps): ReactElement {
+export function CellEditor({
+  cell,
+  index,
+  outputs = [],
+  isStreaming = false,
+  onChange,
+}: CellEditorProps): ReactElement {
   return (
     <div className="overflow-hidden rounded-md border bg-card">
       <div className="flex items-center justify-between border-b px-3 py-1.5 text-[11px] text-muted-foreground">
@@ -38,7 +45,7 @@ export function CellEditor({ cell, index, outputs = [], onChange }: CellEditorPr
           onChange={onChange}
         />
       </Suspense>
-      <CellOutputs outputs={outputs} />
+      <CellOutputs outputs={outputs} isStreaming={isStreaming} />
     </div>
   );
 }

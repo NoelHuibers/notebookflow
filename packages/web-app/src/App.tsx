@@ -189,6 +189,7 @@ export function App(): ReactElement {
   const [events, setEvents] = useState<EngineEvent[]>([]);
   const [outputsByCell, setOutputsByCell] = useState<Record<number, NbOutput[]>>({});
   const [runtimeByNode, setRuntimeByNode] = useState<Record<string, RuntimeState>>({});
+  const [streamingCellIndex, setStreamingCellIndex] = useState<number | null>(null);
   const [timingByNode, setTimingByNode] = useState<Record<string, number>>({});
   const [runSummary, setRunSummary] = useState<RunSummary | null>(null);
   const [focusedCellIndex, setFocusedCellIndex] = useState<number | null>(null);
@@ -320,6 +321,7 @@ export function App(): ReactElement {
       setRuntimeByNode({});
       setTimingByNode({});
       setRunSummary(null);
+      setStreamingCellIndex(null);
       setFocusedCellIndex(null);
       setExplanation(null);
       fileHandleRef.current = null;
@@ -701,6 +703,7 @@ export function App(): ReactElement {
     setOutputsByCell({});
     setTimingByNode({});
     setRunSummary(null);
+    setStreamingCellIndex(null);
     const initialRuntime: Record<string, RuntimeState> = {};
     for (const nodeId of Object.keys(graph.nodes)) {
       initialRuntime[nodeId] = "queued";
@@ -714,11 +717,30 @@ export function App(): ReactElement {
         pipeline: pipelineDef,
         onEvent: (event) => {
           setEvents((prev) => [...prev, event]);
+          if (event.type === "nodeStarted") {
+            setRuntimeByNode((prev) => ({ ...prev, [event.nodeId]: "running" }));
+            const node = graph.nodes[event.nodeId];
+            const cellIndex = node?.cellIndices[0];
+            setStreamingCellIndex(cellIndex ?? null);
+            // Reset this cell's outputs so the streaming cursor doesn't ride
+            // on top of stale text from a prior run.
+            if (cellIndex !== undefined) {
+              setOutputsByCell((prev) => {
+                if (prev[cellIndex] === undefined) {
+                  return prev;
+                }
+                const next = { ...prev };
+                delete next[cellIndex];
+                return next;
+              });
+            }
+          }
           if (event.type === "nodeCompleted") {
             const node = graph.nodes[event.result.nodeId];
             const cellIndex = node?.cellIndices[0];
             if (cellIndex !== undefined) {
               setOutputsByCell((prev) => ({ ...prev, [cellIndex]: event.result.outputs }));
+              setStreamingCellIndex((current) => (current === cellIndex ? null : current));
             }
             const status = event.result.status;
             if (status === "ok" || status === "error" || status === "skipped") {
@@ -747,6 +769,7 @@ export function App(): ReactElement {
       })
       .finally(() => {
         setIsRunning(false);
+        setStreamingCellIndex(null);
       });
   }, [isRunning, pipelineDef, graph]);
 
@@ -1281,6 +1304,7 @@ export function App(): ReactElement {
                     scrollToCellIndex={selected?.cellIndices[0] ?? null}
                     focusedCellIndex={focusedCellIndex}
                     onFocusCell={setFocusedCellIndex}
+                    streamingCellIndex={streamingCellIndex}
                   />
                 </ScrollArea>
                 <CellPaneFooter cells={notebook.cells} isDirty={isDirty} isRunning={isRunning} />
@@ -1919,6 +1943,8 @@ function renderEvent(event: EngineEvent): string {
   switch (event.type) {
     case "executionStarted":
       return `▶ started ${event.pipelineId}`;
+    case "nodeStarted":
+      return `… ${event.nodeId} · running`;
     case "nodeCompleted":
       return `${statusGlyph(event.result.status)} ${event.result.nodeId} · ${event.result.status}${event.result.error ? ` — ${event.result.error}` : ""}`;
     case "pipelineCompleted":

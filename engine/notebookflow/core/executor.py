@@ -15,7 +15,7 @@ from __future__ import annotations
 import contextlib
 import time
 import traceback
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -109,13 +109,22 @@ class Executor:
             results.append(result)
         return results
 
-    async def iter_pipeline(self) -> AsyncIterator[ExecutionResult]:
+    async def iter_pipeline(
+        self,
+        *,
+        on_node_started: Callable[[DAGNode], Awaitable[None]] | None = None,
+    ) -> AsyncIterator[ExecutionResult]:
         """Yield each node's ExecutionResult as soon as it finishes.
 
         On the first error, the remaining nodes are yielded as
         ``status="skipped"`` results so consumers see the full pipeline shape.
         Used by both ``run_pipeline`` (which accumulates into a list) and the
         WebSocket handler (which forwards each event as it lands).
+
+        ``on_node_started`` is awaited right before ``run_node`` for each
+        node, so the WebSocket handler can flush a ``nodeStarted`` event
+        before exec() begins -- the canvas relies on that ordering to turn
+        on the streaming cursor for the right cell.
         """
         order = self._dag.topological_order()
         name_to_id = {n.name: n.id for n in order}
@@ -123,6 +132,8 @@ class Executor:
 
         for node in order:
             inputs = self._gather_inputs(node, name_to_id)
+            if on_node_started is not None:
+                await on_node_started(node)
             result = await self.run_node(node, inputs)
             yield result
             if result.status == "error":

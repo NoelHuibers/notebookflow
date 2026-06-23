@@ -60,6 +60,7 @@ interface ExecutionResultMsg {
 
 export type EngineEvent =
   | { type: "executionStarted"; pipelineId: string }
+  | { type: "nodeStarted"; pipelineId: string; nodeId: string }
   | { type: "nodeCompleted"; pipelineId: string; result: ExecutionResultMsg }
   | { type: "pipelineCompleted"; pipelineId: string; results: ExecutionResultMsg[] }
   | { type: "error"; pipelineId?: string; message: string };

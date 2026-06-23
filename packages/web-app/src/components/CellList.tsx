@@ -30,6 +30,12 @@ export interface CellListProps {
   focusedCellIndex?: number | null;
   /** Notify the parent when a cell wrapper is clicked. */
   onFocusCell?: (index: number) => void;
+  /**
+   * Cell whose node is currently executing on the engine. The matching
+   * `CellOutputs` renders a blinking cursor at the end of its outputs while
+   * this is set.
+   */
+  streamingCellIndex?: number | null;
 }
 
 export function CellList({
@@ -39,6 +45,7 @@ export function CellList({
   scrollToCellIndex,
   focusedCellIndex,
   onFocusCell,
+  streamingCellIndex,
 }: CellListProps): ReactElement {
   const [draft, setDraft] = useState<NotebookCell[]>(cells);
   const incomingRef = useRef(cells);
@@ -130,6 +137,7 @@ export function CellList({
                 cell={cell}
                 index={idx}
                 outputs={outputsByCell?.[idx] ?? []}
+                isStreaming={streamingCellIndex === idx}
                 onChange={(next) => {
                   handleChange(idx, next);
                 }}

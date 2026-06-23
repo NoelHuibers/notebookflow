@@ -588,6 +588,8 @@ function renderEvent(event: EngineEvent): string {
   switch (event.type) {
     case "executionStarted":
       return `▶ started ${event.pipelineId}`;
+    case "nodeStarted":
+      return `… ${event.nodeId} · running`;
     case "nodeCompleted":
       return `${statusGlyph(event.result.status)} ${event.result.nodeId} · ${event.result.status}${event.result.error ? ` — ${event.result.error}` : ""}`;
     case "pipelineCompleted":

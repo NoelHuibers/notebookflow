@@ -309,16 +309,22 @@ def test_ws_run_streams_execution_events(client: TestClient) -> None:
         started = ws.receive_json()
         assert started == {"type": "executionStarted", "pipelineId": "p1"}
 
+        started_ids: list[str] = []
         completed_ids: list[str] = []
         while True:
             msg = ws.receive_json()
             if msg["type"] == "pipelineCompleted":
                 final = msg
                 break
-            assert msg["type"] == "nodeCompleted"
             assert msg["pipelineId"] == "p1"
+            if msg["type"] == "nodeStarted":
+                started_ids.append(msg["nodeId"])
+                continue
+            assert msg["type"] == "nodeCompleted"
             completed_ids.append(msg["result"]["nodeId"])
 
+        # Every node fires a nodeStarted event before its nodeCompleted.
+        assert started_ids == ["a", "b", "c"]
         assert completed_ids == ["a", "b", "c"]
         assert [r["status"] for r in final["results"]] == ["ok", "ok", "ok"]
 
@@ -354,8 +360,33 @@ def test_ws_run_failure_streams_skipped_for_downstream(client: TestClient) -> No
             msg = ws.receive_json()
             if msg["type"] == "pipelineCompleted":
                 break
+            if msg["type"] == "nodeStarted":
+                continue
             statuses.append(msg["result"]["status"])
+        # Skipped nodes don't fire nodeStarted -- only the two that actually
+        # made it to exec() should have raised one.
         assert statuses == ["ok", "error", "skipped"]
+
+
+def test_ws_run_emits_node_started_before_each_node_completes(client: TestClient) -> None:
+    """The streaming-cursor flow on the canvas depends on nodeStarted firing
+    before the matching nodeCompleted; lock that ordering down."""
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "run", "pipelineId": "p4", "pipeline": _linear_pipeline()})
+        _ = ws.receive_json()  # executionStarted
+
+        in_flight: set[str] = set()
+        while True:
+            msg = ws.receive_json()
+            if msg["type"] == "pipelineCompleted":
+                break
+            if msg["type"] == "nodeStarted":
+                in_flight.add(msg["nodeId"])
+            elif msg["type"] == "nodeCompleted":
+                node_id = msg["result"]["nodeId"]
+                assert node_id in in_flight, f"nodeCompleted for {node_id} without nodeStarted"
+                in_flight.discard(node_id)
+        assert in_flight == set()
 
 
 # ---------------------------------------------------------------------------

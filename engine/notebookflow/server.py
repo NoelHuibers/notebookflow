@@ -537,8 +537,21 @@ async def _stream_run(
     with tempfile.TemporaryDirectory(prefix="nbf-spill-") as spill_dir:
         bus = DataBus(spill_dir=Path(spill_dir), pipeline_run_id=pipeline_id)
         executor = Executor(dag=dag, bus=bus)
+
+        async def on_node_started(node: DAGNode) -> None:
+            # iter_pipeline awaits this before running each node, so the
+            # canvas's streaming cursor flips on for the correct cell before
+            # exec() begins.
+            await websocket.send_json(
+                {
+                    "type": "nodeStarted",
+                    "pipelineId": pipeline_id,
+                    "nodeId": node.id,
+                },
+            )
+
         try:
-            async for result in executor.iter_pipeline():
+            async for result in executor.iter_pipeline(on_node_started=on_node_started):
                 results.append(result)
                 await websocket.send_json(
                     {
