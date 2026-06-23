@@ -280,10 +280,48 @@ export class EngineClient {
     }
     return (await res.json()) as PipelineExplanation;
   }
+
+  /**
+   * Draft a fresh pipeline from a natural-language prompt. Backed by
+   * Anthropic when configured; falls back to a keyword-driven template
+   * draft otherwise.
+   */
+  async proposePipeline(prompt: string, notebookPath = ""): Promise<PipelineProposal> {
+    const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/pipelines/propose");
+    const body: { prompt: string; notebookPath?: string } = { prompt };
+    if (notebookPath !== "") {
+      body.notebookPath = notebookPath;
+    }
+    const res = await fetch(httpUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...this.authHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const message = await readErrorMessage(res);
+      throw new Error(`EngineClient.proposePipeline: ${message}`);
+    }
+    return (await res.json()) as PipelineProposal;
+  }
 }
 
 export interface PipelineExplanation {
   prose: string;
+  backend: string;
+  warnings: string[];
+}
+
+export interface PipelineProposalNode {
+  manifestId: string;
+  name: string;
+  config: Record<string, string>;
+}
+
+export interface PipelineProposal {
+  notebookPath: string;
+  cellSources: string[];
+  nodes: PipelineProposalNode[];
+  edges: { from: string; to: string }[];
   backend: string;
   warnings: string[];
 }

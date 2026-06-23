@@ -37,6 +37,7 @@ from notebookflow.core.databus import DataBus
 from notebookflow.core.executor import ExecutionResult, Executor
 from notebookflow.llm.code_synth import CodeSynth
 from notebookflow.llm.explainer import Explainer
+from notebookflow.llm.pipeline_author import PipelineAuthor
 from notebookflow.protocol.registry import Registry
 
 
@@ -189,6 +190,31 @@ class ExplainPipelineResponse(_APIModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class ProposePipelineRequest(_APIModel):
+    prompt: str
+    notebook_path: str = "generated.ipynb"
+
+
+class ProposePipelineNode(_APIModel):
+    manifest_id: str
+    name: str
+    config: dict[str, str] = Field(default_factory=dict)
+
+
+class ProposePipelineEdge(_APIModel):
+    src: str = Field(..., alias="from")
+    dst: str = Field(..., alias="to")
+
+
+class ProposePipelineResponse(_APIModel):
+    notebook_path: str
+    cell_sources: list[str]
+    nodes: list[ProposePipelineNode] = Field(default_factory=list)
+    edges: list[dict[str, str]] = Field(default_factory=list)
+    backend: str
+    warnings: list[str] = Field(default_factory=list)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Discover available node manifests on startup."""
@@ -196,6 +222,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     _app.state.registry = registry
     _app.state.code_synth = CodeSynth(registry)
     _app.state.explainer = Explainer()
+    _app.state.pipeline_author = PipelineAuthor(registry)
     yield
 
 
@@ -236,6 +263,14 @@ def _explainer(app_ref: FastAPI) -> Explainer:
         explainer = Explainer()
         app_ref.state.explainer = explainer
     return explainer
+
+
+def _pipeline_author(app_ref: FastAPI) -> PipelineAuthor:
+    author = getattr(app_ref.state, "pipeline_author", None)
+    if not isinstance(author, PipelineAuthor):
+        author = PipelineAuthor(_registry(app_ref))
+        app_ref.state.pipeline_author = author
+    return author
 
 
 def _collect_target_names(target: ast.expr, into: list[str], seen: set[str]) -> None:
@@ -455,6 +490,38 @@ async def explain_pipeline(request: ExplainPipelineRequest) -> ExplainPipelineRe
         prose=result.prose,
         backend=result.backend,
         warnings=result.warnings,
+    )
+
+
+@app.post(
+    "/pipelines/propose",
+    response_model=ProposePipelineResponse,
+    dependencies=[Depends(require_auth)],
+)
+async def propose_pipeline(request: ProposePipelineRequest) -> ProposePipelineResponse:
+    """Draft a new pipeline from a natural-language prompt.
+
+    Uses Anthropic when configured; falls back to a keyword-driven template
+    draft otherwise, so the canvas always gets something usable. The response
+    is everything the web-app needs to swap the current notebook contents
+    with the draft (cell_sources) or render a preview (nodes + edges).
+    """
+    if request.prompt.strip() == "":
+        raise HTTPException(
+            status_code=400,
+            detail="Empty prompt -- describe the pipeline you want.",
+        )
+    draft = await _pipeline_author(app).propose(
+        request.prompt,
+        notebook_path=request.notebook_path,
+    )
+    return ProposePipelineResponse(
+        notebook_path=draft.notebook_path,
+        cell_sources=draft.cell_sources,
+        nodes=[ProposePipelineNode(**node) for node in draft.nodes],
+        edges=draft.edges,
+        backend=draft.backend,
+        warnings=draft.warnings,
     )
 
 

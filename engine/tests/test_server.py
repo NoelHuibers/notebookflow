@@ -524,3 +524,51 @@ def test_explain_pipeline_accepts_optional_instruction(
     assert r.status_code == 200
     # Template backend ignores instruction but the request shape still validates.
     assert r.json()["backend"] == "template"
+
+
+# ---------------------------------------------------------------------------
+# /pipelines/propose
+# ---------------------------------------------------------------------------
+
+
+def test_propose_pipeline_returns_template_draft_without_api_key(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("NOTEBOOKFLOW_ANTHROPIC_API_KEY", raising=False)
+
+    r = client.post(
+        "/pipelines/propose",
+        json={"prompt": "Load CSV, filter EU, plot revenue by region."},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["backend"] == "template"
+    assert len(body["nodes"]) >= 3
+    assert len(body["cellSources"]) == len(body["nodes"])
+    assert all(src.startswith("# @node:") for src in body["cellSources"])
+
+
+def test_propose_pipeline_empty_prompt_returns_400(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("NOTEBOOKFLOW_ANTHROPIC_API_KEY", raising=False)
+
+    r = client.post("/pipelines/propose", json={"prompt": "   "})
+    assert r.status_code == 400
+    assert "prompt" in r.json()["detail"].lower()
+
+
+def test_propose_pipeline_accepts_notebook_path_override(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("NOTEBOOKFLOW_ANTHROPIC_API_KEY", raising=False)
+
+    r = client.post(
+        "/pipelines/propose",
+        json={"prompt": "Load CSV", "notebookPath": "my-pipeline.ipynb"},
+    )
+    assert r.status_code == 200
+    assert r.json()["notebookPath"] == "my-pipeline.ipynb"
