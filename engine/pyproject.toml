@@ -36,6 +36,12 @@ dev = [
 # their own pyproject.toml so registry.py picks them up automatically.
 builtin = "notebookflow.nodes:register"
 
+[project.entry-points."jupyter_serverproxy_servers"]
+# Lets jupyter-server-proxy auto-launch the engine when JupyterLab boots,
+# so the JupyterLab adapter can connect via a relative /proxy/<port>/ws URL
+# without the user having to run `notebookflow` in another terminal.
+notebookflow = "notebookflow.proxy:server_proxy_config"
+
 [project.scripts]
 notebookflow = "notebookflow.server:main"
 

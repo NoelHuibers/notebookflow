@@ -64,7 +64,31 @@ export type EngineEvent =
   | { type: "pipelineCompleted"; pipelineId: string; results: ExecutionResultMsg[] }
   | { type: "error"; pipelineId?: string; message: string };
 
-const DEFAULT_ENGINE_URL = "ws://127.0.0.1:8765/ws";
+const FALLBACK_ENGINE_URL = "ws://127.0.0.1:8765/ws";
+const PROXY_PORT = 8765;
+
+/**
+ * Build the engine WebSocket URL that runs through jupyter-server-proxy when
+ * we're inside a JupyterLab page. Strips the trailing /lab[...] from the
+ * current pathname so the proxy is rooted at the Jupyter base URL -- works
+ * for vanilla `localhost:8888/lab` and for JupyterHub paths like
+ * `localhost:8888/user/me/lab`.
+ *
+ * Falls back to the loopback URL for tests + non-browser hosts.
+ */
+export function resolveDefaultEngineUrl(): string {
+  if (typeof window === "undefined" || typeof window.location === "undefined") {
+    return FALLBACK_ENGINE_URL;
+  }
+  const loc = window.location;
+  if (loc.host === "" || loc.protocol === "file:") {
+    return FALLBACK_ENGINE_URL;
+  }
+  const wsProto = loc.protocol === "https:" ? "wss" : "ws";
+  const trimmedPath = (loc.pathname || "/").replace(/\/+$/, "");
+  const baseRoot = trimmedPath.replace(/\/lab(\/.*)?$/, "") || "";
+  return `${wsProto}://${loc.host}${baseRoot}/proxy/${String(PROXY_PORT)}/ws`;
+}
 
 export interface RunOptions {
   pipelineId: string;
@@ -76,7 +100,7 @@ export interface RunOptions {
 export class EngineClient {
   private readonly url: string;
 
-  constructor(url: string = DEFAULT_ENGINE_URL) {
+  constructor(url: string = resolveDefaultEngineUrl()) {
     this.url = url;
   }
 
