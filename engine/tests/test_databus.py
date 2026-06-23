@@ -25,13 +25,11 @@ def test_put_then_get_list_of_dicts(bus: DataBus) -> None:
     assert payload.value == rows
 
 
-def test_put_dataframe_spills_to_parquet_and_get_materializes(
-    bus: DataBus, spill_dir: Path
-) -> None:
+def test_put_dataframe_spills_to_parquet_and_get_materializes(bus: DataBus) -> None:
     df = pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]})
     bus.put("n1", "df", df)
 
-    files = list(spill_dir.iterdir())
+    files = list(bus.spill_root.iterdir())
     assert len(files) == 1
     assert files[0].suffix == ".parquet"
 
@@ -61,22 +59,68 @@ def test_put_non_json_primitive_raises(bus: DataBus) -> None:
         bus.put("n1", "p", {1, 2, 3})
 
 
-def test_clear_node_drops_entries_and_deletes_spill_files(
-    bus: DataBus, spill_dir: Path
-) -> None:
+def test_clear_node_drops_entries_and_deletes_spill_files(bus: DataBus) -> None:
     df = pd.DataFrame({"a": [1, 2]})
     bus.put("n1", "df", df)
     bus.put("n1", "count", 5)
     bus.put("n2", "df", df)
 
     assert {k[0] for k in bus.keys()} == {"n1", "n2"}
-    assert len(list(spill_dir.iterdir())) == 2
+    assert len(list(bus.spill_root.iterdir())) == 2
 
     bus.clear_node("n1")
 
     assert {k[0] for k in bus.keys()} == {"n2"}
     # Exactly one parquet file remains (n2's df). n1's spill should be gone.
-    assert len(list(spill_dir.iterdir())) == 1
+    assert len(list(bus.spill_root.iterdir())) == 1
+
+
+def test_explicit_pipeline_run_id_namespaces_spill_subdir(spill_dir: Path) -> None:
+    bus = DataBus(spill_dir=spill_dir, pipeline_run_id="run-abc")
+    bus.put("n1", "df", pd.DataFrame({"x": [1]}))
+    assert bus.spill_root == spill_dir / "run-abc"
+    assert bus.spill_root.is_dir()
+    assert all(p.parent == bus.spill_root for p in spill_dir.rglob("*.parquet"))
+
+
+def test_two_databuses_on_same_spill_dir_are_isolated(spill_dir: Path) -> None:
+    a = DataBus(spill_dir=spill_dir, pipeline_run_id="run-a")
+    b = DataBus(spill_dir=spill_dir, pipeline_run_id="run-b")
+
+    a.put("shared_node", "result", 1)
+    b.put("shared_node", "result", 2)
+    a.put("shared_node", "df", pd.DataFrame({"x": [1]}))
+    b.put("shared_node", "df", pd.DataFrame({"x": [99]}))
+
+    # Each bus sees only its own run's keys.
+    assert set(a.keys()) == {("shared_node", "result"), ("shared_node", "df")}
+    assert set(b.keys()) == {("shared_node", "result"), ("shared_node", "df")}
+    assert a.get("shared_node", "result").value == 1
+    assert b.get("shared_node", "result").value == 2
+    assert a.get("shared_node", "df").value["x"].tolist() == [1]
+    assert b.get("shared_node", "df").value["x"].tolist() == [99]
+
+    # Their spill subdirs are disjoint.
+    assert {p.name for p in spill_dir.iterdir() if p.is_dir()} == {"run-a", "run-b"}
+
+
+def test_clear_run_drops_run_keys_and_spill_subdir(spill_dir: Path) -> None:
+    bus = DataBus(spill_dir=spill_dir, pipeline_run_id="ephemeral")
+    bus.put("n1", "df", pd.DataFrame({"a": [1, 2]}))
+    bus.put("n2", "count", 7)
+    assert len(bus.keys()) == 2
+
+    bus.clear_run()
+
+    assert bus.keys() == []
+    assert not (spill_dir / "ephemeral").exists()
+
+
+def test_auto_generated_run_id_is_unique_per_databus(spill_dir: Path) -> None:
+    a = DataBus(spill_dir=spill_dir)
+    b = DataBus(spill_dir=spill_dir)
+    assert a.pipeline_run_id != b.pipeline_run_id
+    assert len(a.pipeline_run_id) > 0
 
 
 def test_internal_store_holds_path_not_dataframe(bus: DataBus) -> None:

@@ -7,6 +7,14 @@ Routing strategy by payload kind:
     * Anything else → ``TypeError`` for now. ``fileref`` kind is reserved
       for a future iteration (e.g. arbitrary large blobs the executor
       writes to disk directly).
+
+Multi-run isolation:
+    Every DataBus instance carries a ``pipeline_run_id`` (auto-generated
+    UUID when not supplied). Spill files land under ``spill_dir/<run_id>/``
+    and in-memory store keys are namespaced with the run id, so a single
+    shared DataBus can safely host concurrent pipeline runs without
+    collisions. Old single-tenant call sites that just instantiate
+    ``DataBus(spill_dir=...)`` keep working unchanged.
 """
 
 from __future__ import annotations
@@ -34,17 +42,29 @@ class Payload:
 class DataBus:
     """In-memory store for node outputs, spilling DataFrames to Parquet."""
 
-    def __init__(self, spill_dir: Path) -> None:
+    def __init__(self, spill_dir: Path, pipeline_run_id: str | None = None) -> None:
         self._spill_dir = spill_dir
+        self._run_id = pipeline_run_id if pipeline_run_id else uuid.uuid4().hex
         # Internal store keeps the *spilled* form: DataFrames as Path objects.
         # get() materializes back into a Payload whose value is the DataFrame.
-        self._store: dict[tuple[str, str], Payload] = {}
+        # Keys are (run_id, node_id, port) so multiple runs can share one bus.
+        self._store: dict[tuple[str, str, str], Payload] = {}
+
+    @property
+    def pipeline_run_id(self) -> str:
+        return self._run_id
+
+    @property
+    def spill_root(self) -> Path:
+        """Subdirectory where this run's parquet spills live."""
+        return self._spill_dir / self._run_id
 
     def put(self, node_id: str, port: str, value: Any) -> None:
-        key = (node_id, port)
+        key = (self._run_id, node_id, port)
         if isinstance(value, pd.DataFrame):
-            self._spill_dir.mkdir(parents=True, exist_ok=True)
-            path = self._spill_dir / f"{uuid.uuid4().hex}.parquet"
+            run_dir = self.spill_root
+            run_dir.mkdir(parents=True, exist_ok=True)
+            path = run_dir / f"{uuid.uuid4().hex}.parquet"
             value.to_parquet(path)
             self._store[key] = Payload(
                 kind="dataframe",
@@ -68,7 +88,7 @@ class DataBus:
         )
 
     def get(self, node_id: str, port: str) -> Payload:
-        key = (node_id, port)
+        key = (self._run_id, node_id, port)
         if key not in self._store:
             raise KeyError(f"No payload stored for {node_id!r}.{port!r}")
         payload = self._store[key]
@@ -78,7 +98,7 @@ class DataBus:
         return Payload(kind=payload.kind, value=payload.value, meta=dict(payload.meta))
 
     def clear_node(self, node_id: str) -> None:
-        keys_to_drop = [k for k in self._store if k[0] == node_id]
+        keys_to_drop = [k for k in self._store if k[0] == self._run_id and k[1] == node_id]
         for key in keys_to_drop:
             payload = self._store[key]
             if (
@@ -89,6 +109,21 @@ class DataBus:
                 payload.value.unlink()
             del self._store[key]
 
+    def clear_run(self) -> None:
+        """Drop every key + spilled file owned by this DataBus's run."""
+        for key in [k for k in self._store if k[0] == self._run_id]:
+            payload = self._store[key]
+            if (
+                payload.kind == "dataframe"
+                and isinstance(payload.value, Path)
+                and payload.value.exists()
+            ):
+                payload.value.unlink()
+            del self._store[key]
+        run_dir = self.spill_root
+        if run_dir.is_dir() and not any(run_dir.iterdir()):
+            run_dir.rmdir()
+
     def keys(self) -> list[tuple[str, str]]:
-        """Return all (node_id, port) keys currently stored. Useful for tests."""
-        return list(self._store.keys())
+        """All (node_id, port) keys stored for this run. Useful for tests."""
+        return [(node_id, port) for run_id, node_id, port in self._store if run_id == self._run_id]

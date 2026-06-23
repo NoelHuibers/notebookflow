@@ -323,13 +323,13 @@ def _result_to_model(result: ExecutionResult) -> ExecutionResultModel:
     )
 
 
-async def _run_pipeline(pipeline: PipelineDef) -> list[ExecutionResult]:
+async def _run_pipeline(pipeline_id: str, pipeline: PipelineDef) -> list[ExecutionResult]:
     try:
         dag = _build_dag(pipeline)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     with tempfile.TemporaryDirectory(prefix="nbf-spill-") as spill_dir:
-        bus = DataBus(spill_dir=Path(spill_dir))
+        bus = DataBus(spill_dir=Path(spill_dir), pipeline_run_id=pipeline_id)
         executor = Executor(dag=dag, bus=bus)
         try:
             return await executor.run_pipeline()
@@ -406,7 +406,7 @@ async def analyze_cells(request: AnalyzeRequest) -> AnalyzeResponse:
     dependencies=[Depends(require_auth)],
 )
 async def run_pipeline(pipeline_id: str, pipeline: PipelineDef) -> RunResponse:
-    results = await _run_pipeline(pipeline)
+    results = await _run_pipeline(pipeline_id, pipeline)
     return RunResponse(
         pipeline_id=pipeline_id, results=[_result_to_model(r) for r in results]
     )
@@ -489,7 +489,7 @@ async def _stream_run(
 
     results: list[ExecutionResult] = []
     with tempfile.TemporaryDirectory(prefix="nbf-spill-") as spill_dir:
-        bus = DataBus(spill_dir=Path(spill_dir))
+        bus = DataBus(spill_dir=Path(spill_dir), pipeline_run_id=pipeline_id)
         executor = Executor(dag=dag, bus=bus)
         try:
             async for result in executor.iter_pipeline():
