@@ -18,7 +18,7 @@ import type { GraphModel, NodeModel, NodeTag, RunSummary, RuntimeState, WireMode
 import type { NotebookNodeData } from "./Node";
 import { NotebookNode } from "./Node";
 import type { NodeGroupData } from "./NodeGroup";
-import { NodeGroup } from "./NodeGroup";
+import { NODE_GROUP_HEADER_HEIGHT, NodeGroup } from "./NodeGroup";
 import type { WireData } from "./Wire";
 import { Wire } from "./Wire";
 
@@ -49,9 +49,13 @@ const EDGE_TYPES = {
 } satisfies EdgeTypes;
 
 const COLUMN_WIDTH = 320;
+const COLUMN_GAP = 32;
 const GROUP_Y = 0;
-const FIRST_NODE_Y = 70;
-const NODE_VERTICAL_SPACING = 140;
+const NODE_VERTICAL_SPACING = 160;
+const NODE_X_INSET = 16;
+const GROUP_INNER_TOP_PADDING = 16;
+const GROUP_INNER_BOTTOM_PADDING = 24;
+const COLLAPSED_GROUP_HEIGHT = NODE_GROUP_HEADER_HEIGHT;
 
 const FLOW_STYLE = {
   width: "100%",
@@ -268,28 +272,38 @@ function buildNodes(
       continue;
     }
 
-    const groupX = columnIdx * COLUMN_WIDTH;
+    const groupX = columnIdx * (COLUMN_WIDTH + COLUMN_GAP);
     const groupData: NodeGroupData = { ...group };
     if (onGroupToggle !== undefined) {
       groupData.onToggle = onGroupToggle;
-    }
-    rfNodes.push({
-      id: `group:${group.id}`,
-      type: "group",
-      position: { x: groupX, y: GROUP_Y },
-      data: groupData,
-      draggable: false,
-      selectable: true,
-    });
-
-    if (group.collapsed) {
-      continue;
     }
 
     const groupNodes = group.nodeIds
       .map((id) => graph.nodes[id])
       .filter((n): n is NodeModel => n !== undefined)
       .sort((a, b) => (a.cellIndices[0] ?? 0) - (b.cellIndices[0] ?? 0));
+
+    const expandedGroupHeight =
+      NODE_GROUP_HEADER_HEIGHT +
+      GROUP_INNER_TOP_PADDING +
+      Math.max(1, groupNodes.length) * NODE_VERTICAL_SPACING +
+      GROUP_INNER_BOTTOM_PADDING;
+    const groupHeight = group.collapsed ? COLLAPSED_GROUP_HEIGHT : expandedGroupHeight;
+
+    const groupNodeId = `group:${group.id}`;
+    rfNodes.push({
+      id: groupNodeId,
+      type: "group",
+      position: { x: groupX, y: GROUP_Y },
+      data: groupData,
+      draggable: false,
+      selectable: true,
+      style: { width: COLUMN_WIDTH, height: groupHeight },
+    });
+
+    if (group.collapsed) {
+      continue;
+    }
 
     for (let rowIdx = 0; rowIdx < groupNodes.length; rowIdx++) {
       const node = groupNodes[rowIdx];
@@ -315,10 +329,16 @@ function buildNodes(
         nodeData.onOutputsChange = onOutputsChange;
         nodeData.outputSuggestions = collectOutputSuggestions(node, vars);
       }
+      // Position is relative to the parent group's top-left, since each child
+      // node is rendered inside the group container via parentNode + extent.
+      const childY =
+        NODE_GROUP_HEADER_HEIGHT + GROUP_INNER_TOP_PADDING + rowIdx * NODE_VERTICAL_SPACING;
       rfNodes.push({
         id: node.id,
         type: "notebook",
-        position: { x: groupX, y: FIRST_NODE_Y + rowIdx * NODE_VERTICAL_SPACING },
+        parentNode: groupNodeId,
+        extent: "parent",
+        position: { x: NODE_X_INSET, y: childY },
         data: nodeData,
         draggable: false,
         selectable: true,

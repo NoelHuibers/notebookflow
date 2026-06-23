@@ -1,12 +1,11 @@
 /**
- * NodeGroup — renders a notebook as a header card on the canvas.
+ * NodeGroup — renders a notebook as a translucent container that wraps its
+ * child nodes on the canvas.
  *
- * Phase-2 form: a labelled chip showing the notebook filename and a
- * collapse toggle. Nodes belonging to the group are rendered as standalone
- * React Flow nodes positioned beneath this header. A future iteration will
- * promote this to a true React Flow parent node (with children nested via
- * `parentNode`/`extent: 'parent'`) once layout/dragging behaviour is
- * worked out.
+ * The group is a React Flow node with its own width + height; child node
+ * positions are relative to its top-left via `parentNode` + `extent:
+ * "parent"`. The component below renders only the visible chrome: a header
+ * strip with the notebook name and a collapse toggle.
  */
 
 import type { CSSProperties, ReactElement } from "react";
@@ -18,15 +17,19 @@ export interface NodeGroupData extends NodeGroupModel {
   onToggle?: (groupId: string) => void;
 }
 
-const GROUP_BACKGROUND = "var(--notebookflow-group-bg, var(--muted, #f3f4f6))";
+export const NODE_GROUP_HEADER_HEIGHT = 36;
+
 const GROUP_FOREGROUND = "var(--notebookflow-group-fg, var(--foreground, #111827))";
 const GROUP_MUTED = "var(--notebookflow-group-muted, var(--muted-foreground, #6b7280))";
 const GROUP_BORDER = "var(--notebookflow-group-border, var(--border, #d1d5db))";
+const GROUP_TRANSLUCENT_BG = "var(--notebookflow-group-bg, rgba(243, 244, 246, 0.45))";
+const GROUP_HEADER_BG = "var(--notebookflow-group-header-bg, rgba(243, 244, 246, 0.92))";
 const GROUP_FONT_FAMILY =
   "var(--notebookflow-font-family, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif)";
 
 interface NodeGroupStyles {
   wrapper: CSSProperties;
+  header: CSSProperties;
   toggleButton: CSSProperties;
   label: CSSProperties;
   path: CSSProperties;
@@ -34,9 +37,11 @@ interface NodeGroupStyles {
 
 export function NodeGroup(props: NodeProps<NodeGroupData>): ReactElement {
   const { data, selected } = props;
-  const styles = groupStyles(selected);
+  const styles = groupStyles(selected, data.collapsed);
 
-  const handleToggle = (): void => {
+  const handleToggle = (event: React.MouseEvent<HTMLButtonElement>): void => {
+    // Don't let the click bubble to React Flow's pane / node click handler.
+    event.stopPropagation();
     if (data.onToggle !== undefined) {
       data.onToggle(data.id);
     }
@@ -44,39 +49,51 @@ export function NodeGroup(props: NodeProps<NodeGroupData>): ReactElement {
 
   return (
     <div style={styles.wrapper}>
-      <button
-        type="button"
-        onClick={handleToggle}
-        aria-label={data.collapsed ? "Expand notebook" : "Collapse notebook"}
-        style={styles.toggleButton}
-      >
-        {data.collapsed ? "▶" : "▼"}
-      </button>
-      <span style={styles.label}>{data.name}</span>
-      <span style={styles.path} title={data.notebookPath}>
-        {data.notebookPath}
-      </span>
+      <div style={styles.header}>
+        <button
+          type="button"
+          onClick={handleToggle}
+          aria-label={data.collapsed ? "Expand notebook" : "Collapse notebook"}
+          className="nodrag nopan"
+          style={styles.toggleButton}
+        >
+          {data.collapsed ? "▶" : "▼"}
+        </button>
+        <span style={styles.label}>{data.name}</span>
+        <span style={styles.path} title={data.notebookPath}>
+          {data.notebookPath}
+        </span>
+      </div>
     </div>
   );
 }
 
-function groupStyles(selected: boolean): NodeGroupStyles {
+function groupStyles(selected: boolean, collapsed: boolean): NodeGroupStyles {
   return {
     wrapper: {
-      display: "flex",
-      alignItems: "center",
-      gap: 8,
-      minWidth: 220,
-      maxWidth: 320,
-      padding: "6px 10px",
+      width: "100%",
+      height: "100%",
       borderRadius: 10,
-      border: `2px solid ${selected ? "var(--notebookflow-group-selected-border, var(--foreground, #111827))" : GROUP_BORDER}`,
-      background: GROUP_BACKGROUND,
+      border: `1.5px ${selected ? "solid" : "dashed"} ${selected ? "var(--notebookflow-group-selected-border, var(--foreground, #111827))" : GROUP_BORDER}`,
+      // Collapsed groups become an opaque header chip; expanded groups stay
+      // translucent so the canvas grid + child nodes inside remain visible.
+      background: collapsed ? GROUP_HEADER_BG : GROUP_TRANSLUCENT_BG,
       color: GROUP_FOREGROUND,
       fontFamily: GROUP_FONT_FAMILY,
       fontSize: 12,
       lineHeight: 1.3,
-      boxShadow: "0 1px 2px rgba(15, 23, 42, 0.12)",
+      boxShadow: selected ? "0 0 0 2px rgba(99, 102, 241, 0.18)" : "none",
+      boxSizing: "border-box",
+      overflow: "hidden",
+    },
+    header: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      height: NODE_GROUP_HEADER_HEIGHT,
+      padding: "0 10px",
+      background: GROUP_HEADER_BG,
+      borderBottom: collapsed ? "none" : `1px solid ${GROUP_BORDER}`,
       boxSizing: "border-box",
     },
     toggleButton: {
