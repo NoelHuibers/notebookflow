@@ -213,6 +213,9 @@ export function Canvas(props: CanvasProps): ReactElement {
       <Panel position="top-left">
         <KeyboardLegend />
       </Panel>
+      <Panel position="top-right">
+        <CanvasBreadcrumbs graph={graph} />
+      </Panel>
     </ReactFlow>
   );
 }
@@ -337,6 +340,45 @@ const LEGEND_KEY_STYLE = {
   color: "var(--notebookflow-legend-fg, #1f2937)",
   marginRight: 4,
 } as const;
+
+const BREADCRUMBS_STYLE = {
+  display: "flex",
+  gap: 8,
+  alignItems: "center",
+  padding: "4px 10px",
+  borderRadius: 6,
+  background: "var(--notebookflow-legend-bg, rgba(255, 255, 255, 0.86))",
+  color: "var(--notebookflow-legend-fg, #4b5563)",
+  fontSize: 10.5,
+  fontFamily: "var(--notebookflow-font-family, ui-sans-serif, system-ui, sans-serif)",
+  letterSpacing: "0.02em",
+  border: "1px solid var(--notebookflow-legend-border, #e5e7eb)",
+  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.05)",
+  pointerEvents: "none",
+} as const;
+
+const BREADCRUMBS_PATH_STYLE = {
+  color: "var(--notebookflow-legend-fg, #1f2937)",
+  fontWeight: 500,
+} as const;
+
+function CanvasBreadcrumbs({ graph }: { graph: GraphModel }): ReactElement {
+  const nodeCount = Object.keys(graph.nodes).length;
+  const groups = Object.values(graph.groups);
+  const singleGroup = groups.length === 1 ? groups[0] : undefined;
+  return (
+    <div role="img" aria-label="Canvas summary" style={BREADCRUMBS_STYLE}>
+      <span style={BREADCRUMBS_PATH_STYLE}>
+        Graph
+        {singleGroup === undefined ? "" : ` / ${singleGroup.name}`}
+      </span>
+      <span>· {nodeCount === 1 ? "1 node" : `${String(nodeCount)} nodes`}</span>
+      {groups.length > 1 && (
+        <span>· {groups.length === 1 ? "1 group" : `${String(groups.length)} groups`}</span>
+      )}
+    </div>
+  );
+}
 
 function KeyboardLegend(): ReactElement {
   return (
