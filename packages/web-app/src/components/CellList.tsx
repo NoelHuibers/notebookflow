@@ -20,9 +20,20 @@ export interface CellListProps {
   cells: NotebookCell[];
   onCellsChange: (next: NotebookCell[]) => void;
   outputsByCell?: Record<number, NbOutput[]>;
+  /**
+   * Cell index to scroll into view. When this changes to a defined value, the
+   * matching cell wrapper is brought to the top of the visible area. Used by
+   * the canvas selection-to-cells handoff.
+   */
+  scrollToCellIndex?: number | null;
 }
 
-export function CellList({ cells, onCellsChange, outputsByCell }: CellListProps): ReactElement {
+export function CellList({
+  cells,
+  onCellsChange,
+  outputsByCell,
+  scrollToCellIndex,
+}: CellListProps): ReactElement {
   const [draft, setDraft] = useState<NotebookCell[]>(cells);
   const incomingRef = useRef(cells);
   const onChangeRef = useRef(onCellsChange);
@@ -68,21 +79,42 @@ export function CellList({ cells, onCellsChange, outputsByCell }: CellListProps)
     };
   }, [draft]);
 
+  // Scroll the targeted cell into view when the parent asks for it (e.g. the
+  // user clicks a node in the canvas). Looked up by data-cell-index rather
+  // than a ref map so adding/removing cells doesn't require ref bookkeeping.
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (scrollToCellIndex === undefined || scrollToCellIndex === null || scrollToCellIndex < 0) {
+      return;
+    }
+    const root = containerRef.current;
+    if (root === null) {
+      return;
+    }
+    const target = root.querySelector<HTMLElement>(
+      `[data-cell-index="${String(scrollToCellIndex)}"]`,
+    );
+    if (target !== null) {
+      target.scrollIntoView({ block: "start", behavior: "smooth" });
+    }
+  }, [scrollToCellIndex]);
+
   return (
-    <div className="flex flex-col gap-3 p-4">
+    <div ref={containerRef} className="flex flex-col gap-3 p-4">
       {draft.length === 0 ? (
         <p className="text-sm italic text-muted-foreground">No cells yet — drop a notebook.</p>
       ) : (
         draft.map((cell, idx) => (
-          <CellEditor
-            key={`cell-${String(idx)}`}
-            cell={cell}
-            index={idx}
-            outputs={outputsByCell?.[idx] ?? []}
-            onChange={(next) => {
-              handleChange(idx, next);
-            }}
-          />
+          <div key={`cell-${String(idx)}`} data-cell-index={idx}>
+            <CellEditor
+              cell={cell}
+              index={idx}
+              outputs={outputsByCell?.[idx] ?? []}
+              onChange={(next) => {
+                handleChange(idx, next);
+              }}
+            />
+          </div>
         ))
       )}
     </div>

@@ -867,12 +867,40 @@ export function App(): ReactElement {
         <div ref={contentRef} className="grid min-h-0 flex-1 overflow-hidden" style={contentStyle}>
           <div ref={topPaneRef} className="grid min-h-0 overflow-hidden" style={topPaneStyle}>
             <section className="flex min-h-0 min-w-0 flex-col">
-              <div className="border-b px-4 py-2 text-xs text-muted-foreground">Cells</div>
+              <div className="flex items-center gap-2 border-b px-4 py-2 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <span
+                    role="img"
+                    aria-label={isDirty ? "Out of sync" : "In sync"}
+                    title={
+                      isDirty
+                        ? "Cells diverge from the loaded .ipynb"
+                        : "Cells match the loaded .ipynb"
+                    }
+                    className={cn(
+                      "inline-block size-1.5 rounded-full",
+                      isDirty ? "bg-amber-500" : "bg-emerald-500",
+                    )}
+                  />
+                  Cells
+                </span>
+                {selected !== null && (
+                  <SelectedNodePill
+                    name={selected.name}
+                    tag={selected.tag}
+                    cellIndices={selected.cellIndices}
+                    onClear={() => {
+                      setSelected(null);
+                    }}
+                  />
+                )}
+              </div>
               <ScrollArea className="min-h-0 flex-1">
                 <CellList
                   cells={notebook.cells}
                   onCellsChange={handleCellsChange}
                   outputsByCell={outputsByCell}
+                  scrollToCellIndex={selected?.cellIndices[0] ?? null}
                 />
               </ScrollArea>
             </section>
@@ -1188,6 +1216,54 @@ function InspectorPanel({ title, count, empty, children }: InspectorPanelProps):
         </div>
       </ScrollArea>
     </div>
+  );
+}
+
+const TAG_PILL_DOT: Record<NodeModel["tag"], string> = {
+  input: "bg-blue-500",
+  transform: "bg-emerald-500",
+  output: "bg-red-500",
+  ai: "bg-purple-500",
+  io: "bg-orange-500",
+};
+
+interface SelectedNodePillProps {
+  name: string;
+  tag: NodeModel["tag"];
+  cellIndices: number[];
+  onClear: () => void;
+}
+
+function SelectedNodePill({
+  name,
+  tag,
+  cellIndices,
+  onClear,
+}: SelectedNodePillProps): ReactElement {
+  const range =
+    cellIndices.length === 0
+      ? null
+      : cellIndices.length === 1
+        ? `cell ${String(cellIndices[0])}`
+        : `cells ${String(cellIndices[0])}–${String(cellIndices[cellIndices.length - 1])}`;
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border bg-background px-2 py-0.5 font-mono text-[10px]">
+      <span
+        role="img"
+        aria-label={`Tag: ${tag}`}
+        className={cn("inline-block size-1.5 rounded-full", TAG_PILL_DOT[tag])}
+      />
+      <span className="font-medium text-foreground">{name}</span>
+      {range !== null && <span className="text-muted-foreground">· {range}</span>}
+      <button
+        type="button"
+        onClick={onClear}
+        aria-label="Clear node selection"
+        className="ml-0.5 rounded text-muted-foreground hover:text-foreground"
+      >
+        ✕
+      </button>
+    </span>
   );
 }
 
