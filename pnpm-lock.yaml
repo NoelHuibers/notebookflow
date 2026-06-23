@@ -26,6 +26,9 @@ importers:
 
   packages/graph-canvas:
     dependencies:
+      dagre:
+        specifier: ^0.8.5
+        version: 0.8.5
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@18.3.1)
@@ -39,6 +42,9 @@ importers:
         specifier: ^11.11.4
         version: 11.11.4(@types/react@18.3.28)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
     devDependencies:
+      '@types/dagre':
+        specifier: ^0.7.54
+        version: 0.7.54
       '@types/react':
         specifier: ^18.3.28
         version: 18.3.28
@@ -1597,6 +1603,9 @@ packages:
   '@types/d3@7.4.3':
     resolution: {integrity: sha512-lZXZ9ckh5R8uiFVt8ogUNf+pIrK4EsWrx2Np75WvF/eTpJ0FMHNhjXk8CKEx/+gpHbNQyJWehbFaTvqmHWB3ww==}
 
+  '@types/dagre@0.7.54':
+    resolution: {integrity: sha512-QjcRY+adGbYvBFS7cwv5txhVIwX1XXIUswWl+kSQTbI6NjgZydrZkEKX/etzVd7i+bCsCb40Z/xlBY5eoFuvWQ==}
+
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
 
@@ -2229,6 +2238,9 @@ packages:
   dagre-d3-es@7.0.14:
     resolution: {integrity: sha512-P4rFMVq9ESWqmOgK+dlXvOtLwYg0i7u0HBGJER0LZDJT2VHIPAMZ/riPxqJceWMStH5+E61QxFra9kIS3AqdMg==}
 
+  dagre@0.8.5:
+    resolution: {integrity: sha512-/aTqmnRta7x7MCCpExk7HQL2O4owCT2h8NT//9I1OQ9vt29Pa0BzSAkR5lwFUcQ7491yVi/3CXU9jQ5o0Mn2Sw==}
+
   data-urls@2.0.0:
     resolution: {integrity: sha512-X5eWTSXO/BJmpdIKCRuKUgSCgAN0OwliVK3yPKbwIWU1Tdw5BRajxlzMidvh+gwko9AfQ9zIj52pzF91Q3YAvQ==}
     engines: {node: '>=10'}
@@ -2504,6 +2516,9 @@ packages:
 
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
+
+  graphlib@2.1.8:
+    resolution: {integrity: sha512-jcLLfkpoVGmH7/InMC/1hIvOPSUh38oJtGhvrOFGzioE1DZ+0YW16RgmOJhHiuWTvGiJQ9Z1Ik43JvkRPRvE+A==}
 
   hachure-fill@0.5.2:
     resolution: {integrity: sha512-3GKBOn+m2LX9iq+JC1064cSFprJY4jL1jCXTcpnfER5HYE2l/4EfWSGzkPa/ZDBmYI0ZOEj5VHV/eKnPGkHuOg==}
@@ -5630,6 +5645,8 @@ snapshots:
       '@types/d3-transition': 3.0.9
       '@types/d3-zoom': 3.0.8
 
+  '@types/dagre@0.7.54': {}
+
   '@types/deep-eql@4.0.2': {}
 
   '@types/eslint-scope@3.7.7':
@@ -6341,6 +6358,11 @@ snapshots:
       d3: 7.9.0
       lodash-es: 4.18.1
 
+  dagre@0.8.5:
+    dependencies:
+      graphlib: 2.1.8
+      lodash: 4.18.1
+
   data-urls@2.0.0:
     dependencies:
       abab: 2.0.6
@@ -6610,6 +6632,10 @@ snapshots:
   gopd@1.2.0: {}
 
   graceful-fs@4.2.11: {}
+
+  graphlib@2.1.8:
+    dependencies:
+      lodash: 4.18.1
 
   hachure-fill@0.5.2: {}
 

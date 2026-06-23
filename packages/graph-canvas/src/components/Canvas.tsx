@@ -9,10 +9,11 @@
  * draggable yet — a future iteration will introduce free-form layout.
  */
 
-import type { ReactElement } from "react";
-import { useCallback, useMemo } from "react";
+import dagre from "dagre";
+import type { ChangeEvent, ReactElement } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { Connection, Edge, EdgeTypes, Node, NodeTypes } from "reactflow";
-import { Background, Controls, MiniMap, Panel, ReactFlow } from "reactflow";
+import { Background, Controls, MiniMap, Panel, ReactFlow, useStore } from "reactflow";
 
 import type { GraphModel, NodeModel, NodeTag, RunSummary, RuntimeState, WireModel } from "../types";
 import type { NotebookNodeData } from "./Node";
@@ -56,6 +57,13 @@ const NODE_X_INSET = 16;
 const GROUP_INNER_TOP_PADDING = 16;
 const GROUP_INNER_BOTTOM_PADDING = 24;
 const COLLAPSED_GROUP_HEIGHT = NODE_GROUP_HEADER_HEIGHT;
+
+const DAGRE_NODE_WIDTH = 240;
+const DAGRE_NODE_HEIGHT = 160;
+const DAGRE_RANKSEP = 90;
+const DAGRE_NODESEP = 50;
+
+export type CanvasLayout = "manual" | "dagre";
 
 const FLOW_STYLE = {
   width: "100%",
@@ -116,19 +124,12 @@ export function Canvas(props: CanvasProps): ReactElement {
     runSummary,
   } = props;
 
-  const rfNodes = useMemo<Node[]>(
-    () =>
-      buildNodes(graph, {
-        onNodeRename,
-        onGroupToggle,
-        onInputsChange,
-        onOutputsChange,
-        variablesByNode,
-        runtimeByNode,
-        timingByNode,
-      }),
-    [
-      graph,
+  const [layout, setLayout] = useState<CanvasLayout>("manual");
+
+  const rfEdges = useMemo<Edge<WireData>[]>(() => buildRfEdges(graph), [graph]);
+
+  const rfNodes = useMemo<Node[]>(() => {
+    const manualNodes = buildNodes(graph, {
       onNodeRename,
       onGroupToggle,
       onInputsChange,
@@ -136,10 +137,23 @@ export function Canvas(props: CanvasProps): ReactElement {
       variablesByNode,
       runtimeByNode,
       timingByNode,
-    ],
-  );
-
-  const rfEdges = useMemo<Edge<WireData>[]>(() => buildRfEdges(graph), [graph]);
+    });
+    if (layout === "manual") {
+      return manualNodes;
+    }
+    return applyDagreLayout(manualNodes, rfEdges);
+  }, [
+    graph,
+    layout,
+    rfEdges,
+    onNodeRename,
+    onGroupToggle,
+    onInputsChange,
+    onOutputsChange,
+    variablesByNode,
+    runtimeByNode,
+    timingByNode,
+  ]);
 
   const handleConnect = useCallback(
     (conn: Connection): void => {
@@ -222,6 +236,9 @@ export function Canvas(props: CanvasProps): ReactElement {
       />
       <Panel position="top-left">
         <KeyboardLegend />
+      </Panel>
+      <Panel position="top-center">
+        <LayoutSelector value={layout} onChange={setLayout} />
       </Panel>
       <Panel position="top-right">
         <CanvasBreadcrumbs graph={graph} />
@@ -486,6 +503,9 @@ function CanvasBreadcrumbs({ graph }: { graph: GraphModel }): ReactElement {
   const nodeCount = Object.keys(graph.nodes).length;
   const groups = Object.values(graph.groups);
   const singleGroup = groups.length === 1 ? groups[0] : undefined;
+  // useStore reads from React Flow's internal store; transform = [tx, ty, zoom]
+  const zoom = useStore((state) => state.transform[2]);
+  const zoomPct = `${String(Math.round(zoom * 100))}%`;
   return (
     <div role="img" aria-label="Canvas summary" style={BREADCRUMBS_STYLE}>
       <span style={BREADCRUMBS_PATH_STYLE}>
@@ -496,6 +516,7 @@ function CanvasBreadcrumbs({ graph }: { graph: GraphModel }): ReactElement {
       {groups.length > 1 && (
         <span>· {groups.length === 1 ? "1 group" : `${String(groups.length)} groups`}</span>
       )}
+      <span title="Use ⌘/Ctrl + wheel to zoom">· {zoomPct}</span>
     </div>
   );
 }
@@ -517,6 +538,100 @@ function KeyboardLegend(): ReactElement {
       </span>
     </div>
   );
+}
+
+const LAYOUT_SELECTOR_STYLE = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  padding: "4px 8px",
+  borderRadius: 6,
+  background: "var(--notebookflow-legend-bg, rgba(255, 255, 255, 0.92))",
+  color: "var(--notebookflow-legend-fg, #1f2937)",
+  fontSize: 10.5,
+  fontFamily: "var(--notebookflow-font-family, ui-sans-serif, system-ui, sans-serif)",
+  border: "1px solid var(--notebookflow-legend-border, #e5e7eb)",
+  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.05)",
+} as const;
+
+const LAYOUT_SELECT_STYLE = {
+  appearance: "none",
+  border: "none",
+  background: "transparent",
+  color: "inherit",
+  font: "inherit",
+  fontSize: 10.5,
+  padding: "0 14px 0 2px",
+  cursor: "pointer",
+  outline: "none",
+} as const;
+
+function LayoutSelector({
+  value,
+  onChange,
+}: {
+  value: CanvasLayout;
+  onChange: (next: CanvasLayout) => void;
+}): ReactElement {
+  const handleChange = (event: ChangeEvent<HTMLSelectElement>): void => {
+    const next = event.target.value;
+    if (next === "manual" || next === "dagre") {
+      onChange(next);
+    }
+  };
+  return (
+    <label style={LAYOUT_SELECTOR_STYLE} className="nodrag nopan">
+      <span style={{ letterSpacing: "0.04em", color: "var(--notebookflow-legend-fg, #4b5563)" }}>
+        layout
+      </span>
+      <select
+        value={value}
+        onChange={handleChange}
+        aria-label="Canvas layout"
+        style={LAYOUT_SELECT_STYLE}
+      >
+        <option value="manual">manual</option>
+        <option value="dagre">dagre (LR)</option>
+      </select>
+    </label>
+  );
+}
+
+/**
+ * Re-position notebook nodes via dagre's layered layout. The group container
+ * is dropped from the rendered set so dagre can space siblings freely; the
+ * parentNode / extent wiring is also stripped so positions are absolute.
+ */
+function applyDagreLayout(nodes: Node[], edges: Edge[]): Node[] {
+  const notebookNodes = nodes.filter((node) => node.type === "notebook");
+  if (notebookNodes.length === 0) {
+    return nodes;
+  }
+  const dagreGraph = new dagre.graphlib.Graph();
+  dagreGraph.setGraph({ rankdir: "LR", nodesep: DAGRE_NODESEP, ranksep: DAGRE_RANKSEP });
+  dagreGraph.setDefaultEdgeLabel(() => ({}));
+  for (const node of notebookNodes) {
+    dagreGraph.setNode(node.id, { width: DAGRE_NODE_WIDTH, height: DAGRE_NODE_HEIGHT });
+  }
+  const ids = new Set(notebookNodes.map((node) => node.id));
+  for (const edge of edges) {
+    if (ids.has(edge.source) && ids.has(edge.target)) {
+      dagreGraph.setEdge(edge.source, edge.target);
+    }
+  }
+  dagre.layout(dagreGraph);
+  return notebookNodes.map((node) => {
+    const { x, y } = dagreGraph.node(node.id);
+    // dagre returns the centre point; React Flow expects top-left.
+    // Drop parentNode + extent so children float free for dagre's layout.
+    const { parentNode, extent, ...rest } = node;
+    void parentNode;
+    void extent;
+    return {
+      ...rest,
+      position: { x: x - DAGRE_NODE_WIDTH / 2, y: y - DAGRE_NODE_HEIGHT / 2 },
+    };
+  });
 }
 
 function buildRfEdges(graph: GraphModel): Edge<WireData>[] {
