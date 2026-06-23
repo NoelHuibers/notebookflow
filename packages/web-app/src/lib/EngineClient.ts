@@ -326,6 +326,90 @@ export class EngineClient {
     }
     return (await res.json()) as PipelineProposal;
   }
+
+  // ---------------------------------------------------------------------
+  // Triggers (manual / cron / file_watch / webhook). Backs the Triggers
+  // dialog in the top bar; engine REST surface lives in server.py at
+  // /triggers, /triggers/{id}/fire, /triggers/{id}/firings.
+  // ---------------------------------------------------------------------
+
+  private httpBase(): string {
+    return this.url.replace(/^ws/, "http").replace(/\/ws$/, "");
+  }
+
+  async listTriggers(): Promise<TriggerSpec[]> {
+    const res = await fetch(`${this.httpBase()}/triggers`, {
+      headers: { ...this.authHeaders() },
+    });
+    if (!res.ok) {
+      throw new Error(`EngineClient.listTriggers: ${await readErrorMessage(res)}`);
+    }
+    return (await res.json()) as TriggerSpec[];
+  }
+
+  async registerTrigger(spec: TriggerSpec): Promise<TriggerSpec> {
+    const res = await fetch(`${this.httpBase()}/triggers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...this.authHeaders() },
+      body: JSON.stringify(spec),
+    });
+    if (!res.ok) {
+      throw new Error(`EngineClient.registerTrigger: ${await readErrorMessage(res)}`);
+    }
+    return (await res.json()) as TriggerSpec;
+  }
+
+  async unregisterTrigger(id: string): Promise<void> {
+    const res = await fetch(`${this.httpBase()}/triggers/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { ...this.authHeaders() },
+    });
+    if (!res.ok) {
+      throw new Error(`EngineClient.unregisterTrigger: ${await readErrorMessage(res)}`);
+    }
+  }
+
+  async fireTrigger(id: string, payload: Record<string, unknown> = {}): Promise<TriggerFiring> {
+    const res = await fetch(`${this.httpBase()}/triggers/${encodeURIComponent(id)}/fire`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...this.authHeaders() },
+      body: JSON.stringify({ payload }),
+    });
+    if (!res.ok) {
+      throw new Error(`EngineClient.fireTrigger: ${await readErrorMessage(res)}`);
+    }
+    return (await res.json()) as TriggerFiring;
+  }
+
+  async listFirings(id: string): Promise<TriggerFiring[]> {
+    const res = await fetch(`${this.httpBase()}/triggers/${encodeURIComponent(id)}/firings`, {
+      headers: { ...this.authHeaders() },
+    });
+    if (!res.ok) {
+      throw new Error(`EngineClient.listFirings: ${await readErrorMessage(res)}`);
+    }
+    return (await res.json()) as TriggerFiring[];
+  }
+
+  /** The ready-to-paste URL a third party hits to fire this trigger. */
+  webhookUrl(triggerId: string): string {
+    return `${this.httpBase()}/triggers/${encodeURIComponent(triggerId)}/fire`;
+  }
+}
+
+export type TriggerKind = "manual" | "cron" | "file_watch" | "webhook";
+
+export interface TriggerSpec {
+  id: string;
+  kind: TriggerKind;
+  pipelineId: string;
+  config: Record<string, unknown>;
+}
+
+export interface TriggerFiring {
+  triggerId: string;
+  firedAt: number;
+  payload: Record<string, unknown>;
 }
 
 export interface PipelineExplanation {
