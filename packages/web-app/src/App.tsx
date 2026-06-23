@@ -22,6 +22,7 @@ import {
   configValuesEqual,
   defaultConfigForManifest,
   hasMissingRequiredConfig,
+  NODE_DRAG_MIME,
   NodeConfigEditor,
   readNotebookflowMetadata,
   resolveNodeConfig,
@@ -30,7 +31,18 @@ import {
 } from "@notebookflow/graph-canvas";
 import type { CellPatch, NotebookCell } from "@notebookflow/graph-canvas/sync";
 import { SyncEngine } from "@notebookflow/graph-canvas/sync";
-import { Download, ExternalLink, Play, RotateCcw, Save } from "lucide-react";
+import {
+  Download,
+  ExternalLink,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Play,
+  RotateCcw,
+  Save,
+  Settings as SettingsIcon,
+  Square,
+  X,
+} from "lucide-react";
 import type {
   ReactElement,
   KeyboardEvent as ReactKeyboardEvent,
@@ -68,6 +80,83 @@ const DEFAULT_PALETTE_WIDTH_PX = 280;
 const KEYBOARD_RESIZE_STEP = 2;
 const TAG_ORDER = ["input", "transform", "output", "ai", "io"] as const;
 const DEFAULT_JUPYTER_URL = "http://localhost:8888";
+const PANEL_STORAGE_KEY = "notebookflow.panels.v1";
+const SETTINGS_STORAGE_KEY = "notebookflow.settings.v1";
+
+type Trigger = "manual" | "scheduled" | "file-watch";
+type Theme = "light" | "dark" | "system";
+
+interface UserSettings {
+  engineUrlOverride: string;
+  theme: Theme;
+}
+
+const DEFAULT_USER_SETTINGS: UserSettings = {
+  engineUrlOverride: "",
+  theme: "system",
+};
+
+function readUserSettings(): UserSettings {
+  if (typeof window === "undefined") {
+    return DEFAULT_USER_SETTINGS;
+  }
+  try {
+    const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (raw === null) {
+      return DEFAULT_USER_SETTINGS;
+    }
+    const parsed = JSON.parse(raw) as Partial<UserSettings>;
+    return {
+      engineUrlOverride:
+        typeof parsed.engineUrlOverride === "string" ? parsed.engineUrlOverride : "",
+      theme:
+        parsed.theme === "light" || parsed.theme === "dark" || parsed.theme === "system"
+          ? parsed.theme
+          : "system",
+    };
+  } catch {
+    return DEFAULT_USER_SETTINGS;
+  }
+}
+
+function applyTheme(theme: Theme): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+  const wantDark =
+    theme === "dark" ||
+    (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.classList.toggle("dark", wantDark);
+}
+
+interface PanelLayoutState {
+  paletteCollapsed: boolean;
+  cellsCollapsed: boolean;
+}
+
+const DEFAULT_PANEL_LAYOUT: PanelLayoutState = {
+  paletteCollapsed: false,
+  cellsCollapsed: false,
+};
+
+function readPanelLayout(): PanelLayoutState {
+  if (typeof window === "undefined") {
+    return DEFAULT_PANEL_LAYOUT;
+  }
+  try {
+    const raw = window.localStorage.getItem(PANEL_STORAGE_KEY);
+    if (raw === null) {
+      return DEFAULT_PANEL_LAYOUT;
+    }
+    const parsed = JSON.parse(raw) as Partial<PanelLayoutState>;
+    return {
+      paletteCollapsed: parsed.paletteCollapsed === true,
+      cellsCollapsed: parsed.cellsCollapsed === true,
+    };
+  } catch {
+    return DEFAULT_PANEL_LAYOUT;
+  }
+}
 const JUPYTER_URL: string = (() => {
   const raw = import.meta.env.VITE_NOTEBOOKFLOW_JUPYTER_URL;
   // Undefined env var -> use default. Explicitly empty string -> opt-out, no button.
@@ -124,14 +213,33 @@ export function App(): ReactElement {
   const [notebookRatio, setNotebookRatio] = useState(DEFAULT_NOTEBOOK_RATIO);
   const [mainRatio, setMainRatio] = useState(DEFAULT_MAIN_RATIO);
   const [paletteWidth, setPaletteWidth] = useState(DEFAULT_PALETTE_WIDTH_PX);
-  const [isPaletteCollapsed, setIsPaletteCollapsed] = useState(false);
+  const [isPaletteCollapsed, setIsPaletteCollapsed] = useState(
+    () => readPanelLayout().paletteCollapsed,
+  );
+  const [isCellsCollapsed, setIsCellsCollapsed] = useState(() => readPanelLayout().cellsCollapsed);
+  const [trigger, setTrigger] = useState<Trigger>("manual");
+  const [settings, setSettings] = useState<UserSettings>(() => readUserSettings());
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [paletteDragState, setPaletteDragState] = useState<{
     startCoord: number;
     startWidth: number;
   } | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const engineRef = useRef<SyncEngine | null>(null);
-  const clientRef = useRef<EngineClient>(new EngineClient());
+  const clientRef = useRef<EngineClient>(
+    settings.engineUrlOverride === ""
+      ? new EngineClient()
+      : new EngineClient(settings.engineUrlOverride),
+  );
+
+  // If the user changes the engine URL override in Settings, rebuild the
+  // EngineClient so subsequent runs hit the new host.
+  useEffect(() => {
+    clientRef.current =
+      settings.engineUrlOverride === ""
+        ? new EngineClient()
+        : new EngineClient(settings.engineUrlOverride);
+  }, [settings.engineUrlOverride]);
   const fileHandleRef = useRef<FileSystemFileHandle | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -164,6 +272,38 @@ export function App(): ReactElement {
   useEffect(() => {
     setSelected((current) => (current === null ? null : (graph.nodes[current.id] ?? null)));
   }, [graph]);
+
+  // Persist panel collapse state so reloads keep the user's layout.
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      window.localStorage.setItem(
+        PANEL_STORAGE_KEY,
+        JSON.stringify({
+          paletteCollapsed: isPaletteCollapsed,
+          cellsCollapsed: isCellsCollapsed,
+        }),
+      );
+    } catch {
+      // Quota / disabled storage -- silently keep working in-memory.
+    }
+  }, [isPaletteCollapsed, isCellsCollapsed]);
+
+  // Persist Settings dialog state (engine URL override + theme) and apply the
+  // theme to the <html> element. "system" tracks prefers-color-scheme.
+  useEffect(() => {
+    applyTheme(settings.theme);
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+    } catch {
+      // best-effort persistence
+    }
+  }, [settings]);
 
   const handleFile = useCallback((text: string, name: string): void => {
     try {
@@ -324,6 +464,21 @@ export function App(): ReactElement {
         });
     },
     [notebook.name],
+  );
+
+  // Drag-from-palette drop handler: look the manifest up by id, then funnel
+  // through the same add-node flow as a click. The drop position is currently
+  // ignored at the SyncEngine layer (node layout is derived from cellIndex);
+  // wiring positional metadata into cell metadata is left to a follow-up.
+  const handlePaneDrop = useCallback(
+    (manifestId: string, _position: { x: number; y: number }): void => {
+      const manifest = paletteNodes.find((entry) => entry.id === manifestId);
+      if (manifest === undefined) {
+        return;
+      }
+      handleAddNode(manifest);
+    },
+    [paletteNodes, handleAddNode],
   );
 
   // Ask the engine to statically analyze cell sources so port autocomplete can
@@ -877,10 +1032,13 @@ export function App(): ReactElement {
   );
 
   const topPaneStyle = useMemo(
-    () => ({
-      gridTemplateColumns: `minmax(${MIN_NOTEBOOK_WIDTH_PX}px, ${notebookRatio}%) ${DIVIDER_SIZE_PX}px minmax(${minCanvasPaneWidth}px, calc(${100 - notebookRatio}% - ${DIVIDER_SIZE_PX}px))`,
-    }),
-    [minCanvasPaneWidth, notebookRatio],
+    () =>
+      isCellsCollapsed
+        ? { gridTemplateColumns: `${DIVIDER_SIZE_PX}px minmax(${minCanvasPaneWidth}px, 1fr)` }
+        : {
+            gridTemplateColumns: `minmax(${MIN_NOTEBOOK_WIDTH_PX}px, ${notebookRatio}%) ${DIVIDER_SIZE_PX}px minmax(${minCanvasPaneWidth}px, calc(${100 - notebookRatio}% - ${DIVIDER_SIZE_PX}px))`,
+          },
+    [isCellsCollapsed, minCanvasPaneWidth, notebookRatio],
   );
 
   const canvasPaneStyle = useMemo(
@@ -949,12 +1107,63 @@ export function App(): ReactElement {
               <Download className="mr-1.5 size-3.5" />
               Download
             </Button>
+            <select
+              value={trigger}
+              onChange={(event) => {
+                const next = event.target.value;
+                if (next === "manual" || next === "scheduled" || next === "file-watch") {
+                  setTrigger(next);
+                }
+              }}
+              aria-label="Pipeline trigger"
+              title={
+                trigger === "manual"
+                  ? "Manual trigger: runs only when you press Run"
+                  : "Scheduled / file-watch triggers ship with #8 TriggerManager — this stub is UI-only"
+              }
+              className="h-8 rounded-md border bg-background px-2 text-[11px]"
+            >
+              <option value="manual">Manual</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="file-watch">File-watch</option>
+            </select>
             <Button variant="default" size="sm" onClick={handleRun} disabled={isRunning}>
               <Play className="mr-1.5 size-3.5" />
               {isRunning ? "Running…" : "Run pipeline"}
             </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled
+              title="Stop arrives with #9 KernelBridge — pipelines currently run synchronously and can't be cancelled mid-flight"
+            >
+              <Square className="mr-1.5 size-3.5" />
+              Stop
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="px-2"
+              title="Settings"
+              aria-label="Settings"
+              onClick={() => {
+                setIsSettingsOpen((open) => !open);
+              }}
+            >
+              <SettingsIcon className="size-4" />
+            </Button>
           </div>
         </header>
+
+        {isSettingsOpen && (
+          <SettingsDialog
+            settings={settings}
+            onChange={setSettings}
+            onClose={() => {
+              setIsSettingsOpen(false);
+            }}
+          />
+        )}
 
         {error !== null && (
           <div className="border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-xs text-destructive">
@@ -964,69 +1173,98 @@ export function App(): ReactElement {
 
         <div ref={contentRef} className="grid min-h-0 flex-1 overflow-hidden" style={contentStyle}>
           <div ref={topPaneRef} className="grid min-h-0 overflow-hidden" style={topPaneStyle}>
-            <section className="flex min-h-0 min-w-0 flex-col">
-              <div className="flex items-center gap-2 border-b px-4 py-2 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1.5">
-                  <span
-                    role="img"
-                    aria-label={isDirty ? "Out of sync" : "In sync"}
-                    title={
-                      isDirty
-                        ? "Cells diverge from the loaded .ipynb"
-                        : "Cells match the loaded .ipynb"
-                    }
-                    className={cn(
-                      "inline-block size-1.5 rounded-full",
-                      isDirty ? "bg-amber-500" : "bg-emerald-500",
-                    )}
-                  />
-                  Cells
-                </span>
-                {selected !== null && (
-                  <SelectedNodePill
-                    name={selected.name}
-                    tag={selected.tag}
-                    cellIndices={selected.cellIndices}
-                    onClear={() => {
-                      setSelected(null);
+            {!isCellsCollapsed && (
+              <section className="flex min-h-0 min-w-0 flex-col">
+                <div className="flex items-center gap-2 border-b px-4 py-2 text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1.5">
+                    <span
+                      role="img"
+                      aria-label={isDirty ? "Out of sync" : "In sync"}
+                      title={
+                        isDirty
+                          ? "Cells diverge from the loaded .ipynb"
+                          : "Cells match the loaded .ipynb"
+                      }
+                      className={cn(
+                        "inline-block size-1.5 rounded-full",
+                        isDirty ? "bg-amber-500" : "bg-emerald-500",
+                      )}
+                    />
+                    Cells
+                  </span>
+                  {selected !== null && (
+                    <SelectedNodePill
+                      name={selected.name}
+                      tag={selected.tag}
+                      cellIndices={selected.cellIndices}
+                      onClear={() => {
+                        setSelected(null);
+                      }}
+                    />
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto h-7 px-1.5"
+                    title="Collapse cell pane"
+                    onClick={() => {
+                      setIsCellsCollapsed(true);
                     }}
-                  />
-                )}
-              </div>
-              <CellToolbar
-                focusedCellIndex={focusedCellIndex}
-                focusedCell={
-                  focusedCellIndex === null ? null : (notebook.cells[focusedCellIndex] ?? null)
-                }
-                hasClipboard={cellClipboard !== null}
-                onAddCell={handleAddCell}
-                onDeleteCell={handleDeleteFocusedCell}
-                onCutCell={handleCutFocusedCell}
-                onCopyCell={handleCopyFocusedCell}
-                onPasteCell={handlePasteCell}
-                onChangeCellType={handleChangeFocusedCellType}
-                isAddMenuOpen={isAddCellMenuOpen}
-                onAddCellMenuOpenChange={setIsAddCellMenuOpen}
-              />
-              <ScrollArea className="min-h-0 flex-1">
-                <CellList
-                  cells={notebook.cells}
-                  onCellsChange={handleCellsChange}
-                  outputsByCell={outputsByCell}
-                  scrollToCellIndex={selected?.cellIndices[0] ?? null}
+                  >
+                    <PanelLeftClose className="size-3.5" />
+                  </Button>
+                </div>
+                <CellToolbar
                   focusedCellIndex={focusedCellIndex}
-                  onFocusCell={setFocusedCellIndex}
+                  focusedCell={
+                    focusedCellIndex === null ? null : (notebook.cells[focusedCellIndex] ?? null)
+                  }
+                  hasClipboard={cellClipboard !== null}
+                  onAddCell={handleAddCell}
+                  onDeleteCell={handleDeleteFocusedCell}
+                  onCutCell={handleCutFocusedCell}
+                  onCopyCell={handleCopyFocusedCell}
+                  onPasteCell={handlePasteCell}
+                  onChangeCellType={handleChangeFocusedCellType}
+                  isAddMenuOpen={isAddCellMenuOpen}
+                  onAddCellMenuOpenChange={setIsAddCellMenuOpen}
                 />
-              </ScrollArea>
-              <CellPaneFooter cells={notebook.cells} isDirty={isDirty} isRunning={isRunning} />
-            </section>
+                <ScrollArea className="min-h-0 flex-1">
+                  <CellList
+                    cells={notebook.cells}
+                    onCellsChange={handleCellsChange}
+                    outputsByCell={outputsByCell}
+                    scrollToCellIndex={selected?.cellIndices[0] ?? null}
+                    focusedCellIndex={focusedCellIndex}
+                    onFocusCell={setFocusedCellIndex}
+                  />
+                </ScrollArea>
+                <CellPaneFooter cells={notebook.cells} isDirty={isDirty} isRunning={isRunning} />
+              </section>
+            )}
 
-            <PaneDivider
-              orientation="vertical"
-              label="Resize notebook and canvas panes"
-              onPointerDown={handleVerticalDividerPointerDown}
-              onKeyDown={handleVerticalDividerKeyDown}
-            />
+            {isCellsCollapsed ? (
+              <div className="flex w-full items-start justify-center border-r bg-muted/30 py-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-1.5"
+                  title="Expand cell pane"
+                  onClick={() => {
+                    setIsCellsCollapsed(false);
+                  }}
+                >
+                  <PanelLeftOpen className="size-3.5" />
+                </Button>
+              </div>
+            ) : (
+              <PaneDivider
+                orientation="vertical"
+                label="Resize notebook and canvas panes"
+                onPointerDown={handleVerticalDividerPointerDown}
+                onKeyDown={handleVerticalDividerKeyDown}
+              />
+            )}
 
             <section className="flex min-h-0 min-w-0 flex-col">
               <div className="flex items-center justify-between border-b px-4 py-2 text-xs text-muted-foreground">
@@ -1063,6 +1301,7 @@ export function App(): ReactElement {
                     runtimeByNode={runtimeByNode}
                     timingByNode={timingByNode}
                     runSummary={runSummary}
+                    onPaneDrop={handlePaneDrop}
                   />
                 </div>
 
@@ -1153,10 +1392,16 @@ export function App(): ReactElement {
                                   <button
                                     key={manifest.id}
                                     type="button"
+                                    draggable
+                                    onDragStart={(event) => {
+                                      event.dataTransfer.setData(NODE_DRAG_MIME, manifest.id);
+                                      event.dataTransfer.effectAllowed = "copy";
+                                    }}
                                     onClick={() => {
                                       handleAddNode(manifest);
                                     }}
-                                    className="rounded-md border bg-background px-3 py-2 text-left transition-colors hover:bg-muted/70"
+                                    title={`Click to append at the end, or drag onto the canvas to place at the drop point — ${manifest.name}`}
+                                    className="cursor-grab rounded-md border bg-background px-3 py-2 text-left transition-colors hover:bg-muted/70 active:cursor-grabbing"
                                   >
                                     <div className="flex items-center justify-between gap-2">
                                       <span className="text-sm font-medium">{manifest.name}</span>
@@ -1453,6 +1698,66 @@ function SelectedNodePill({
         ✕
       </button>
     </span>
+  );
+}
+
+interface SettingsDialogProps {
+  settings: UserSettings;
+  onChange: (next: UserSettings) => void;
+  onClose: () => void;
+}
+
+function SettingsDialog({ settings, onChange, onClose }: SettingsDialogProps): ReactElement {
+  return (
+    <div className="border-b bg-card/95 backdrop-blur px-4 py-3 shadow-sm">
+      <div className="mx-auto flex max-w-3xl flex-col gap-3 text-xs">
+        <div className="flex items-center justify-between">
+          <span className="font-semibold tracking-tight">Settings</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-1.5"
+            onClick={onClose}
+            aria-label="Close settings"
+          >
+            <X className="size-3.5" />
+          </Button>
+        </div>
+        <label className="flex flex-col gap-1">
+          <span className="text-muted-foreground">Engine URL override</span>
+          <input
+            type="text"
+            value={settings.engineUrlOverride}
+            onChange={(event) => {
+              onChange({ ...settings, engineUrlOverride: event.target.value });
+            }}
+            placeholder="ws://localhost:8765/ws  (leave blank to use VITE_NOTEBOOKFLOW_ENGINE_URL)"
+            className="rounded-md border bg-background px-2 py-1 font-mono text-[11px] outline-none focus:ring-1 focus:ring-ring"
+          />
+          <span className="text-[10px] italic text-muted-foreground">
+            Connects to a different engine on the next pipeline run. Leave blank to use the env-var
+            default.
+          </span>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-muted-foreground">Theme</span>
+          <select
+            value={settings.theme}
+            onChange={(event) => {
+              const value = event.target.value;
+              if (value === "light" || value === "dark" || value === "system") {
+                onChange({ ...settings, theme: value });
+              }
+            }}
+            className="rounded-md border bg-background px-2 py-1 text-[11px]"
+          >
+            <option value="system">Match system</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+      </div>
+    </div>
   );
 }
 
