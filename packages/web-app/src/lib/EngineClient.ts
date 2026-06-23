@@ -282,6 +282,29 @@ export class EngineClient {
   }
 
   /**
+   * Free-form Q&A backing the Cmd/Ctrl+K command palette. Backed by
+   * Anthropic when configured; falls back to a keyword-driven template
+   * hint that nudges the user toward the matching button.
+   */
+  async askLLM(prompt: string, pipeline?: PipelineDef): Promise<AskAnswer> {
+    const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/llm/ask");
+    const body: { prompt: string; pipeline?: PipelineDef } = { prompt };
+    if (pipeline !== undefined) {
+      body.pipeline = pipeline;
+    }
+    const res = await fetch(httpUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...this.authHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const message = await readErrorMessage(res);
+      throw new Error(`EngineClient.askLLM: ${message}`);
+    }
+    return (await res.json()) as AskAnswer;
+  }
+
+  /**
    * Draft a fresh pipeline from a natural-language prompt. Backed by
    * Anthropic when configured; falls back to a keyword-driven template
    * draft otherwise.
@@ -307,6 +330,12 @@ export class EngineClient {
 
 export interface PipelineExplanation {
   prose: string;
+  backend: string;
+  warnings: string[];
+}
+
+export interface AskAnswer {
+  answer: string;
   backend: string;
   warnings: string[];
 }

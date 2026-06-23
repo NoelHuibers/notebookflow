@@ -662,3 +662,45 @@ def test_webhook_trigger_routes_payload_to_callback(client: TestClient) -> None:
         assert r.json()["payload"]["repo"] == "notebookflow"
     finally:
         client.delete("/triggers/wh")
+
+
+# ---------------------------------------------------------------------------
+# /llm/ask -- command palette
+# ---------------------------------------------------------------------------
+
+
+def test_ask_endpoint_returns_template_answer_without_key(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("NOTEBOOKFLOW_ANTHROPIC_API_KEY", raising=False)
+    r = client.post("/llm/ask", json={"prompt": "How do I run this?"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["backend"] == "template"
+    assert "Run pipeline" in body["answer"]
+
+
+def test_ask_endpoint_accepts_pipeline_context(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("NOTEBOOKFLOW_ANTHROPIC_API_KEY", raising=False)
+    r = client.post(
+        "/llm/ask",
+        json={"prompt": "explain this pipeline", "pipeline": _linear_pipeline()},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["backend"] == "template"
+    # The explain-intent hint points at the Explain button regardless of context.
+    assert "Explain" in body["answer"]
+
+
+def test_ask_endpoint_empty_prompt_returns_400(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("NOTEBOOKFLOW_ANTHROPIC_API_KEY", raising=False)
+    r = client.post("/llm/ask", json={"prompt": "   "})
+    assert r.status_code == 400

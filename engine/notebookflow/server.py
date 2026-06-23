@@ -44,6 +44,7 @@ from notebookflow.core.dag import DAG, DAGEdge, DAGNode
 from notebookflow.core.databus import DataBus
 from notebookflow.core.executor import ExecutionResult, Executor
 from notebookflow.core.triggers import Trigger, TriggerFiring, TriggerManager
+from notebookflow.llm.ask import Ask
 from notebookflow.llm.code_synth import CodeSynth
 from notebookflow.llm.explainer import Explainer
 from notebookflow.llm.pipeline_author import PipelineAuthor
@@ -241,6 +242,17 @@ class FireTriggerRequest(_APIModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class AskRequest(_APIModel):
+    prompt: str
+    pipeline: PipelineDef | None = None
+
+
+class AskResponse(_APIModel):
+    answer: str
+    backend: str
+    warnings: list[str] = Field(default_factory=list)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Discover available node manifests on startup; clean up triggers on exit."""
@@ -249,6 +261,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     _app.state.code_synth = CodeSynth(registry)
     _app.state.explainer = Explainer()
     _app.state.pipeline_author = PipelineAuthor(registry)
+    _app.state.ask = Ask()
     trigger_manager = TriggerManager()
     trigger_manager.on_fire(_log_trigger_fire)
     _app.state.trigger_manager = trigger_manager
@@ -326,6 +339,14 @@ def _trigger_manager(app_ref: FastAPI) -> TriggerManager:
         manager.on_fire(_log_trigger_fire)
         app_ref.state.trigger_manager = manager
     return manager
+
+
+def _ask(app_ref: FastAPI) -> Ask:
+    ask = getattr(app_ref.state, "ask", None)
+    if not isinstance(ask, Ask):
+        ask = Ask()
+        app_ref.state.ask = ask
+    return ask
 
 
 def _collect_target_names(target: ast.expr, into: list[str], seen: set[str]) -> None:
@@ -668,6 +689,35 @@ async def list_firings(trigger_id: str) -> list[dict[str, Any]]:
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"unknown trigger id: {trigger_id}") from exc
     return [_firing_to_model(f).model_dump(by_alias=True) for f in manager.firings(trigger_id)]
+
+
+# ---------------------------------------------------------------------------
+# /llm/ask -- command palette free-form Q&A
+# ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/llm/ask",
+    response_model=AskResponse,
+    dependencies=[Depends(require_auth)],
+)
+async def ask_llm(request: AskRequest) -> AskResponse:
+    """Free-form Q&A backing the web-app's Cmd/Ctrl+K command palette.
+
+    Backed by Anthropic when configured; falls back to a keyword-driven
+    template hint that nudges the user toward the matching button
+    (Explain / Compose / Run / triggers).
+    """
+    if request.prompt.strip() == "":
+        raise HTTPException(status_code=400, detail="prompt must not be empty")
+    dag: DAG | None = None
+    if request.pipeline is not None:
+        try:
+            dag = _build_dag(request.pipeline)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    result = await _ask(app).ask(request.prompt, dag=dag)
+    return AskResponse(answer=result.answer, backend=result.backend, warnings=result.warnings)
 
 
 @app.websocket("/ws")

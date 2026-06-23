@@ -32,6 +32,7 @@ import {
 import type { CellPatch, NotebookCell } from "@notebookflow/graph-canvas/sync";
 import { SyncEngine } from "@notebookflow/graph-canvas/sync";
 import {
+  Command,
   Download,
   ExternalLink,
   PanelLeftClose,
@@ -61,6 +62,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type {
+  AskAnswer,
   EngineEvent,
   NbOutput,
   PipelineDef,
@@ -236,6 +238,11 @@ export function App(): ReactElement {
   const [isComposing, setIsComposing] = useState(false);
   const [composeResult, setComposeResult] = useState<PipelineProposal | null>(null);
   const [composeError, setComposeError] = useState<string | null>(null);
+  const [isAskOpen, setIsAskOpen] = useState(false);
+  const [askPrompt, setAskPrompt] = useState("");
+  const [isAsking, setIsAsking] = useState(false);
+  const [askResult, setAskResult] = useState<AskAnswer | null>(null);
+  const [askError, setAskError] = useState<string | null>(null);
   const [paletteDragState, setPaletteDragState] = useState<{
     startCoord: number;
     startWidth: number;
@@ -256,6 +263,27 @@ export function App(): ReactElement {
         ? new EngineClient()
         : new EngineClient(settings.engineUrlOverride);
   }, [settings.engineUrlOverride]);
+
+  // Cmd/Ctrl+K opens the Ask AI command palette anywhere in the app.
+  // Skip when a dialog is already open so the hotkey can't reopen on
+  // top of itself, and let inputs handle K when modifier isn't pressed.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent): void {
+      const modifier = event.metaKey || event.ctrlKey;
+      if (!modifier) {
+        return;
+      }
+      if (event.key !== "k" && event.key !== "K") {
+        return;
+      }
+      event.preventDefault();
+      setIsAskOpen((open) => !open);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
   const fileHandleRef = useRef<FileSystemFileHandle | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -596,6 +624,28 @@ export function App(): ReactElement {
       setIsComposing(false);
     }
   }, [composePrompt]);
+
+  const handleAsk = useCallback(async (): Promise<void> => {
+    if (askPrompt.trim() === "") {
+      setAskError("Ask a question or describe what you'd like to do.");
+      return;
+    }
+    setIsAsking(true);
+    setAskError(null);
+    try {
+      // Pass the current pipeline as context so the answer can reference
+      // specific node names. When the canvas is empty we omit it -- the
+      // engine treats absent pipelines as a general Q&A.
+      const pipeline = pipelineDef.nodes.length > 0 ? pipelineDef : undefined;
+      const result = await clientRef.current.askLLM(askPrompt.trim(), pipeline);
+      setAskResult(result);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "unknown error";
+      setAskError(`Could not reach the engine: ${message}`);
+    } finally {
+      setIsAsking(false);
+    }
+  }, [askPrompt, pipelineDef]);
 
   const handleApplyProposal = useCallback((): void => {
     if (composeResult === null || composeResult.cellSources.length === 0) {
@@ -1263,6 +1313,20 @@ export function App(): ReactElement {
               <Wand2 className="mr-1.5 size-3.5" />
               Compose
             </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setIsAskOpen(true);
+              }}
+              title="Ask AI anything about your pipeline (Cmd/Ctrl+K)"
+            >
+              <Command className="mr-1.5 size-3.5" />
+              Ask AI
+              <Badge variant="outline" className="ml-2 px-1 font-mono text-[10px]">
+                ⌘K
+              </Badge>
+            </Button>
             <Button variant="default" size="sm" onClick={handleRun} disabled={isRunning}>
               <Play className="mr-1.5 size-3.5" />
               {isRunning ? "Running…" : "Run pipeline"}
@@ -1325,6 +1389,22 @@ export function App(): ReactElement {
               setIsComposeOpen(false);
               setComposeResult(null);
               setComposeError(null);
+            }}
+          />
+        )}
+
+        {isAskOpen && (
+          <AskPalette
+            prompt={askPrompt}
+            isAsking={isAsking}
+            result={askResult}
+            errorMessage={askError}
+            onPromptChange={setAskPrompt}
+            onSubmit={() => {
+              void handleAsk();
+            }}
+            onClose={() => {
+              setIsAskOpen(false);
             }}
           />
         )}
@@ -2056,6 +2136,104 @@ function ComposeDialog({
               <ul className="mt-2 flex flex-col gap-0.5 text-[10px] text-muted-foreground">
                 {result.warnings.map((warning, idx) => (
                   <li key={`warning-${String(idx)}`}>• {warning}</li>
+                ))}
+              </ul>
+            )}
+          </ScrollArea>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface AskPaletteProps {
+  prompt: string;
+  isAsking: boolean;
+  result: AskAnswer | null;
+  errorMessage: string | null;
+  onPromptChange: (next: string) => void;
+  onSubmit: () => void;
+  onClose: () => void;
+}
+
+function AskPalette({
+  prompt,
+  isAsking,
+  result,
+  errorMessage,
+  onPromptChange,
+  onSubmit,
+  onClose,
+}: AskPaletteProps): ReactElement {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    textareaRef.current?.focus();
+  }, []);
+  function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>): void {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      onSubmit();
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+    }
+  }
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-background/70 p-6 pt-[15vh] backdrop-blur">
+      <div className="flex max-h-[70vh] w-full max-w-2xl flex-col gap-3 overflow-hidden rounded-md border bg-card p-4 shadow-xl">
+        <div className="flex items-center justify-between">
+          <span className="flex items-center gap-2 text-sm font-semibold">
+            <Command className="size-4 text-primary" />
+            Ask AI
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-1.5"
+            onClick={onClose}
+            aria-label="Dismiss"
+          >
+            <X className="size-3.5" />
+          </Button>
+        </div>
+        <textarea
+          ref={textareaRef}
+          rows={3}
+          value={prompt}
+          onChange={(event) => {
+            onPromptChange(event.target.value);
+          }}
+          onKeyDown={handleKeyDown}
+          placeholder="Ask anything — describe what you want to do, request an explanation, or ask a pandas question"
+          aria-label="Ask AI prompt"
+          className="resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
+        />
+        {errorMessage !== null && (
+          <p className="rounded border border-destructive/40 bg-destructive/5 px-2 py-1 text-[11px] text-destructive">
+            {errorMessage}
+          </p>
+        )}
+        <div className="flex items-center gap-2">
+          <Button variant="default" size="sm" onClick={onSubmit} disabled={isAsking}>
+            {isAsking ? "Thinking…" : "Ask"}
+          </Button>
+          {result !== null && (
+            <Badge variant="outline" className="font-mono text-[10px]">
+              {result.backend}
+            </Badge>
+          )}
+          <span className="ml-auto text-[10px] text-muted-foreground">
+            ⌘/Ctrl+Enter to send · Esc to close
+          </span>
+        </div>
+        {result !== null && (
+          <ScrollArea className="min-h-[120px] flex-1 rounded border bg-muted/30 p-3">
+            <p className="whitespace-pre-wrap text-sm leading-relaxed">{result.answer}</p>
+            {result.warnings.length > 0 && (
+              <ul className="mt-3 flex flex-col gap-0.5 text-[10px] text-muted-foreground">
+                {result.warnings.map((warning, idx) => (
+                  <li key={`ask-warning-${String(idx)}`}>• {warning}</li>
                 ))}
               </ul>
             )}
