@@ -14,7 +14,7 @@ import { useCallback, useMemo } from "react";
 import type { Connection, Edge, EdgeTypes, Node, NodeTypes } from "reactflow";
 import { Background, Controls, MiniMap, Panel, ReactFlow } from "reactflow";
 
-import type { GraphModel, NodeModel, NodeTag, RuntimeState, WireModel } from "../types";
+import type { GraphModel, NodeModel, NodeTag, RunSummary, RuntimeState, WireModel } from "../types";
 import type { NotebookNodeData } from "./Node";
 import { NotebookNode } from "./Node";
 import type { NodeGroupData } from "./NodeGroup";
@@ -89,6 +89,11 @@ export interface CanvasProps {
    * dot once the node enters a terminal state.
    */
   timingByNode?: Record<string, number>;
+  /**
+   * Summary of the most recent pipeline run, rendered as a bottom-center
+   * overlay. Hosts compute it from pipelineCompleted events.
+   */
+  runSummary?: RunSummary | null;
 }
 
 export function Canvas(props: CanvasProps): ReactElement {
@@ -104,6 +109,7 @@ export function Canvas(props: CanvasProps): ReactElement {
     variablesByNode,
     runtimeByNode,
     timingByNode,
+    runSummary,
   } = props;
 
   const rfNodes = useMemo<Node[]>(
@@ -216,6 +222,11 @@ export function Canvas(props: CanvasProps): ReactElement {
       <Panel position="top-right">
         <CanvasBreadcrumbs graph={graph} />
       </Panel>
+      {runSummary !== undefined && runSummary !== null && (
+        <Panel position="bottom-center">
+          <RunSummaryOverlay summary={runSummary} />
+        </Panel>
+      )}
     </ReactFlow>
   );
 }
@@ -361,6 +372,95 @@ const BREADCRUMBS_PATH_STYLE = {
   color: "var(--notebookflow-legend-fg, #1f2937)",
   fontWeight: 500,
 } as const;
+
+const RUN_SUMMARY_STYLE = {
+  display: "flex",
+  gap: 10,
+  alignItems: "center",
+  padding: "5px 12px",
+  borderRadius: 999,
+  background: "var(--notebookflow-legend-bg, rgba(255, 255, 255, 0.92))",
+  color: "var(--notebookflow-legend-fg, #4b5563)",
+  fontSize: 10.5,
+  fontFamily: "var(--notebookflow-font-family, ui-sans-serif, system-ui, sans-serif)",
+  letterSpacing: "0.02em",
+  border: "1px solid var(--notebookflow-legend-border, #e5e7eb)",
+  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.05)",
+  pointerEvents: "none",
+} as const;
+
+const RUN_SUMMARY_CHIP_STYLE = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 4,
+  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+  fontSize: 10,
+} as const;
+
+function RunSummaryOverlay({ summary }: { summary: RunSummary }): ReactElement {
+  const { totalNodes, ok, error, skipped, totalDurationMs } = summary;
+  const overallStatus = error > 0 ? "error" : skipped > 0 ? "partial" : ok > 0 ? "ok" : "empty";
+  const overallColor =
+    overallStatus === "ok"
+      ? "#10b981"
+      : overallStatus === "partial"
+        ? "#f59e0b"
+        : overallStatus === "error"
+          ? "#ef4444"
+          : "#9ca3af";
+  const overallLabel =
+    overallStatus === "ok"
+      ? "completed"
+      : overallStatus === "partial"
+        ? "partial"
+        : overallStatus === "error"
+          ? "failed"
+          : "no nodes";
+  return (
+    <div role="img" aria-label="Last run summary" style={RUN_SUMMARY_STYLE}>
+      <span style={RUN_SUMMARY_CHIP_STYLE}>
+        <span
+          style={{
+            display: "inline-block",
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            background: overallColor,
+          }}
+        />
+        {overallLabel}
+      </span>
+      <span style={RUN_SUMMARY_CHIP_STYLE}>
+        {totalNodes === 1 ? "1 node" : `${String(totalNodes)} nodes`}
+      </span>
+      {ok > 0 && (
+        <span style={{ ...RUN_SUMMARY_CHIP_STYLE, color: "#10b981" }}>✓ {String(ok)}</span>
+      )}
+      {error > 0 && (
+        <span style={{ ...RUN_SUMMARY_CHIP_STYLE, color: "#ef4444" }}>✗ {String(error)}</span>
+      )}
+      {skipped > 0 && (
+        <span style={{ ...RUN_SUMMARY_CHIP_STYLE, color: "#f59e0b" }}>↷ {String(skipped)}</span>
+      )}
+      <span style={RUN_SUMMARY_CHIP_STYLE}>{formatRunDuration(totalDurationMs)}</span>
+    </div>
+  );
+}
+
+function formatRunDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) {
+    return "—";
+  }
+  if (ms < 1000) {
+    return `${String(Math.round(ms))}ms`;
+  }
+  if (ms < 60_000) {
+    return `${(ms / 1000).toFixed(1)}s`;
+  }
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms - minutes * 60_000) / 1000);
+  return `${String(minutes)}m ${String(seconds)}s`;
+}
 
 function CanvasBreadcrumbs({ graph }: { graph: GraphModel }): ReactElement {
   const nodeCount = Object.keys(graph.nodes).length;

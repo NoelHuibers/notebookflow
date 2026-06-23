@@ -20,6 +20,18 @@ export type NodeTag = "input" | "transform" | "output" | "ai" | "io";
  */
 export type RuntimeState = "idle" | "queued" | "running" | "ok" | "error" | "skipped";
 
+/**
+ * Summary of the most recent pipeline run, rendered as the canvas run-status
+ * overlay. Hosts compute it from engine `pipelineCompleted` events.
+ */
+export interface RunSummary {
+  totalNodes: number;
+  ok: number;
+  error: number;
+  skipped: number;
+  totalDurationMs: number;
+}
+
 /** A single `# @node` marker as parsed from a notebook cell. */
 export interface NodeMarker {
   /** Node display name from the marker. */
