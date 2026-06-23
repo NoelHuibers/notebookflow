@@ -102,6 +102,111 @@ describe("NotebookNode", () => {
     expect(onRename).toHaveBeenCalledWith("node-1", "Cleaner");
   });
 
+  it("renders a status dot whose aria-label reflects runtimeState", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    document.body.appendChild(container);
+    mounts.push({ container, root });
+
+    act(() => {
+      root.render(
+        <NotebookNode
+          id="node-1"
+          type="notebook"
+          selected={false}
+          xPos={0}
+          yPos={0}
+          zIndex={0}
+          isConnectable
+          dragging={false}
+          data={{
+            id: "node-1",
+            name: "Load CSV",
+            tag: "input",
+            inputs: [],
+            outputs: ["df"],
+            cellIndices: [0],
+            groupId: "group-a",
+            runtimeState: "error",
+          }}
+        />,
+      );
+    });
+
+    const dot = container.querySelector('[aria-label^="Status:"]');
+    expect(dot).not.toBeNull();
+    expect(dot?.getAttribute("aria-label")).toBe("Status: error");
+  });
+
+  it("renders the duration label when runtimeDurationMs is set", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    document.body.appendChild(container);
+    mounts.push({ container, root });
+
+    act(() => {
+      root.render(
+        <NotebookNode
+          id="node-1"
+          type="notebook"
+          selected={false}
+          xPos={0}
+          yPos={0}
+          zIndex={0}
+          isConnectable
+          dragging={false}
+          data={{
+            id: "node-1",
+            name: "Load CSV",
+            tag: "input",
+            inputs: [],
+            outputs: ["df"],
+            cellIndices: [0],
+            groupId: "group-a",
+            runtimeState: "ok",
+            runtimeDurationMs: 1234,
+          }}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("1.2s");
+  });
+
+  it("omits the duration label when runtimeDurationMs is undefined", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    document.body.appendChild(container);
+    mounts.push({ container, root });
+
+    act(() => {
+      root.render(
+        <NotebookNode
+          id="node-1"
+          type="notebook"
+          selected={false}
+          xPos={0}
+          yPos={0}
+          zIndex={0}
+          isConnectable
+          dragging={false}
+          data={{
+            id: "node-1",
+            name: "Load CSV",
+            tag: "input",
+            inputs: [],
+            outputs: ["df"],
+            cellIndices: [0],
+            groupId: "group-a",
+          }}
+        />,
+      );
+    });
+
+    expect(container.textContent).not.toMatch(/\d+ms/);
+    expect(container.textContent).not.toMatch(/\d+\.\ds/);
+  });
+
   it("opens inline rename from a title double click", () => {
     const onRename = vi.fn();
     const container = document.createElement("div");
