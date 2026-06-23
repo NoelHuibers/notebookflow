@@ -36,6 +36,7 @@ from notebookflow.core.dag import DAG, DAGEdge, DAGNode
 from notebookflow.core.databus import DataBus
 from notebookflow.core.executor import ExecutionResult, Executor
 from notebookflow.llm.code_synth import CodeSynth
+from notebookflow.llm.explainer import Explainer
 from notebookflow.protocol.registry import Registry
 
 
@@ -177,12 +178,24 @@ class SynthesizeNodeResponse(_APIModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class ExplainPipelineRequest(_APIModel):
+    pipeline: PipelineDef
+    instruction: str = ""
+
+
+class ExplainPipelineResponse(_APIModel):
+    prose: str
+    backend: str
+    warnings: list[str] = Field(default_factory=list)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Discover available node manifests on startup."""
     registry = Registry.discover()
     _app.state.registry = registry
     _app.state.code_synth = CodeSynth(registry)
+    _app.state.explainer = Explainer()
     yield
 
 
@@ -215,6 +228,14 @@ def _code_synth(app_ref: FastAPI) -> CodeSynth:
         synth = CodeSynth(registry)
         app_ref.state.code_synth = synth
     return synth
+
+
+def _explainer(app_ref: FastAPI) -> Explainer:
+    explainer = getattr(app_ref.state, "explainer", None)
+    if not isinstance(explainer, Explainer):
+        explainer = Explainer()
+        app_ref.state.explainer = explainer
+    return explainer
 
 
 def _collect_target_names(target: ast.expr, into: list[str], seen: set[str]) -> None:
@@ -409,6 +430,31 @@ async def run_pipeline(pipeline_id: str, pipeline: PipelineDef) -> RunResponse:
     results = await _run_pipeline(pipeline_id, pipeline)
     return RunResponse(
         pipeline_id=pipeline_id, results=[_result_to_model(r) for r in results]
+    )
+
+
+@app.post(
+    "/pipelines/explain",
+    response_model=ExplainPipelineResponse,
+    dependencies=[Depends(require_auth)],
+)
+async def explain_pipeline(request: ExplainPipelineRequest) -> ExplainPipelineResponse:
+    """Return a literate prose walkthrough of the pipeline.
+
+    Uses Anthropic when ANTHROPIC_API_KEY (or NOTEBOOKFLOW_ANTHROPIC_API_KEY)
+    is set; falls back to a deterministic template outline otherwise so the
+    canvas sidebar always has something to render.
+    """
+    try:
+        dag = _build_dag(request.pipeline)
+        result = await _explainer(app).explain(dag, instruction=request.instruction)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return ExplainPipelineResponse(
+        prose=result.prose,
+        backend=result.backend,
+        warnings=result.warnings,
     )
 
 

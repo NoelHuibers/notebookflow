@@ -40,6 +40,7 @@ import {
   RotateCcw,
   Save,
   Settings as SettingsIcon,
+  Sparkles,
   Square,
   X,
 } from "lucide-react";
@@ -58,7 +59,7 @@ import { FileDropZone } from "@/components/FileDropZone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import type { EngineEvent, NbOutput, PipelineDef } from "@/lib/EngineClient";
+import type { EngineEvent, NbOutput, PipelineDef, PipelineExplanation } from "@/lib/EngineClient";
 import { EngineClient } from "@/lib/EngineClient";
 import { canSaveInPlace, pickSaveFileHandle, writeFileHandle } from "@/lib/fileSystemAccess";
 import type { IpynbDoc } from "@/lib/notebook";
@@ -220,6 +221,8 @@ export function App(): ReactElement {
   const [trigger, setTrigger] = useState<Trigger>("manual");
   const [settings, setSettings] = useState<UserSettings>(() => readUserSettings());
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [explanation, setExplanation] = useState<PipelineExplanation | null>(null);
+  const [isExplaining, setIsExplaining] = useState(false);
   const [paletteDragState, setPaletteDragState] = useState<{
     startCoord: number;
     startWidth: number;
@@ -318,6 +321,7 @@ export function App(): ReactElement {
       setTimingByNode({});
       setRunSummary(null);
       setFocusedCellIndex(null);
+      setExplanation(null);
       fileHandleRef.current = null;
       setSaveStatus("idle");
       setError(null);
@@ -541,6 +545,25 @@ export function App(): ReactElement {
     () => buildPipelineDef(graph, notebook.cells, notebook.name),
     [graph, notebook],
   );
+
+  // Ask the engine for a prose walkthrough of the current pipeline. Backed by
+  // Anthropic when configured server-side; falls back to a template outline.
+  const handleExplain = useCallback(async (): Promise<void> => {
+    if (isExplaining) {
+      return;
+    }
+    setIsExplaining(true);
+    setError(null);
+    try {
+      const result = await clientRef.current.explainPipeline(pipelineDef);
+      setExplanation(result);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "unknown error";
+      setError(`Could not explain pipeline: ${message}`);
+    } finally {
+      setIsExplaining(false);
+    }
+  }, [isExplaining, pipelineDef]);
 
   const manifestById = useMemo(
     () => new Map(paletteNodes.map((manifest) => [manifest.id, manifest] as const)),
@@ -1127,6 +1150,18 @@ export function App(): ReactElement {
               <option value="scheduled">Scheduled</option>
               <option value="file-watch">File-watch</option>
             </select>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                void handleExplain();
+              }}
+              disabled={isExplaining}
+              title="Ask Claude (or the template fallback) to describe what this pipeline does"
+            >
+              <Sparkles className="mr-1.5 size-3.5" />
+              {isExplaining ? "Explaining…" : "Explain"}
+            </Button>
             <Button variant="default" size="sm" onClick={handleRun} disabled={isRunning}>
               <Play className="mr-1.5 size-3.5" />
               {isRunning ? "Running…" : "Run pipeline"}
@@ -1161,6 +1196,15 @@ export function App(): ReactElement {
             onChange={setSettings}
             onClose={() => {
               setIsSettingsOpen(false);
+            }}
+          />
+        )}
+
+        {explanation !== null && (
+          <ExplanationPanel
+            explanation={explanation}
+            onClose={() => {
+              setExplanation(null);
             }}
           />
         )}
@@ -1756,6 +1800,46 @@ function SettingsDialog({ settings, onChange, onClose }: SettingsDialogProps): R
             <option value="dark">Dark</option>
           </select>
         </label>
+      </div>
+    </div>
+  );
+}
+
+interface ExplanationPanelProps {
+  explanation: PipelineExplanation;
+  onClose: () => void;
+}
+
+function ExplanationPanel({ explanation, onClose }: ExplanationPanelProps): ReactElement {
+  return (
+    <div className="border-b bg-card/95 px-4 py-3 shadow-sm backdrop-blur">
+      <div className="mx-auto flex max-w-3xl flex-col gap-2 text-xs">
+        <div className="flex items-center justify-between">
+          <span className="flex items-center gap-2">
+            <Sparkles className="size-3.5 text-primary" />
+            <span className="font-semibold tracking-tight">Pipeline explanation</span>
+            <Badge variant="outline" className="font-mono text-[10px]">
+              {explanation.backend}
+            </Badge>
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-1.5"
+            onClick={onClose}
+            aria-label="Dismiss explanation"
+          >
+            <X className="size-3.5" />
+          </Button>
+        </div>
+        <p className="whitespace-pre-wrap leading-relaxed text-foreground">{explanation.prose}</p>
+        {explanation.warnings.length > 0 && (
+          <ul className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
+            {explanation.warnings.map((warning, idx) => (
+              <li key={`warning-${String(idx)}`}>• {warning}</li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );

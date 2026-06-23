@@ -260,6 +260,31 @@ export class EngineClient {
     }
     return (await res.json()) as NodeSynthesisResponse;
   }
+
+  /**
+   * Ask the engine for a literate prose walkthrough of the current pipeline.
+   * Backed by Anthropic when configured server-side; otherwise a deterministic
+   * template outline.
+   */
+  async explainPipeline(pipeline: PipelineDef, instruction = ""): Promise<PipelineExplanation> {
+    const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/pipelines/explain");
+    const res = await fetch(httpUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...this.authHeaders() },
+      body: JSON.stringify({ pipeline, instruction }),
+    });
+    if (!res.ok) {
+      const message = await readErrorMessage(res);
+      throw new Error(`EngineClient.explainPipeline: ${message}`);
+    }
+    return (await res.json()) as PipelineExplanation;
+  }
+}
+
+export interface PipelineExplanation {
+  prose: string;
+  backend: string;
+  warnings: string[];
 }
 
 async function readErrorMessage(response: Response): Promise<string> {

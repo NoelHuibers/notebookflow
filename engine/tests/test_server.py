@@ -445,3 +445,51 @@ def test_empty_token_env_var_disables_auth(
     # No Authorization header -- should still succeed.
     r = client.get("/nodes")
     assert r.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# /pipelines/explain
+# ---------------------------------------------------------------------------
+
+
+def test_explain_pipeline_returns_template_prose_without_api_key(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("NOTEBOOKFLOW_ANTHROPIC_API_KEY", raising=False)
+
+    r = client.post("/pipelines/explain", json={"pipeline": _linear_pipeline()})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["backend"] == "template"
+    assert body["prose"] != ""
+    # Outline mentions every node name from the linear fixture.
+    assert "A" in body["prose"]
+    assert "B" in body["prose"]
+    assert "C" in body["prose"]
+
+
+def test_explain_pipeline_with_cycle_returns_400(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("NOTEBOOKFLOW_ANTHROPIC_API_KEY", raising=False)
+
+    r = client.post("/pipelines/explain", json={"pipeline": _cyclic_pipeline()})
+    assert r.status_code == 400
+    assert "cycle" in r.json()["detail"].lower()
+
+
+def test_explain_pipeline_accepts_optional_instruction(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("NOTEBOOKFLOW_ANTHROPIC_API_KEY", raising=False)
+
+    r = client.post(
+        "/pipelines/explain",
+        json={"pipeline": _linear_pipeline(), "instruction": "Highlight the input source."},
+    )
+    assert r.status_code == 200
+    # Template backend ignores instruction but the request shape still validates.
+    assert r.json()["backend"] == "template"
