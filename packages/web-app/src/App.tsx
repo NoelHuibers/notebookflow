@@ -1018,7 +1018,7 @@ export function App(): ReactElement {
                   onFocusCell={setFocusedCellIndex}
                 />
               </ScrollArea>
-              <CellPaneFooter cells={notebook.cells} isDirty={isDirty} />
+              <CellPaneFooter cells={notebook.cells} isDirty={isDirty} isRunning={isRunning} />
             </section>
 
             <PaneDivider
@@ -1339,9 +1339,10 @@ function InspectorPanel({ title, count, empty, children }: InspectorPanelProps):
 interface CellPaneFooterProps {
   cells: NotebookCell[];
   isDirty: boolean;
+  isRunning: boolean;
 }
 
-function CellPaneFooter({ cells, isDirty }: CellPaneFooterProps): ReactElement {
+function CellPaneFooter({ cells, isDirty, isRunning }: CellPaneFooterProps): ReactElement {
   const counts = { code: 0, markdown: 0, raw: 0 };
   for (const cell of cells) {
     if (cell.cellType === "code") {
@@ -1364,6 +1365,27 @@ function CellPaneFooter({ cells, isDirty }: CellPaneFooterProps): ReactElement {
         {counts.raw > 0 && <span>{counts.raw} raw</span>}
       </div>
       <div className="flex items-center gap-3 font-mono">
+        <span
+          className={cn(
+            "inline-flex items-center gap-1",
+            isRunning ? "text-sky-600" : "text-emerald-600",
+          )}
+          title={
+            isRunning
+              ? "Engine is executing a pipeline"
+              : "Engine is idle; nodes run via exec() against a shared namespace"
+          }
+        >
+          <span
+            role="img"
+            aria-label={isRunning ? "Executing" : "Idle"}
+            className={cn(
+              "inline-block size-1.5 rounded-full",
+              isRunning ? "animate-pulse bg-sky-500" : "bg-emerald-500",
+            )}
+          />
+          Python 3 · {isRunning ? "executing" : "idle"}
+        </span>
         <span
           className={cn(
             "inline-flex items-center gap-1",
