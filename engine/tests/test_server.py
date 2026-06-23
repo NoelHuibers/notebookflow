@@ -572,3 +572,93 @@ def test_propose_pipeline_accepts_notebook_path_override(
     )
     assert r.status_code == 200
     assert r.json()["notebookPath"] == "my-pipeline.ipynb"
+
+
+# ---------------------------------------------------------------------------
+# Triggers (file_watch / cron / webhook / manual)
+# ---------------------------------------------------------------------------
+
+
+def test_trigger_lifecycle_register_list_fire_unregister(client: TestClient) -> None:
+    # Register a manual trigger.
+    r = client.post(
+        "/triggers",
+        json={
+            "id": "manual-1",
+            "kind": "manual",
+            "pipelineId": "demo",
+            "config": {},
+        },
+    )
+    assert r.status_code == 201
+    body = r.json()
+    assert body["id"] == "manual-1"
+    assert body["kind"] == "manual"
+    assert body["pipelineId"] == "demo"
+
+    # List shows the new trigger.
+    r = client.get("/triggers")
+    assert r.status_code == 200
+    listed = r.json()
+    assert len(listed) == 1
+    assert listed[0]["id"] == "manual-1"
+
+    # Fire it -- response carries the firing record.
+    r = client.post("/triggers/manual-1/fire", json={"payload": {"reason": "test"}})
+    assert r.status_code == 200
+    firing = r.json()
+    assert firing["triggerId"] == "manual-1"
+    assert firing["payload"] == {"reason": "test"}
+
+    # Firings endpoint reflects the history.
+    r = client.get("/triggers/manual-1/firings")
+    assert r.status_code == 200
+    assert [f["triggerId"] for f in r.json()] == ["manual-1"]
+
+    # Unregister.
+    r = client.delete("/triggers/manual-1")
+    assert r.status_code == 204
+    r = client.get("/triggers")
+    assert r.json() == []
+
+
+def test_trigger_duplicate_id_returns_400(client: TestClient) -> None:
+    client.post(
+        "/triggers",
+        json={"id": "dup", "kind": "webhook", "pipelineId": "p", "config": {}},
+    )
+    r = client.post(
+        "/triggers",
+        json={"id": "dup", "kind": "webhook", "pipelineId": "p", "config": {}},
+    )
+    assert r.status_code == 400
+    assert "already registered" in r.json()["detail"].lower()
+    client.delete("/triggers/dup")  # cleanup
+
+
+def test_fire_unknown_trigger_returns_404(client: TestClient) -> None:
+    r = client.post("/triggers/no-such-thing/fire", json={"payload": {}})
+    assert r.status_code == 404
+    assert "unknown trigger" in r.json()["detail"].lower()
+
+
+def test_unregister_unknown_trigger_returns_404(client: TestClient) -> None:
+    r = client.delete("/triggers/never-registered")
+    assert r.status_code == 404
+
+
+def test_webhook_trigger_routes_payload_to_callback(client: TestClient) -> None:
+    """End-to-end: register a webhook trigger and fire it via the POST route."""
+    client.post(
+        "/triggers",
+        json={"id": "wh", "kind": "webhook", "pipelineId": "demo", "config": {}},
+    )
+    try:
+        r = client.post(
+            "/triggers/wh/fire",
+            json={"payload": {"event": "push", "repo": "notebookflow"}},
+        )
+        assert r.status_code == 200
+        assert r.json()["payload"]["repo"] == "notebookflow"
+    finally:
+        client.delete("/triggers/wh")
