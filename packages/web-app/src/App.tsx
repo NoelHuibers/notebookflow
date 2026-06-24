@@ -40,7 +40,6 @@ import {
   ExternalLink,
   Keyboard,
   MoreHorizontal,
-  PanelLeftClose,
   PanelLeftOpen,
   Play,
   Plus,
@@ -1451,20 +1450,6 @@ export function App(): ReactElement {
           <div ref={topPaneRef} className="grid min-h-0 overflow-hidden" style={topPaneStyle}>
             {!isCellsCollapsed && (
               <section className="flex min-h-0 min-w-0 flex-col">
-                <div className="flex items-center justify-between border-b px-4 py-2 text-xs text-muted-foreground">
-                  <span>Cells</span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-1.5"
-                    title="Collapse cell pane"
-                    onClick={() => {
-                      setIsCellsCollapsed(true);
-                    }}
-                  >
-                    <PanelLeftClose className="size-3.5" />
-                  </Button>
-                </div>
                 <CellToolbar
                   focusedCellIndex={focusedCellIndex}
                   focusedCell={
@@ -1479,6 +1464,9 @@ export function App(): ReactElement {
                   onChangeCellType={handleChangeFocusedCellType}
                   isAddMenuOpen={isAddCellMenuOpen}
                   onAddCellMenuOpenChange={setIsAddCellMenuOpen}
+                  onCollapse={() => {
+                    setIsCellsCollapsed(true);
+                  }}
                 />
                 <ScrollArea className="min-h-0 flex-1">
                   <CellList

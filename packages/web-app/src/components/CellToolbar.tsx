@@ -8,7 +8,7 @@
  */
 
 import type { NotebookCell } from "@notebookflow/graph-canvas/sync";
-import { ChevronDown, Clipboard, Copy, Plus, Scissors, Trash2 } from "lucide-react";
+import { ChevronDown, Clipboard, Copy, PanelLeftClose, Plus, Scissors, Trash2 } from "lucide-react";
 import type { ChangeEvent, ReactElement } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,8 @@ export interface CellToolbarProps {
   onChangeCellType: (kind: CellKind) => void;
   onAddCellMenuOpenChange?: (open: boolean) => void;
   isAddMenuOpen: boolean;
+  /** Collapse the whole cell pane. Rendered as the toolbar's leading button. */
+  onCollapse?: () => void;
 }
 
 export function CellToolbar(props: CellToolbarProps): ReactElement {
@@ -49,6 +51,7 @@ export function CellToolbar(props: CellToolbarProps): ReactElement {
     onChangeCellType,
     onAddCellMenuOpenChange,
     isAddMenuOpen,
+    onCollapse,
   } = props;
   const focused = focusedCellIndex !== null && focusedCell !== null;
 
@@ -61,6 +64,21 @@ export function CellToolbar(props: CellToolbarProps): ReactElement {
 
   return (
     <div className="flex items-center gap-1 border-b bg-card/60 px-3 py-1.5">
+      {onCollapse !== undefined && (
+        <>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-1.5"
+            title="Collapse cell pane"
+            aria-label="Collapse cell pane"
+            onClick={onCollapse}
+          >
+            <PanelLeftClose className="size-3.5" />
+          </Button>
+          <Separator />
+        </>
+      )}
       <div className="relative">
         <Button
           variant="ghost"
