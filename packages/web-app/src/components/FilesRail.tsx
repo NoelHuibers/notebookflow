@@ -1,4 +1,4 @@
-import { Plus, X } from "lucide-react";
+import { Files, PanelLeftClose, Plus, X } from "lucide-react";
 import type { ReactElement } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -10,36 +10,68 @@ interface FilesRailProps {
   files: OpenFileMeta[];
   activeFileId: string;
   activeDirty: boolean;
+  collapsed: boolean;
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
   onOpen: () => void;
+  onToggleCollapse: () => void;
 }
 
 // Left-hand workspace explorer: the open notebooks, with open / switch /
-// close. The active file's name + dirty dot live here. Shown/hidden as one
-// with the code cells via the activity rail; no collapse control of its own.
+// close. Collapses on its own (independently of the code pane) to a slim
+// strip — close files without closing code.
 export function FilesRail({
   files,
   activeFileId,
   activeDirty,
+  collapsed,
   onSelect,
   onClose,
   onOpen,
+  onToggleCollapse,
 }: FilesRailProps): ReactElement {
-  return (
-    <aside className="flex w-48 shrink-0 flex-col border-r bg-muted/30">
-      <div className="flex items-center justify-between border-b px-3 py-2 text-xs text-muted-foreground">
-        <span className="font-medium">Files</span>
+  if (collapsed) {
+    return (
+      <div className="flex w-8 shrink-0 flex-col items-center border-r bg-muted/30 py-2">
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 px-1.5"
-          title="Open notebook"
-          aria-label="Open notebook"
-          onClick={onOpen}
+          className="h-7 w-7 px-0"
+          title="Show files"
+          aria-label="Show files"
+          onClick={onToggleCollapse}
         >
-          <Plus className="size-3.5" />
+          <Files className="size-3.5" />
         </Button>
+      </div>
+    );
+  }
+  return (
+    <aside className="flex w-44 shrink-0 flex-col border-r bg-muted/30">
+      <div className="flex items-center justify-between border-b pl-3 pr-1.5 py-2 text-xs text-muted-foreground">
+        <span className="font-medium">Files</span>
+        <div className="flex items-center gap-0.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 px-0"
+            title="Open notebook"
+            aria-label="Open notebook"
+            onClick={onOpen}
+          >
+            <Plus className="size-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 px-0"
+            title="Hide files"
+            aria-label="Hide files"
+            onClick={onToggleCollapse}
+          >
+            <PanelLeftClose className="size-3.5" />
+          </Button>
+        </div>
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <ul className="flex flex-col p-1">

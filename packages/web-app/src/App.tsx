@@ -39,6 +39,7 @@ import {
   ExternalLink,
   Keyboard,
   MoreHorizontal,
+  PanelLeftOpen,
   Play,
   Plus,
   RotateCcw,
@@ -54,7 +55,6 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityRail } from "@/components/ActivityRail";
 import { AskPalette } from "@/components/AskPalette";
 import { CellList } from "@/components/CellList";
 import { CellPaneFooter } from "@/components/CellPaneFooter";
@@ -143,9 +143,10 @@ export function App(): ReactElement {
     { id: initialFileIdRef.current, name: notebook.name },
   ]);
   const [activeFileId, setActiveFileId] = useState<string>(() => initialFileIdRef.current);
-  // The left workspace (file list + code cells) is one collapsible region,
-  // toggled from the activity rail — a single control for the whole left side.
-  const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(() => readPanelLayout().workspaceOpen);
+  // Files list and code cells collapse independently — close files without
+  // closing code, and vice-versa.
+  const [isFilesCollapsed, setIsFilesCollapsed] = useState(() => readPanelLayout().filesCollapsed);
+  const [isCellsCollapsed, setIsCellsCollapsed] = useState(() => readPanelLayout().cellsCollapsed);
   const snapshotsRef = useRef<Map<string, FileSnapshot>>(new Map());
   const [graph, setGraph] = useState<GraphModel>(EMPTY_GRAPH);
   const [selected, setSelected] = useState<NodeModel | null>(null);
@@ -367,14 +368,15 @@ export function App(): ReactElement {
       window.localStorage.setItem(
         PANEL_STORAGE_KEY,
         JSON.stringify({
-          workspaceOpen: isWorkspaceOpen,
+          filesCollapsed: isFilesCollapsed,
+          cellsCollapsed: isCellsCollapsed,
           inspectorCollapsed: isInspectorCollapsed,
         }),
       );
     } catch {
       // Quota / disabled storage -- silently keep working in-memory.
     }
-  }, [isWorkspaceOpen, isInspectorCollapsed]);
+  }, [isFilesCollapsed, isCellsCollapsed, isInspectorCollapsed]);
 
   // Persist Settings dialog state (engine URL override + theme) and apply the
   // theme to the <html> element. "system" tracks prefers-color-scheme.
@@ -1346,13 +1348,14 @@ export function App(): ReactElement {
 
   const topPaneStyle = useMemo(
     () =>
-      isWorkspaceOpen
-        ? {
+      isCellsCollapsed
+        ? // Code collapsed: a slim strip (wide enough for the expand button)
+          // plus the canvas.
+          { gridTemplateColumns: `2.25rem minmax(${MIN_CANVAS_BODY_WIDTH_PX}px, 1fr)` }
+        : {
             gridTemplateColumns: `minmax(${MIN_NOTEBOOK_WIDTH_PX}px, ${notebookRatio}%) ${DIVIDER_SIZE_PX}px minmax(${MIN_CANVAS_BODY_WIDTH_PX}px, calc(${100 - notebookRatio}% - ${DIVIDER_SIZE_PX}px))`,
-          }
-        : // Workspace collapsed: the canvas takes the whole row.
-          { gridTemplateColumns: `minmax(${MIN_CANVAS_BODY_WIDTH_PX}px, 1fr)` },
-    [isWorkspaceOpen, notebookRatio],
+          },
+    [isCellsCollapsed, notebookRatio],
   );
 
   return (
@@ -1601,29 +1604,40 @@ export function App(): ReactElement {
         )}
 
         <div className="flex min-h-0 flex-1 overflow-hidden">
-          <ActivityRail
-            workspaceOpen={isWorkspaceOpen}
-            onToggleWorkspace={() => {
-              setIsWorkspaceOpen((open) => !open);
+          <FilesRail
+            files={openFiles}
+            activeFileId={activeFileId}
+            activeDirty={isDirty}
+            collapsed={isFilesCollapsed}
+            onSelect={switchToFile}
+            onClose={closeFile}
+            onOpen={triggerOpenFile}
+            onToggleCollapse={() => {
+              setIsFilesCollapsed((c) => !c);
             }}
           />
-          {isWorkspaceOpen && (
-            <FilesRail
-              files={openFiles}
-              activeFileId={activeFileId}
-              activeDirty={isDirty}
-              onSelect={switchToFile}
-              onClose={closeFile}
-              onOpen={triggerOpenFile}
-            />
-          )}
           <div
             ref={contentRef}
             className="grid min-h-0 flex-1 overflow-hidden"
             style={contentStyle}
           >
             <div ref={topPaneRef} className="grid min-h-0 overflow-hidden" style={topPaneStyle}>
-              {isWorkspaceOpen && (
+              {isCellsCollapsed ? (
+                <div className="flex w-full items-start justify-center border-r bg-muted/30 py-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 px-0"
+                    title="Show code"
+                    aria-label="Show code"
+                    onClick={() => {
+                      setIsCellsCollapsed(false);
+                    }}
+                  >
+                    <PanelLeftOpen className="size-3.5" />
+                  </Button>
+                </div>
+              ) : (
                 <>
                   <section className="flex min-h-0 min-w-0 flex-col">
                     <CellToolbar
@@ -1643,7 +1657,7 @@ export function App(): ReactElement {
                       isAddMenuOpen={isAddCellMenuOpen}
                       onAddCellMenuOpenChange={setIsAddCellMenuOpen}
                       onCollapse={() => {
-                        setIsWorkspaceOpen(false);
+                        setIsCellsCollapsed(true);
                       }}
                     />
                     <ScrollArea className="min-h-0 flex-1">

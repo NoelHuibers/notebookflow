@@ -6,14 +6,16 @@
 export const PANEL_STORAGE_KEY = "notebookflow.panels.v1";
 
 export interface PanelLayoutState {
-  // The left workspace (files list + code cells) toggled as one, from the
-  // activity rail. Open by default.
-  workspaceOpen: boolean;
+  // Files list and code cells collapse independently — close files without
+  // closing code, and vice-versa. No separate activity rail.
+  filesCollapsed: boolean;
+  cellsCollapsed: boolean;
   inspectorCollapsed: boolean;
 }
 
 export const DEFAULT_PANEL_LAYOUT: PanelLayoutState = {
-  workspaceOpen: true,
+  filesCollapsed: false,
+  cellsCollapsed: false,
   inspectorCollapsed: true,
 };
 
@@ -28,8 +30,8 @@ export function readPanelLayout(): PanelLayoutState {
     }
     const parsed = JSON.parse(raw) as Partial<PanelLayoutState>;
     return {
-      // Workspace defaults to open; only an explicit false collapses it.
-      workspaceOpen: parsed.workspaceOpen !== false,
+      filesCollapsed: parsed.filesCollapsed === true,
+      cellsCollapsed: parsed.cellsCollapsed === true,
       // Inspector defaults to collapsed; only an explicit false expands it.
       inspectorCollapsed: parsed.inspectorCollapsed !== false,
     };
