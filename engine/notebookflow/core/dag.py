@@ -23,6 +23,10 @@ class DAGNode:
     notebook_path: str = ""
     cell_indices: list[int] = field(default_factory=list)
     source: str = ""  # cell source the synchronous executor runs
+    # The node's notebook alias, used to resolve cross-notebook input refs
+    # (``alias:Node.port``). Empty string for single-notebook pipelines, where
+    # all nodes share one namespace and local ``Node.port`` refs suffice.
+    alias: str = ""
 
 
 @dataclass(slots=True)

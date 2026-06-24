@@ -7,7 +7,7 @@ import pytest
 
 from notebookflow.core.dag import DAG, DAGEdge, DAGNode
 from notebookflow.core.databus import DataBus
-from notebookflow.core.executor import Executor, _introspect_outputs
+from notebookflow.core.executor import Executor, _introspect_outputs, _parse_ref
 
 
 async def test_run_empty_pipeline_returns_no_results(bus: DataBus) -> None:
@@ -314,3 +314,74 @@ async def test_run_node_metadata_empty_on_error(bus: DataBus) -> None:
     result = await Executor(DAG(), bus).run_node(node, inputs={})
     assert result.status == "error"
     assert result.metadata == {}
+
+
+def test_parse_ref_local_uses_own_alias() -> None:
+    assert _parse_ref("Load CSV.df", "a") == ("a", "Load CSV", "df")
+
+
+def test_parse_ref_qualified_uses_explicit_alias() -> None:
+    assert _parse_ref("other:Load CSV.df", "a") == ("other", "Load CSV", "df")
+
+
+def test_parse_ref_without_port_returns_none() -> None:
+    assert _parse_ref("no_port_here", "a") is None
+
+
+async def test_run_pipeline_resolves_cross_notebook_alias_ref(bus: DataBus) -> None:
+    # Two notebooks: alias "a" produces df; alias "b" consumes a:Load.df.
+    dag = DAG()
+    dag.add_node(
+        DAGNode(
+            id="a::0",
+            name="Load",
+            tag="input",
+            alias="a",
+            outputs=["df"],
+            source="import pandas as pd\ndf = pd.DataFrame({'x': [1, 2, 3]})\n",
+        )
+    )
+    dag.add_node(
+        DAGNode(
+            id="b::0",
+            name="Use",
+            tag="transform",
+            alias="b",
+            inputs=["a:Load.df"],
+            outputs=["rows"],
+            source="rows = len(df)\n",
+        )
+    )
+    dag.add_edge(DAGEdge("a::0", "df", "b::0", "a:Load.df"))
+
+    results = await Executor(dag, bus).run_pipeline()
+    assert [r.status for r in results] == ["ok", "ok"]
+    assert bus.get("b::0", "rows").value == 3
+
+
+async def test_cross_notebook_same_name_nodes_do_not_collide(bus: DataBus) -> None:
+    # Both notebooks have a node named "Load"; the qualified ref must pick the
+    # right one rather than colliding on the bare name.
+    dag = DAG()
+    dag.add_node(
+        DAGNode(id="a::0", name="Load", tag="input", alias="a", outputs=["v"], source="v = 10\n")
+    )
+    dag.add_node(
+        DAGNode(id="b::0", name="Load", tag="input", alias="b", outputs=["v"], source="v = 99\n")
+    )
+    dag.add_node(
+        DAGNode(
+            id="c::0",
+            name="Sink",
+            tag="output",
+            alias="c",
+            inputs=["b:Load.v"],
+            outputs=["got"],
+            source="got = v\n",
+        )
+    )
+    dag.add_edge(DAGEdge("b::0", "v", "c::0", "b:Load.v"))
+
+    await Executor(dag, bus).run_pipeline()
+    # c references b's Load (99), not a's (10).
+    assert bus.get("c::0", "got").value == 99

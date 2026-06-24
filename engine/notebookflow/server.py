@@ -125,6 +125,9 @@ class NodeDef(_APIModel):
     source: str = ""
     notebook_path: str = ""
     cell_indices: list[int] = []
+    # Notebook alias for resolving cross-notebook input refs. Empty for
+    # single-notebook pipelines.
+    alias: str = ""
 
 
 class EdgeDef(_APIModel):
@@ -434,6 +437,7 @@ def _build_dag(pipeline: PipelineDef) -> DAG:
                 notebook_path=node.notebook_path,
                 cell_indices=list(node.cell_indices),
                 source=node.source,
+                alias=node.alias,
             )
         )
     for edge in pipeline.edges:

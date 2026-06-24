@@ -101,6 +101,24 @@ def _make_display(outputs: list[NbOutput]) -> Callable[..., None]:
     return display
 
 
+def _parse_ref(ref: str, own_alias: str) -> tuple[str, str, str] | None:
+    """Split an ``in=`` ref into (alias, node_name, port).
+
+    ``alias:Node.port`` -> (alias, "Node", "port"); a local ``Node.port`` ->
+    (own_alias, "Node", "port"). Node names may contain dots but not colons,
+    so the alias is everything before the first ``:`` and the port is
+    everything after the last ``.``. Returns None when there is no port.
+    """
+    if ":" in ref:
+        alias, rest = ref.split(":", 1)
+    else:
+        alias, rest = own_alias, ref
+    if "." not in rest:
+        return None
+    name, port = rest.rsplit(".", 1)
+    return alias, name, port
+
+
 def _introspect_outputs(namespace: dict[str, Any], ports: list[str]) -> dict[str, Any]:
     """Derive a shape hint from the node's first sized output-port value.
 
@@ -158,11 +176,13 @@ class Executor:
         on the streaming cursor for the right cell.
         """
         order = self._dag.topological_order()
-        name_to_id = {n.name: n.id for n in order}
+        # Index by (alias, name) so cross-notebook refs resolve unambiguously
+        # even when two notebooks contain a node with the same name.
+        id_index = {(n.alias, n.name): n.id for n in order}
         self._namespace = {}
 
         for node in order:
-            inputs = self._gather_inputs(node, name_to_id)
+            inputs = self._gather_inputs(node, id_index)
             if on_node_started is not None:
                 await on_node_started(node)
             result = await self.run_node(node, inputs)
@@ -222,15 +242,21 @@ class Executor:
         )
 
     def _gather_inputs(
-        self, node: DAGNode, name_to_id: dict[str, str]
+        self, node: DAGNode, id_index: dict[tuple[str, str], str]
     ) -> dict[str, Any]:
-        """Resolve marker ``in=`` refs to actual values via the DataBus."""
+        """Resolve marker ``in=`` refs to actual values via the DataBus.
+
+        A local ``Node.port`` ref resolves within the node's own notebook
+        (its alias); a qualified ``alias:Node.port`` ref resolves within the
+        notebook declaring that alias.
+        """
         result: dict[str, Any] = {}
         for ref in node.inputs:
-            if "." not in ref:
+            parsed = _parse_ref(ref, node.alias)
+            if parsed is None:
                 continue
-            up_name, port = ref.rsplit(".", 1)
-            up_id = name_to_id.get(up_name)
+            up_alias, up_name, port = parsed
+            up_id = id_index.get((up_alias, up_name))
             if up_id is None:
                 continue
             try:
