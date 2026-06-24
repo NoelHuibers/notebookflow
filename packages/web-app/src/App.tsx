@@ -38,8 +38,10 @@ import {
   Copy,
   Download,
   ExternalLink,
+  Files,
   Keyboard,
   MoreHorizontal,
+  PanelLeftClose,
   PanelLeftOpen,
   Play,
   Plus,
@@ -157,11 +159,13 @@ function applyTheme(theme: Theme): void {
 interface PanelLayoutState {
   cellsCollapsed: boolean;
   inspectorCollapsed: boolean;
+  filesCollapsed: boolean;
 }
 
 const DEFAULT_PANEL_LAYOUT: PanelLayoutState = {
   cellsCollapsed: false,
   inspectorCollapsed: true,
+  filesCollapsed: false,
 };
 
 function readPanelLayout(): PanelLayoutState {
@@ -178,6 +182,7 @@ function readPanelLayout(): PanelLayoutState {
       cellsCollapsed: parsed.cellsCollapsed === true,
       // Inspector defaults to collapsed; only an explicit false expands it.
       inspectorCollapsed: parsed.inspectorCollapsed !== false,
+      filesCollapsed: parsed.filesCollapsed === true,
     };
   } catch {
     return DEFAULT_PANEL_LAYOUT;
@@ -198,6 +203,28 @@ interface LoadedNotebook {
   doc: IpynbDoc;
 }
 
+/** A file open in the workspace. The active file's live content lives in the
+ * `notebook` state; this carries the rail's identity (id + name). */
+interface OpenFileMeta {
+  id: string;
+  name: string;
+}
+
+/** Frozen editing state of an inactive open file, kept in a ref until it's
+ * switched back to. */
+interface FileSnapshot {
+  cells: NotebookCell[];
+  doc: IpynbDoc;
+  baseline: string[];
+  fileHandle: FileSystemFileHandle | null;
+}
+
+function makeFileId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `file-${String(Math.floor(performance.now() * 1000))}`;
+}
+
 type DragAxis = "horizontal" | "vertical";
 
 interface DragState {
@@ -208,6 +235,15 @@ interface DragState {
 
 export function App(): ReactElement {
   const [notebook, setNotebook] = useState<LoadedNotebook>(() => bootstrapFromFixture());
+  // Multi-file workspace. The active file's live content is `notebook`; other
+  // open files freeze into snapshotsRef until switched back to.
+  const initialFileIdRef = useRef<string>(makeFileId());
+  const [openFiles, setOpenFiles] = useState<OpenFileMeta[]>(() => [
+    { id: initialFileIdRef.current, name: notebook.name },
+  ]);
+  const [activeFileId, setActiveFileId] = useState<string>(() => initialFileIdRef.current);
+  const [isFilesCollapsed, setIsFilesCollapsed] = useState(() => readPanelLayout().filesCollapsed);
+  const snapshotsRef = useRef<Map<string, FileSnapshot>>(new Map());
   const [graph, setGraph] = useState<GraphModel>(EMPTY_GRAPH);
   const [selected, setSelected] = useState<NodeModel | null>(null);
   const [patches, setPatches] = useState<CellPatch[]>([]);
@@ -340,8 +376,11 @@ export function App(): ReactElement {
   const topPaneRef = useRef<HTMLDivElement | null>(null);
   const canvasPaneRef = useRef<HTMLDivElement | null>(null);
 
-  // Lazily construct the SyncEngine once. We re-call ingest whenever the
-  // notebook's cell array changes (drop, edit-debounce, re-ingest button).
+  // Construct the SyncEngine for the active file. Re-created when the active
+  // file changes so the canvas reflects only that notebook (the composed
+  // union across files is the separate UI B2 slice). The `[notebook]` ingest
+  // effect below repopulates it after each switch / edit.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: activeFileId is the intended reset trigger, not read in the body
   useEffect(() => {
     const engine = new SyncEngine({
       onGraphUpdate: setGraph,
@@ -352,7 +391,7 @@ export function App(): ReactElement {
       },
     });
     engineRef.current = engine;
-  }, []);
+  }, [activeFileId]);
 
   // Re-ingest whenever the cell array changes.
   useEffect(() => {
@@ -362,6 +401,16 @@ export function App(): ReactElement {
     }
     void engine.ingestNotebook(notebook.name, notebook.cells, Date.now());
   }, [notebook]);
+
+  // Keep the Files rail label in sync when the active notebook is renamed
+  // (e.g. applying a Compose draft swaps in a new filename).
+  useEffect(() => {
+    setOpenFiles((prev) =>
+      prev.map((f) =>
+        f.id === activeFileId && f.name !== notebook.name ? { ...f, name: notebook.name } : f,
+      ),
+    );
+  }, [notebook.name, activeFileId]);
 
   useEffect(() => {
     setSelected((current) => (current === null ? null : (graph.nodes[current.id] ?? null)));
@@ -378,12 +427,13 @@ export function App(): ReactElement {
         JSON.stringify({
           cellsCollapsed: isCellsCollapsed,
           inspectorCollapsed: isInspectorCollapsed,
+          filesCollapsed: isFilesCollapsed,
         }),
       );
     } catch {
       // Quota / disabled storage -- silently keep working in-memory.
     }
-  }, [isCellsCollapsed, isInspectorCollapsed]);
+  }, [isCellsCollapsed, isInspectorCollapsed, isFilesCollapsed]);
 
   // Persist Settings dialog state (engine URL override + theme) and apply the
   // theme to the <html> element. "system" tracks prefers-color-scheme.
@@ -399,30 +449,115 @@ export function App(): ReactElement {
     }
   }, [settings]);
 
-  const handleFile = useCallback((text: string, name: string): void => {
-    try {
-      const parsed = parseNotebook(text);
-      setNotebook({ name, cells: parsed.cells, doc: parsed.doc });
-      setBaselineSources(parsed.cells.map((cell) => cell.source));
-      setSelected(null);
-      setPatches([]);
-      setEvents([]);
-      setOutputsByCell({});
-      setRuntimeByNode({});
-      setTimingByNode({});
-      setRowsByNode({});
-      setRunSummary(null);
-      setStreamingCellIndex(null);
-      setFocusedCellIndex(null);
-      setExplanation(null);
-      fileHandleRef.current = null;
-      setSaveStatus("idle");
-      setError(null);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "unknown error";
-      setError(`Failed to load ${name}: ${message}`);
-    }
+  // Reset the ephemeral run / edit UI to a clean slate. Used whenever the
+  // active document changes (open a file, switch files, apply a draft).
+  const resetTransient = useCallback((): void => {
+    setSelected(null);
+    setPatches([]);
+    setEvents([]);
+    setOutputsByCell({});
+    setRuntimeByNode({});
+    setTimingByNode({});
+    setRowsByNode({});
+    setRunSummary(null);
+    setStreamingCellIndex(null);
+    setFocusedCellIndex(null);
+    setExplanation(null);
+    setSaveStatus("idle");
   }, []);
+
+  // Freeze the active file's working state so it can be restored when the
+  // user switches back to it.
+  const snapshotActive = useCallback((): void => {
+    snapshotsRef.current.set(activeFileId, {
+      cells: notebook.cells,
+      doc: notebook.doc,
+      baseline: baselineSources,
+      fileHandle: fileHandleRef.current,
+    });
+  }, [activeFileId, notebook, baselineSources]);
+
+  const switchToFile = useCallback(
+    (targetId: string): void => {
+      if (targetId === activeFileId) {
+        return;
+      }
+      snapshotActive();
+      const snap = snapshotsRef.current.get(targetId);
+      const targetName = openFiles.find((f) => f.id === targetId)?.name ?? "notebook.ipynb";
+      if (snap !== undefined) {
+        setNotebook({ name: targetName, cells: snap.cells, doc: snap.doc });
+        setBaselineSources(snap.baseline);
+        fileHandleRef.current = snap.fileHandle;
+        snapshotsRef.current.delete(targetId);
+      }
+      resetTransient();
+      setActiveFileId(targetId);
+    },
+    [activeFileId, openFiles, snapshotActive, resetTransient],
+  );
+
+  const handleFile = useCallback(
+    (text: string, name: string): void => {
+      try {
+        const parsed = parseNotebook(text);
+        // Re-opening an already-open file just switches to it.
+        const existing = openFiles.find((f) => f.name === name);
+        if (existing !== undefined) {
+          switchToFile(existing.id);
+          return;
+        }
+        snapshotActive();
+        const id = makeFileId();
+        setOpenFiles((prev) => [...prev, { id, name }]);
+        setActiveFileId(id);
+        setNotebook({ name, cells: parsed.cells, doc: parsed.doc });
+        setBaselineSources(parsed.cells.map((cell) => cell.source));
+        fileHandleRef.current = null;
+        resetTransient();
+        setError(null);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "unknown error";
+        setError(`Failed to load ${name}: ${message}`);
+      }
+    },
+    [openFiles, snapshotActive, switchToFile, resetTransient],
+  );
+
+  const closeFile = useCallback(
+    (id: string): void => {
+      if (openFiles.length <= 1) {
+        return; // keep at least one file open
+      }
+      if (id === activeFileId) {
+        const idx = openFiles.findIndex((f) => f.id === id);
+        const neighbor = openFiles[idx + 1] ?? openFiles[idx - 1];
+        if (neighbor !== undefined) {
+          switchToFile(neighbor.id);
+        }
+      }
+      snapshotsRef.current.delete(id);
+      setOpenFiles((prev) => prev.filter((f) => f.id !== id));
+    },
+    [openFiles, activeFileId, switchToFile],
+  );
+
+  // Open the OS file picker and load the chosen notebook into the workspace.
+  const triggerOpenFile = useCallback((): void => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".ipynb,application/json";
+    input.onchange = (): void => {
+      const file = input.files?.[0];
+      if (file === undefined) {
+        return;
+      }
+      void file.text().then((text) => {
+        handleFile(text, file.name);
+      });
+    };
+    input.click();
+  }, [handleFile]);
 
   const handleCellsChange = useCallback((next: NotebookCell[]): void => {
     setNotebook((prev) => ({ ...prev, cells: next }));
@@ -1446,239 +1581,257 @@ export function App(): ReactElement {
           </div>
         )}
 
-        <div ref={contentRef} className="grid min-h-0 flex-1 overflow-hidden" style={contentStyle}>
-          <div ref={topPaneRef} className="grid min-h-0 overflow-hidden" style={topPaneStyle}>
-            {!isCellsCollapsed && (
-              <section className="flex min-h-0 min-w-0 flex-col">
-                <CellToolbar
-                  focusedCellIndex={focusedCellIndex}
-                  focusedCell={
-                    focusedCellIndex === null ? null : (notebook.cells[focusedCellIndex] ?? null)
-                  }
-                  hasClipboard={cellClipboard !== null}
-                  onAddCell={handleAddCell}
-                  onDeleteCell={handleDeleteFocusedCell}
-                  onCutCell={handleCutFocusedCell}
-                  onCopyCell={handleCopyFocusedCell}
-                  onPasteCell={handlePasteCell}
-                  onChangeCellType={handleChangeFocusedCellType}
-                  isAddMenuOpen={isAddCellMenuOpen}
-                  onAddCellMenuOpenChange={setIsAddCellMenuOpen}
-                  onCollapse={() => {
-                    setIsCellsCollapsed(true);
-                  }}
-                />
-                <ScrollArea className="min-h-0 flex-1">
-                  <CellList
-                    cells={notebook.cells}
-                    onCellsChange={handleCellsChange}
-                    outputsByCell={outputsByCell}
-                    scrollToCellIndex={selected?.cellIndices[0] ?? null}
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <FilesRail
+            files={openFiles}
+            activeFileId={activeFileId}
+            activeDirty={isDirty}
+            collapsed={isFilesCollapsed}
+            onSelect={switchToFile}
+            onClose={closeFile}
+            onOpen={triggerOpenFile}
+            onToggleCollapse={() => {
+              setIsFilesCollapsed((c) => !c);
+            }}
+          />
+          <div
+            ref={contentRef}
+            className="grid min-h-0 flex-1 overflow-hidden"
+            style={contentStyle}
+          >
+            <div ref={topPaneRef} className="grid min-h-0 overflow-hidden" style={topPaneStyle}>
+              {!isCellsCollapsed && (
+                <section className="flex min-h-0 min-w-0 flex-col">
+                  <CellToolbar
                     focusedCellIndex={focusedCellIndex}
-                    onFocusCell={setFocusedCellIndex}
-                    streamingCellIndex={streamingCellIndex}
+                    focusedCell={
+                      focusedCellIndex === null ? null : (notebook.cells[focusedCellIndex] ?? null)
+                    }
+                    hasClipboard={cellClipboard !== null}
+                    onAddCell={handleAddCell}
+                    onDeleteCell={handleDeleteFocusedCell}
+                    onCutCell={handleCutFocusedCell}
+                    onCopyCell={handleCopyFocusedCell}
+                    onPasteCell={handlePasteCell}
+                    onChangeCellType={handleChangeFocusedCellType}
+                    isAddMenuOpen={isAddCellMenuOpen}
+                    onAddCellMenuOpenChange={setIsAddCellMenuOpen}
+                    onCollapse={() => {
+                      setIsCellsCollapsed(true);
+                    }}
                   />
-                </ScrollArea>
-                <CellPaneFooter cells={notebook.cells} isDirty={isDirty} />
-              </section>
-            )}
+                  <ScrollArea className="min-h-0 flex-1">
+                    <CellList
+                      cells={notebook.cells}
+                      onCellsChange={handleCellsChange}
+                      outputsByCell={outputsByCell}
+                      scrollToCellIndex={selected?.cellIndices[0] ?? null}
+                      focusedCellIndex={focusedCellIndex}
+                      onFocusCell={setFocusedCellIndex}
+                      streamingCellIndex={streamingCellIndex}
+                    />
+                  </ScrollArea>
+                  <CellPaneFooter cells={notebook.cells} isDirty={isDirty} />
+                </section>
+              )}
 
-            {isCellsCollapsed ? (
-              <div className="flex w-full items-start justify-center border-r bg-muted/30 py-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-1.5"
-                  title="Expand cell pane"
-                  onClick={() => {
-                    setIsCellsCollapsed(false);
-                  }}
+              {isCellsCollapsed ? (
+                <div className="flex w-full items-start justify-center border-r bg-muted/30 py-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-1.5"
+                    title="Expand cell pane"
+                    onClick={() => {
+                      setIsCellsCollapsed(false);
+                    }}
+                  >
+                    <PanelLeftOpen className="size-3.5" />
+                  </Button>
+                </div>
+              ) : (
+                <PaneDivider
+                  orientation="vertical"
+                  label="Resize notebook and canvas panes"
+                  onPointerDown={handleVerticalDividerPointerDown}
+                  onKeyDown={handleVerticalDividerKeyDown}
+                />
+              )}
+
+              <section className="flex min-h-0 min-w-0 flex-col">
+                <div className="flex items-center justify-between border-b px-4 py-2 text-xs text-muted-foreground">
+                  <span>Canvas</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-[11px]"
+                    onClick={() => {
+                      setIsPaletteOpen(true);
+                    }}
+                    title="Add a node — opens the palette (Alt+A)"
+                  >
+                    <Plus className="mr-1 size-3.5" />
+                    Add node
+                  </Button>
+                </div>
+                <div
+                  ref={canvasPaneRef}
+                  className="relative min-h-0 flex-1 overflow-hidden bg-background"
                 >
-                  <PanelLeftOpen className="size-3.5" />
-                </Button>
-              </div>
-            ) : (
+                  <Canvas
+                    graph={graph}
+                    onNodeRename={handleRename}
+                    onNodeSelect={setSelected}
+                    onInputsChange={handleInputsChange}
+                    onOutputsChange={handleOutputsChange}
+                    variablesByNode={variablesByNode}
+                    runtimeByNode={runtimeByNode}
+                    timingByNode={timingByNode}
+                    metaByNode={metaByNode}
+                    runSummary={runSummary}
+                    onPaneDrop={handlePaneDrop}
+                    showMinimap={showMinimap}
+                    onToggleMinimap={() => {
+                      setShowMinimap((on) => !on);
+                    }}
+                  />
+                  {isPaletteOpen && (
+                    <PaletteDrawer
+                      nodes={paletteNodes}
+                      filteredNodes={filteredPaletteNodes}
+                      error={paletteError}
+                      search={paletteSearch}
+                      tagFilter={paletteTagFilter}
+                      onSearchChange={setPaletteSearch}
+                      onToggleTag={togglePaletteTag}
+                      onClearFilters={clearPaletteFilters}
+                      onPick={(manifest) => {
+                        handleAddNode(manifest);
+                        setIsPaletteOpen(false);
+                      }}
+                      onClose={() => {
+                        setIsPaletteOpen(false);
+                      }}
+                    />
+                  )}
+                </div>
+              </section>
+            </div>
+
+            {!isInspectorCollapsed && (
               <PaneDivider
-                orientation="vertical"
-                label="Resize notebook and canvas panes"
-                onPointerDown={handleVerticalDividerPointerDown}
-                onKeyDown={handleVerticalDividerKeyDown}
+                orientation="horizontal"
+                label="Resize editor and inspector panes"
+                onPointerDown={handleHorizontalDividerPointerDown}
+                onKeyDown={handleHorizontalDividerKeyDown}
               />
             )}
 
-            <section className="flex min-h-0 min-w-0 flex-col">
-              <div className="flex items-center justify-between border-b px-4 py-2 text-xs text-muted-foreground">
-                <span>Canvas</span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-[11px]"
-                  onClick={() => {
-                    setIsPaletteOpen(true);
-                  }}
-                  title="Add a node — opens the palette (Alt+A)"
-                >
-                  <Plus className="mr-1 size-3.5" />
-                  Add node
-                </Button>
-              </div>
-              <div
-                ref={canvasPaneRef}
-                className="relative min-h-0 flex-1 overflow-hidden bg-background"
+            <aside className="flex min-h-0 flex-col bg-muted/30 text-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsInspectorCollapsed((open) => !open);
+                }}
+                className="flex items-center gap-2 border-t px-4 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-muted/50"
+                aria-label={isInspectorCollapsed ? "Expand inspector" : "Collapse inspector"}
               >
-                <Canvas
-                  graph={graph}
-                  onNodeRename={handleRename}
-                  onNodeSelect={setSelected}
-                  onInputsChange={handleInputsChange}
-                  onOutputsChange={handleOutputsChange}
-                  variablesByNode={variablesByNode}
-                  runtimeByNode={runtimeByNode}
-                  timingByNode={timingByNode}
-                  metaByNode={metaByNode}
-                  runSummary={runSummary}
-                  onPaneDrop={handlePaneDrop}
-                  showMinimap={showMinimap}
-                  onToggleMinimap={() => {
-                    setShowMinimap((on) => !on);
-                  }}
-                />
-                {isPaletteOpen && (
-                  <PaletteDrawer
-                    nodes={paletteNodes}
-                    filteredNodes={filteredPaletteNodes}
-                    error={paletteError}
-                    search={paletteSearch}
-                    tagFilter={paletteTagFilter}
-                    onSearchChange={setPaletteSearch}
-                    onToggleTag={togglePaletteTag}
-                    onClearFilters={clearPaletteFilters}
-                    onPick={(manifest) => {
-                      handleAddNode(manifest);
-                      setIsPaletteOpen(false);
-                    }}
-                    onClose={() => {
-                      setIsPaletteOpen(false);
-                    }}
-                  />
+                {isInspectorCollapsed ? (
+                  <ChevronRight className="size-3" />
+                ) : (
+                  <ChevronDown className="size-3" />
                 )}
-              </div>
-            </section>
-          </div>
-
-          {!isInspectorCollapsed && (
-            <PaneDivider
-              orientation="horizontal"
-              label="Resize editor and inspector panes"
-              onPointerDown={handleHorizontalDividerPointerDown}
-              onKeyDown={handleHorizontalDividerKeyDown}
-            />
-          )}
-
-          <aside className="flex min-h-0 flex-col bg-muted/30 text-xs">
-            <button
-              type="button"
-              onClick={() => {
-                setIsInspectorCollapsed((open) => !open);
-              }}
-              className="flex items-center gap-2 border-t px-4 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-muted/50"
-              aria-label={isInspectorCollapsed ? "Expand inspector" : "Collapse inspector"}
-            >
-              {isInspectorCollapsed ? (
-                <ChevronRight className="size-3" />
-              ) : (
-                <ChevronDown className="size-3" />
-              )}
-              <span className="uppercase tracking-wider">Inspector</span>
-              {selected !== null && (
-                <span className="font-mono text-[10px]">· {selected.name}</span>
-              )}
-              {events.length > 0 && (
-                <span className="font-mono text-[10px]">· {events.length} events</span>
-              )}
-            </button>
-            {!isInspectorCollapsed && (
-              <div
-                className={cn(
-                  "grid min-h-0 flex-1 divide-x",
-                  DEV_MODE ? "grid-cols-3" : "grid-cols-2",
+                <span className="uppercase tracking-wider">Inspector</span>
+                {selected !== null && (
+                  <span className="font-mono text-[10px]">· {selected.name}</span>
                 )}
-              >
-                <InspectorPanel
-                  title="Selected"
-                  count={selected === null ? 0 : 1}
-                  empty="Click a node."
-                >
-                  {selected !== null &&
-                  selectedManifest !== null &&
-                  selectedManifest.configFields.length > 0 ? (
-                    <NodeConfigEditor
-                      manifest={selectedManifest}
-                      values={configDraft}
-                      isDirty={isConfigDirty}
-                      isSubmitting={isConfigSubmitting}
-                      isDisabled={isConfigBlocked}
-                      error={configError}
-                      warnings={configWarnings}
-                      status={configStatus}
-                      onChange={(key, value) => {
-                        setConfigDraft((current) => ({ ...current, [key]: value }));
-                      }}
-                      onSubmit={handleApplySelectedConfig}
-                    />
-                  ) : (
-                    <pre className="overflow-x-auto rounded-md border bg-background p-2 font-mono text-[11px]">
-                      {JSON.stringify(selected, null, 2)}
-                    </pre>
+                {events.length > 0 && (
+                  <span className="font-mono text-[10px]">· {events.length} events</span>
+                )}
+              </button>
+              {!isInspectorCollapsed && (
+                <div
+                  className={cn(
+                    "grid min-h-0 flex-1 divide-x",
+                    DEV_MODE ? "grid-cols-3" : "grid-cols-2",
                   )}
-                </InspectorPanel>
-
-                <InspectorPanel
-                  title="Execution events"
-                  count={events.length}
-                  empty="Click Run to dispatch this pipeline."
                 >
-                  <ul className="flex flex-col gap-1">
-                    {events.map((event, idx) => (
-                      <li
-                        key={`${event.type}-${String(idx)}`}
-                        className="rounded border bg-background px-2 py-1 font-mono text-[11px]"
-                      >
-                        {renderEvent(event)}
-                      </li>
-                    ))}
-                  </ul>
-                </InspectorPanel>
-
-                {DEV_MODE && (
                   <InspectorPanel
-                    title="Cell patches"
-                    count={patches.length}
-                    empty="Rename a node in the canvas to see one."
+                    title="Selected"
+                    count={selected === null ? 0 : 1}
+                    empty="Click a node."
                   >
-                    {patches.map((patch, idx) => (
-                      <div
-                        key={`${patch.notebookPath}-${String(patch.cellIndex)}-${String(idx)}`}
-                        className="rounded border bg-background p-2"
-                      >
-                        <div className="mb-1 flex items-center gap-2 text-[10px] text-muted-foreground">
-                          <Badge variant="outline" className="font-mono uppercase">
-                            {patch.operation}
-                          </Badge>
-                          <Badge variant="secondary" className="font-mono">
-                            cell {patch.cellIndex}
-                          </Badge>
-                        </div>
-                        <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[11px]">
-                          {patch.newSource ?? "(deleted)"}
-                        </pre>
-                      </div>
-                    ))}
+                    {selected !== null &&
+                    selectedManifest !== null &&
+                    selectedManifest.configFields.length > 0 ? (
+                      <NodeConfigEditor
+                        manifest={selectedManifest}
+                        values={configDraft}
+                        isDirty={isConfigDirty}
+                        isSubmitting={isConfigSubmitting}
+                        isDisabled={isConfigBlocked}
+                        error={configError}
+                        warnings={configWarnings}
+                        status={configStatus}
+                        onChange={(key, value) => {
+                          setConfigDraft((current) => ({ ...current, [key]: value }));
+                        }}
+                        onSubmit={handleApplySelectedConfig}
+                      />
+                    ) : (
+                      <pre className="overflow-x-auto rounded-md border bg-background p-2 font-mono text-[11px]">
+                        {JSON.stringify(selected, null, 2)}
+                      </pre>
+                    )}
                   </InspectorPanel>
-                )}
-              </div>
-            )}
-          </aside>
+
+                  <InspectorPanel
+                    title="Execution events"
+                    count={events.length}
+                    empty="Click Run to dispatch this pipeline."
+                  >
+                    <ul className="flex flex-col gap-1">
+                      {events.map((event, idx) => (
+                        <li
+                          key={`${event.type}-${String(idx)}`}
+                          className="rounded border bg-background px-2 py-1 font-mono text-[11px]"
+                        >
+                          {renderEvent(event)}
+                        </li>
+                      ))}
+                    </ul>
+                  </InspectorPanel>
+
+                  {DEV_MODE && (
+                    <InspectorPanel
+                      title="Cell patches"
+                      count={patches.length}
+                      empty="Rename a node in the canvas to see one."
+                    >
+                      {patches.map((patch, idx) => (
+                        <div
+                          key={`${patch.notebookPath}-${String(patch.cellIndex)}-${String(idx)}`}
+                          className="rounded border bg-background p-2"
+                        >
+                          <div className="mb-1 flex items-center gap-2 text-[10px] text-muted-foreground">
+                            <Badge variant="outline" className="font-mono uppercase">
+                              {patch.operation}
+                            </Badge>
+                            <Badge variant="secondary" className="font-mono">
+                              cell {patch.cellIndex}
+                            </Badge>
+                          </div>
+                          <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[11px]">
+                            {patch.newSource ?? "(deleted)"}
+                          </pre>
+                        </div>
+                      ))}
+                    </InspectorPanel>
+                  )}
+                </div>
+              )}
+            </aside>
+          </div>
         </div>
       </div>
     </FileDropZone>
@@ -2814,6 +2967,129 @@ function ShortcutsDialog({ onClose }: { onClose: () => void }): ReactElement {
         </ul>
       </div>
     </div>
+  );
+}
+
+interface FilesRailProps {
+  files: OpenFileMeta[];
+  activeFileId: string;
+  activeDirty: boolean;
+  collapsed: boolean;
+  onSelect: (id: string) => void;
+  onClose: (id: string) => void;
+  onOpen: () => void;
+  onToggleCollapse: () => void;
+}
+
+// Left-hand workspace explorer: the open notebooks, with open / switch /
+// close. The active file's name + dirty dot live here (the top-bar filename
+// badge was removed). Collapses to a thin strip.
+function FilesRail({
+  files,
+  activeFileId,
+  activeDirty,
+  collapsed,
+  onSelect,
+  onClose,
+  onOpen,
+  onToggleCollapse,
+}: FilesRailProps): ReactElement {
+  if (collapsed) {
+    return (
+      <div className="flex w-9 flex-col items-center border-r bg-muted/30 py-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-1.5"
+          title="Show files"
+          aria-label="Show files"
+          onClick={onToggleCollapse}
+        >
+          <Files className="size-3.5" />
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <aside className="flex w-48 shrink-0 flex-col border-r bg-muted/30">
+      <div className="flex items-center justify-between border-b px-3 py-2 text-xs text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <Files className="size-3.5" />
+          Files
+        </span>
+        <div className="flex items-center gap-0.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-1.5"
+            title="Open notebook"
+            aria-label="Open notebook"
+            onClick={onOpen}
+          >
+            <Plus className="size-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-1.5"
+            title="Hide files"
+            aria-label="Hide files"
+            onClick={onToggleCollapse}
+          >
+            <PanelLeftClose className="size-3.5" />
+          </Button>
+        </div>
+      </div>
+      <ScrollArea className="min-h-0 flex-1">
+        <ul className="flex flex-col p-1">
+          {files.map((file) => {
+            const isActive = file.id === activeFileId;
+            return (
+              <li key={file.id}>
+                <div
+                  className={cn(
+                    "group flex items-center gap-1.5 rounded px-2 py-1 text-[12px]",
+                    isActive ? "bg-background font-medium" : "hover:bg-muted/60",
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSelect(file.id);
+                    }}
+                    className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                    title={file.name}
+                  >
+                    {isActive && activeDirty && (
+                      <span
+                        role="img"
+                        aria-label="Unsaved changes"
+                        className="size-1.5 shrink-0 rounded-full bg-amber-500"
+                      />
+                    )}
+                    <span className="truncate font-mono text-[11px]">{file.name}</span>
+                  </button>
+                  {files.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onClose(file.id);
+                      }}
+                      className="shrink-0 rounded text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"
+                      aria-label={`Close ${file.name}`}
+                      title={`Close ${file.name}`}
+                    >
+                      <X className="size-3" />
+                    </button>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </ScrollArea>
+    </aside>
   );
 }
 
