@@ -81,7 +81,13 @@ import type {
 import { EngineClient } from "@/lib/EngineClient";
 import { canSaveInPlace, pickSaveFileHandle, writeFileHandle } from "@/lib/fileSystemAccess";
 import type { IpynbDoc } from "@/lib/notebook";
-import { downloadNotebook, parseNotebook, serializeNotebook, toIpynbCell } from "@/lib/notebook";
+import {
+  downloadNotebook,
+  extractSourceFilename,
+  parseNotebook,
+  serializeNotebook,
+  toIpynbCell,
+} from "@/lib/notebook";
 import { cn } from "@/lib/utils";
 
 import twoNode from "./fixtures/two-node.ipynb.json";
@@ -206,6 +212,9 @@ export function App(): ReactElement {
   const [events, setEvents] = useState<EngineEvent[]>([]);
   const [outputsByCell, setOutputsByCell] = useState<Record<number, NbOutput[]>>({});
   const [runtimeByNode, setRuntimeByNode] = useState<Record<string, RuntimeState>>({});
+  // Post-run output row counts, keyed by node id. Merged with the static
+  // filename map (derived from cell source) into the canvas meta line.
+  const [rowsByNode, setRowsByNode] = useState<Record<string, number>>({});
   const [streamingCellIndex, setStreamingCellIndex] = useState<number | null>(null);
   const [timingByNode, setTimingByNode] = useState<Record<string, number>>({});
   const [runSummary, setRunSummary] = useState<RunSummary | null>(null);
@@ -371,6 +380,7 @@ export function App(): ReactElement {
       setOutputsByCell({});
       setRuntimeByNode({});
       setTimingByNode({});
+      setRowsByNode({});
       setRunSummary(null);
       setStreamingCellIndex(null);
       setFocusedCellIndex(null);
@@ -594,6 +604,31 @@ export function App(): ReactElement {
     return result;
   }, [graph, definedByCell]);
 
+  // Canvas meta line: a static input filename parsed from the node's first
+  // cell source, merged with the post-run row count from rowsByNode. Either
+  // half may be absent; a node with neither gets no entry.
+  const metaByNode = useMemo<Record<string, { filename?: string; rows?: number }>>(() => {
+    const result: Record<string, { filename?: string; rows?: number }> = {};
+    for (const node of Object.values(graph.nodes)) {
+      const cellIndex = node.cellIndices[0];
+      const source = cellIndex === undefined ? undefined : notebook.cells[cellIndex]?.source;
+      const filename = source === undefined ? null : extractSourceFilename(source);
+      const rows = rowsByNode[node.id];
+      if (filename === null && rows === undefined) {
+        continue;
+      }
+      const entry: { filename?: string; rows?: number } = {};
+      if (filename !== null) {
+        entry.filename = filename;
+      }
+      if (rows !== undefined) {
+        entry.rows = rows;
+      }
+      result[node.id] = entry;
+    }
+    return result;
+  }, [graph, notebook.cells, rowsByNode]);
+
   const pipelineDef = useMemo<PipelineDef>(
     () => buildPipelineDef(graph, notebook.cells, notebook.name),
     [graph, notebook],
@@ -704,6 +739,7 @@ export function App(): ReactElement {
     setOutputsByCell({});
     setRuntimeByNode({});
     setTimingByNode({});
+    setRowsByNode({});
     setRunSummary(null);
     setStreamingCellIndex(null);
     setFocusedCellIndex(null);
@@ -851,6 +887,7 @@ export function App(): ReactElement {
     setEvents([]);
     setOutputsByCell({});
     setTimingByNode({});
+    setRowsByNode({});
     setRunSummary(null);
     setStreamingCellIndex(null);
     const initialRuntime: Record<string, RuntimeState> = {};
@@ -899,6 +936,10 @@ export function App(): ReactElement {
               ...prev,
               [event.result.nodeId]: event.result.durationMs,
             }));
+            const rows = event.result.metadata?.rows;
+            if (rows !== undefined) {
+              setRowsByNode((prev) => ({ ...prev, [event.result.nodeId]: rows }));
+            }
           }
           if (event.type === "pipelineCompleted") {
             const summary: RunSummary = {
@@ -1588,6 +1629,7 @@ export function App(): ReactElement {
                     variablesByNode={variablesByNode}
                     runtimeByNode={runtimeByNode}
                     timingByNode={timingByNode}
+                    metaByNode={metaByNode}
                     runSummary={runSummary}
                     onPaneDrop={handlePaneDrop}
                   />

@@ -34,6 +34,12 @@ export interface NotebookNodeData extends NodeModel {
   runtimeState?: RuntimeState;
   /** Last-run duration in milliseconds. Shown next to the status dot. */
   runtimeDurationMs?: number;
+  /**
+   * Data hints for the meta line: the input filename (static, from source)
+   * and the output row count (post-run, from the engine). Either may be
+   * absent; both absent means no meta line renders.
+   */
+  meta?: { filename?: string; rows?: number };
 }
 
 interface RuntimeBadge {
@@ -162,6 +168,7 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
 
   const runtime = RUNTIME_BADGES[data.runtimeState ?? "idle"];
   const durationLabel = formatDuration(data.runtimeDurationMs);
+  const metaLabel = formatMeta(data.meta);
 
   return (
     <div style={styles.wrapper}>
@@ -232,6 +239,14 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
         <span style={styles.tagChip}>{data.tag}</span>
       </div>
       <div style={styles.meta}>
+        {metaLabel !== null && (
+          <div
+            title="Input file · output rows"
+            style={{ fontSize: 10, color: NODE_MUTED, fontVariantNumeric: "tabular-nums" }}
+          >
+            {metaLabel}
+          </div>
+        )}
         {showInput &&
           (data.onInputsChange !== undefined ? (
             <PortEditor
@@ -324,6 +339,20 @@ function formatDuration(ms: number | undefined): string | null {
     return `${String(Math.round(ms))}ms`;
   }
   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function formatMeta(meta: NotebookNodeData["meta"]): string | null {
+  if (meta === undefined) {
+    return null;
+  }
+  const parts: string[] = [];
+  if (meta.filename !== undefined && meta.filename !== "") {
+    parts.push(meta.filename);
+  }
+  if (meta.rows !== undefined && Number.isFinite(meta.rows)) {
+    parts.push(`${meta.rows.toLocaleString()} rows`);
+  }
+  return parts.length === 0 ? null : parts.join(" · ");
 }
 
 function nodeStyles(tag: NodeTag, selected: boolean): NotebookNodeStyles {

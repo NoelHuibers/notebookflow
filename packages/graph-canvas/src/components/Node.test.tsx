@@ -207,6 +207,74 @@ describe("NotebookNode", () => {
     expect(container.textContent).not.toMatch(/\d+\.\ds/);
   });
 
+  it("renders the meta line with filename and row count", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    document.body.appendChild(container);
+    mounts.push({ container, root });
+
+    act(() => {
+      root.render(
+        <NotebookNode
+          id="node-1"
+          type="notebook"
+          selected={false}
+          xPos={0}
+          yPos={0}
+          zIndex={0}
+          isConnectable
+          dragging={false}
+          data={{
+            id: "node-1",
+            name: "Load CSV",
+            tag: "input",
+            inputs: [],
+            outputs: ["df"],
+            cellIndices: [0],
+            groupId: "group-a",
+            meta: { filename: "orders.csv", rows: 12438 },
+          }}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("orders.csv");
+    expect(container.textContent).toContain("12,438 rows");
+  });
+
+  it("omits the meta line when meta is undefined", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    document.body.appendChild(container);
+    mounts.push({ container, root });
+
+    act(() => {
+      root.render(
+        <NotebookNode
+          id="node-1"
+          type="notebook"
+          selected={false}
+          xPos={0}
+          yPos={0}
+          zIndex={0}
+          isConnectable
+          dragging={false}
+          data={{
+            id: "node-1",
+            name: "Load CSV",
+            tag: "input",
+            inputs: [],
+            outputs: ["df"],
+            cellIndices: [0],
+            groupId: "group-a",
+          }}
+        />,
+      );
+    });
+
+    expect(container.textContent).not.toContain("rows");
+  });
+
   it("opens inline rename from a title double click", () => {
     const onRename = vi.fn();
     const container = document.createElement("div");

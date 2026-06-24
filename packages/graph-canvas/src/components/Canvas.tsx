@@ -118,6 +118,11 @@ export interface CanvasProps {
    */
   timingByNode?: Record<string, number>;
   /**
+   * Per-node data hints for the meta line: input filename (static) + output
+   * row count (post-run). Either field may be absent.
+   */
+  metaByNode?: Record<string, { filename?: string; rows?: number }>;
+  /**
    * Summary of the most recent pipeline run, rendered as a bottom-center
    * overlay. Hosts compute it from pipelineCompleted events.
    */
@@ -153,6 +158,7 @@ function CanvasInner(props: CanvasProps): ReactElement {
     variablesByNode,
     runtimeByNode,
     timingByNode,
+    metaByNode,
     runSummary,
     onPaneDrop,
   } = props;
@@ -170,6 +176,7 @@ function CanvasInner(props: CanvasProps): ReactElement {
       variablesByNode,
       runtimeByNode,
       timingByNode,
+      metaByNode,
     });
     if (layout === "manual") {
       return manualNodes;
@@ -186,6 +193,7 @@ function CanvasInner(props: CanvasProps): ReactElement {
     variablesByNode,
     runtimeByNode,
     timingByNode,
+    metaByNode,
   ]);
 
   const handleConnect = useCallback(
@@ -328,6 +336,7 @@ function buildNodes(
     variablesByNode: CanvasProps["variablesByNode"];
     runtimeByNode: CanvasProps["runtimeByNode"];
     timingByNode: CanvasProps["timingByNode"];
+    metaByNode: CanvasProps["metaByNode"];
   },
 ): Node[] {
   const {
@@ -338,10 +347,12 @@ function buildNodes(
     variablesByNode,
     runtimeByNode,
     timingByNode,
+    metaByNode,
   } = callbacks;
   const vars = variablesByNode ?? {};
   const runtime = runtimeByNode ?? {};
   const timing = timingByNode ?? {};
+  const metas = metaByNode ?? {};
   const rfNodes: Node[] = [];
   const groupIds = Object.keys(graph.groups).sort();
 
@@ -400,6 +411,10 @@ function buildNodes(
       const duration = timing[node.id];
       if (duration !== undefined) {
         nodeData.runtimeDurationMs = duration;
+      }
+      const meta = metas[node.id];
+      if (meta !== undefined) {
+        nodeData.meta = meta;
       }
       if (onRename !== undefined) {
         nodeData.onRename = onRename;

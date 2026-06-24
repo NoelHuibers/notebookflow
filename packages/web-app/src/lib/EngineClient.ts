@@ -65,6 +65,9 @@ export interface ExecutionResultMsg {
   error: string | null;
   durationMs: number;
   outputs: NbOutput[];
+  // Shape hints derived from the node's output ports, e.g. {rows, cols}.
+  // Empty/absent when no output is sized.
+  metadata?: { rows?: number; cols?: number };
 }
 
 export type EngineEvent =

@@ -288,6 +288,15 @@ def test_run_pipeline_executes_in_topo_order(client: TestClient) -> None:
     assert [result["nodeId"] for result in body["results"]] == ["a", "b", "c"]
 
 
+def test_run_pipeline_result_carries_metadata_shape(client: TestClient) -> None:
+    # Node A outputs `df = [1, 2, 3, 4, 5]`, so metadata should report 5 rows.
+    r = client.post("/pipelines/demo/run", json=_linear_pipeline())
+    assert r.status_code == 200
+    node_a = r.json()["results"][0]
+    assert node_a["nodeId"] == "a"
+    assert node_a["metadata"] == {"rows": 5}
+
+
 def test_run_pipeline_with_cycle_returns_400(client: TestClient) -> None:
     r = client.post("/pipelines/demo/run", json=_cyclic_pipeline())
     assert r.status_code == 400

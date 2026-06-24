@@ -167,6 +167,9 @@ class ExecutionResultModel(_APIModel):
     # inside each dict stay as-is -- to_camel only renames pydantic fields,
     # not arbitrary dict contents, so nbformat round-trips cleanly.
     outputs: list[dict[str, Any]] = Field(default_factory=list)
+    # Shape hints for the canvas meta line, e.g. {"rows": 12438, "cols": 5}.
+    # Single-word field so camelCase is a no-op; inner keys pass through.
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class RunResponse(_APIModel):
@@ -452,6 +455,7 @@ def _result_to_model(result: ExecutionResult) -> ExecutionResultModel:
         error=result.error,
         duration_ms=result.duration_ms,
         outputs=result.outputs,
+        metadata=result.metadata,
     )
 
 

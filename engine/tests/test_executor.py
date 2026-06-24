@@ -7,7 +7,7 @@ import pytest
 
 from notebookflow.core.dag import DAG, DAGEdge, DAGNode
 from notebookflow.core.databus import DataBus
-from notebookflow.core.executor import Executor
+from notebookflow.core.executor import Executor, _introspect_outputs
 
 
 async def test_run_empty_pipeline_returns_no_results(bus: DataBus) -> None:
@@ -245,3 +245,72 @@ async def test_run_pipeline_attaches_outputs_per_node(bus: DataBus) -> None:
     assert [r.status for r in results] == ["ok", "ok"]
     assert results[0].outputs[0]["text"] == "A\n"
     assert results[1].outputs[0]["text"] == "B=1\n"
+
+
+async def test_run_node_metadata_reports_dataframe_shape(bus: DataBus) -> None:
+    src = "import pandas as pd\ndf = pd.DataFrame({'x': [1, 2, 3], 'y': [4, 5, 6]})\n"
+    node = DAGNode(id="a", name="A", tag="input", outputs=["df"], source=src)
+    result = await Executor(DAG(), bus).run_node(node, inputs={})
+    assert result.status == "ok"
+    assert result.metadata == {"rows": 3, "cols": 2}
+
+
+async def test_run_node_metadata_reports_length_for_list_output(bus: DataBus) -> None:
+    node = DAGNode(id="a", name="A", tag="input", outputs=["rows"], source="rows = [1, 2, 3, 4]\n")
+    result = await Executor(DAG(), bus).run_node(node, inputs={})
+    assert result.metadata == {"rows": 4}
+
+
+async def test_run_node_metadata_empty_for_scalar_output(bus: DataBus) -> None:
+    node = DAGNode(id="a", name="A", tag="input", outputs=["n"], source="n = 42\n")
+    result = await Executor(DAG(), bus).run_node(node, inputs={})
+    assert result.status == "ok"
+    assert result.metadata == {}
+
+
+async def test_run_node_metadata_skips_str_and_dict_outputs(bus: DataBus) -> None:
+    # str/bytes/dict have a length but it's not a meaningful "row count".
+    node = DAGNode(
+        id="a",
+        name="A",
+        tag="input",
+        outputs=["text"],
+        source="text = 'hello world'\n",
+    )
+    result = await Executor(DAG(), bus).run_node(node, inputs={})
+    assert result.metadata == {}
+
+
+def test_introspect_outputs_tolerates_broken_len() -> None:
+    # A buggy __len__ must not raise -- the helper just yields no hint. Tested
+    # directly because the DataBus only accepts DataFrames + JSON primitives,
+    # so such an object can never reach introspection through run_node.
+    class Bad:
+        def __len__(self) -> int:
+            raise RuntimeError("no length")
+
+    assert _introspect_outputs({"out": Bad()}, ["out"]) == {}
+
+
+def test_introspect_outputs_prefers_2d_shape_over_len() -> None:
+    class Framey:
+        shape = (12438, 5)
+
+        def __len__(self) -> int:
+            return 12438
+
+    assert _introspect_outputs({"df": Framey()}, ["df"]) == {"rows": 12438, "cols": 5}
+
+
+def test_introspect_outputs_walks_ports_in_order() -> None:
+    # First sized output wins; a scalar earlier in the list is skipped.
+    namespace = {"n": 7, "rows": [1, 2, 3]}
+    assert _introspect_outputs(namespace, ["n", "rows"]) == {"rows": 3}
+
+
+async def test_run_node_metadata_empty_on_error(bus: DataBus) -> None:
+    src = "raise ValueError('x')\n"
+    node = DAGNode(id="a", name="A", tag="transform", outputs=["x"], source=src)
+    result = await Executor(DAG(), bus).run_node(node, inputs={})
+    assert result.status == "error"
+    assert result.metadata == {}

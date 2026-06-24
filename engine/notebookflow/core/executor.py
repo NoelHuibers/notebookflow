@@ -35,6 +35,10 @@ class ExecutionResult:
     error: str | None = None
     duration_ms: float = 0.0
     outputs: list[NbOutput] = field(default_factory=list)
+    # Lightweight shape hints derived from the node's output-port values --
+    # e.g. {"rows": 12438, "cols": 5} for a DataFrame. Powers the canvas
+    # per-node meta line. Empty when no output is sized.
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class _StreamCapture:
@@ -95,6 +99,33 @@ def _make_display(outputs: list[NbOutput]) -> Callable[..., None]:
             )
 
     return display
+
+
+def _introspect_outputs(namespace: dict[str, Any], ports: list[str]) -> dict[str, Any]:
+    """Derive a shape hint from the node's first sized output-port value.
+
+    Returns {"rows", "cols"} for a 2-D object (DataFrame / ndarray),
+    {"rows"} for anything else with a length, or {} when nothing is sized.
+    A buggy ``shape``/``__len__`` must not kill the result, so every probe
+    is wrapped -- mirrors the BLE001 tolerance in ``_format_display``.
+    """
+    for port in ports:
+        if port not in namespace:
+            continue
+        value = namespace[port]
+        try:
+            shape = getattr(value, "shape", None)
+            if isinstance(shape, tuple) and len(shape) == 2:
+                return {"rows": int(shape[0]), "cols": int(shape[1])}
+        except Exception:  # noqa: BLE001 -- a buggy .shape must not kill the result
+            pass
+        if isinstance(value, (str, bytes, dict)):
+            continue
+        try:
+            return {"rows": len(value)}
+        except Exception:  # noqa: BLE001 -- a buggy __len__ must not kill the result
+            continue
+    return {}
 
 
 class Executor:
@@ -187,6 +218,7 @@ class Executor:
             status="ok",
             duration_ms=duration_ms,
             outputs=outputs,
+            metadata=_introspect_outputs(self._namespace, node.outputs),
         )
 
     def _gather_inputs(
