@@ -95,12 +95,10 @@ const EMPTY_GRAPH: GraphModel = { nodes: {}, groups: {}, wires: {} };
 const DIVIDER_SIZE_PX = 10;
 const MIN_NOTEBOOK_WIDTH_PX = 280;
 const MIN_CANVAS_BODY_WIDTH_PX = 320;
-const MIN_PALETTE_WIDTH_PX = 220;
 const MIN_MAIN_HEIGHT_PX = 220;
 const MIN_INSPECTOR_HEIGHT_PX = 140;
 const DEFAULT_NOTEBOOK_RATIO = 50;
 const DEFAULT_MAIN_RATIO = 72;
-const DEFAULT_PALETTE_WIDTH_PX = 280;
 const KEYBOARD_RESIZE_STEP = 2;
 const TAG_ORDER = ["input", "transform", "output", "ai", "io"] as const;
 const DEFAULT_JUPYTER_URL = "http://localhost:8888";
@@ -153,12 +151,10 @@ function applyTheme(theme: Theme): void {
 }
 
 interface PanelLayoutState {
-  paletteCollapsed: boolean;
   cellsCollapsed: boolean;
 }
 
 const DEFAULT_PANEL_LAYOUT: PanelLayoutState = {
-  paletteCollapsed: false,
   cellsCollapsed: false,
 };
 
@@ -173,7 +169,6 @@ function readPanelLayout(): PanelLayoutState {
     }
     const parsed = JSON.parse(raw) as Partial<PanelLayoutState>;
     return {
-      paletteCollapsed: parsed.paletteCollapsed === true,
       cellsCollapsed: parsed.cellsCollapsed === true,
     };
   } catch {
@@ -239,10 +234,10 @@ export function App(): ReactElement {
   );
   const [notebookRatio, setNotebookRatio] = useState(DEFAULT_NOTEBOOK_RATIO);
   const [mainRatio, setMainRatio] = useState(DEFAULT_MAIN_RATIO);
-  const [paletteWidth, setPaletteWidth] = useState(DEFAULT_PALETTE_WIDTH_PX);
-  const [isPaletteCollapsed, setIsPaletteCollapsed] = useState(
-    () => readPanelLayout().paletteCollapsed,
-  );
+  // The node palette is an on-demand drawer (Alt+A or the "+ Add node"
+  // button), not a docked pane — it slides over the canvas and closes
+  // after use, reclaiming the width for the graph.
+  const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [isCellsCollapsed, setIsCellsCollapsed] = useState(() => readPanelLayout().cellsCollapsed);
   const [settings, setSettings] = useState<UserSettings>(() => readUserSettings());
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -262,10 +257,6 @@ export function App(): ReactElement {
   const [triggers, setTriggers] = useState<TriggerSpec[]>([]);
   const [triggersError, setTriggersError] = useState<string | null>(null);
   const [isLoadingTriggers, setIsLoadingTriggers] = useState(false);
-  const [paletteDragState, setPaletteDragState] = useState<{
-    startCoord: number;
-    startWidth: number;
-  } | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const engineRef = useRef<SyncEngine | null>(null);
   const clientRef = useRef<EngineClient>(
@@ -283,20 +274,23 @@ export function App(): ReactElement {
         : new EngineClient(settings.engineUrlOverride);
   }, [settings.engineUrlOverride]);
 
-  // Cmd/Ctrl+K opens the Ask AI command palette anywhere in the app.
-  // Skip when a dialog is already open so the hotkey can't reopen on
-  // top of itself, and let inputs handle K when modifier isn't pressed.
+  // Global shortcuts: Cmd/Ctrl+K toggles the Ask AI palette; Alt+A toggles
+  // the node palette drawer; Escape closes the drawer.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
-      const modifier = event.metaKey || event.ctrlKey;
-      if (!modifier) {
+      if ((event.metaKey || event.ctrlKey) && (event.key === "k" || event.key === "K")) {
+        event.preventDefault();
+        setIsAskOpen((open) => !open);
         return;
       }
-      if (event.key !== "k" && event.key !== "K") {
+      if (event.altKey && (event.key === "a" || event.key === "A")) {
+        event.preventDefault();
+        setIsPaletteOpen((open) => !open);
         return;
       }
-      event.preventDefault();
-      setIsAskOpen((open) => !open);
+      if (event.key === "Escape") {
+        setIsPaletteOpen((open) => (open ? false : open));
+      }
     }
     document.addEventListener("keydown", onKeyDown);
     return () => {
@@ -345,14 +339,13 @@ export function App(): ReactElement {
       window.localStorage.setItem(
         PANEL_STORAGE_KEY,
         JSON.stringify({
-          paletteCollapsed: isPaletteCollapsed,
           cellsCollapsed: isCellsCollapsed,
         }),
       );
     } catch {
       // Quota / disabled storage -- silently keep working in-memory.
     }
-  }, [isPaletteCollapsed, isCellsCollapsed]);
+  }, [isCellsCollapsed]);
 
   // Persist Settings dialog state (engine URL override + theme) and apply the
   // theme to the <html> element. "system" tracks prefers-color-scheme.
@@ -1029,32 +1022,15 @@ export function App(): ReactElement {
     }
     return false;
   }, [notebook.cells, baselineSources]);
-  const minCanvasPaneWidth = isPaletteCollapsed
-    ? MIN_CANVAS_BODY_WIDTH_PX
-    : MIN_PALETTE_WIDTH_PX + DIVIDER_SIZE_PX + MIN_CANVAS_BODY_WIDTH_PX;
-
-  const clampNotebookRatio = useCallback(
-    (value: number): number => {
-      const host = topPaneRef.current;
-      if (host === null) {
-        return clamp(value, 0, 100);
-      }
-      const availableWidth = Math.max(host.clientWidth - DIVIDER_SIZE_PX, 1);
-      const minRatio = Math.min((MIN_NOTEBOOK_WIDTH_PX / availableWidth) * 100, 50);
-      const maxRatio = Math.max(100 - (minCanvasPaneWidth / availableWidth) * 100, 50);
-      return clamp(value, minRatio, maxRatio);
-    },
-    [minCanvasPaneWidth],
-  );
-
-  const clampPaletteWidth = useCallback((value: number): number => {
-    const host = canvasPaneRef.current;
+  const clampNotebookRatio = useCallback((value: number): number => {
+    const host = topPaneRef.current;
     if (host === null) {
-      return Math.max(value, MIN_PALETTE_WIDTH_PX);
+      return clamp(value, 0, 100);
     }
-    const maxWidth = Math.max(host.clientWidth - DIVIDER_SIZE_PX - MIN_CANVAS_BODY_WIDTH_PX, 0);
-    const minWidth = Math.min(MIN_PALETTE_WIDTH_PX, maxWidth);
-    return clamp(value, minWidth, maxWidth);
+    const availableWidth = Math.max(host.clientWidth - DIVIDER_SIZE_PX, 1);
+    const minRatio = Math.min((MIN_NOTEBOOK_WIDTH_PX / availableWidth) * 100, 50);
+    const maxRatio = Math.max(100 - (MIN_CANVAS_BODY_WIDTH_PX / availableWidth) * 100, 50);
+    return clamp(value, minRatio, maxRatio);
   }, []);
 
   const clampMainRatio = useCallback((value: number): number => {
@@ -1112,48 +1088,6 @@ export function App(): ReactElement {
     };
   }, [clampMainRatio, clampNotebookRatio, dragState]);
 
-  useEffect(() => {
-    if (paletteDragState === null) {
-      return;
-    }
-
-    const handlePointerMove = (event: PointerEvent): void => {
-      const nextWidth = paletteDragState.startWidth - (event.clientX - paletteDragState.startCoord);
-      setPaletteWidth(clampPaletteWidth(nextWidth));
-    };
-
-    const handlePointerUp = (): void => {
-      setPaletteDragState(null);
-    };
-
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = "col-resize";
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-
-    return () => {
-      document.body.style.userSelect = "";
-      document.body.style.cursor = "";
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-    };
-  }, [clampPaletteWidth, paletteDragState]);
-
-  useEffect(() => {
-    if (isPaletteCollapsed) {
-      return;
-    }
-    const syncPaletteWidth = (): void => {
-      setPaletteWidth((current) => clampPaletteWidth(current));
-    };
-    syncPaletteWidth();
-    window.addEventListener("resize", syncPaletteWidth);
-    return () => {
-      window.removeEventListener("resize", syncPaletteWidth);
-    };
-  }, [clampPaletteWidth, isPaletteCollapsed]);
-
   const handleVerticalDividerPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>): void => {
       event.preventDefault();
@@ -1176,17 +1110,6 @@ export function App(): ReactElement {
       });
     },
     [mainRatio],
-  );
-
-  const handlePaletteDividerPointerDown = useCallback(
-    (event: ReactPointerEvent<HTMLButtonElement>): void => {
-      event.preventDefault();
-      setPaletteDragState({
-        startCoord: event.clientX,
-        startWidth: paletteWidth,
-      });
-    },
-    [paletteWidth],
   );
 
   const handleVerticalDividerKeyDown = useCallback(
@@ -1227,37 +1150,6 @@ export function App(): ReactElement {
     [clampMainRatio],
   );
 
-  const handlePaletteDividerKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLButtonElement>): void => {
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        setPaletteWidth((current) => clampPaletteWidth(current + 16));
-      } else if (event.key === "ArrowRight") {
-        event.preventDefault();
-        setPaletteWidth((current) => clampPaletteWidth(current - 16));
-      } else if (event.key === "Home") {
-        event.preventDefault();
-        setIsPaletteCollapsed(true);
-      } else if (event.key === "End") {
-        event.preventDefault();
-        setPaletteWidth(() => clampPaletteWidth(Number.POSITIVE_INFINITY));
-      }
-    },
-    [clampPaletteWidth],
-  );
-
-  const handleTogglePalette = useCallback((): void => {
-    if (isPaletteCollapsed) {
-      setIsPaletteCollapsed(false);
-      setPaletteWidth((current) => {
-        const fallbackWidth = current === 0 ? DEFAULT_PALETTE_WIDTH_PX : current;
-        return clampPaletteWidth(fallbackWidth);
-      });
-      return;
-    }
-    setIsPaletteCollapsed(true);
-  }, [clampPaletteWidth, isPaletteCollapsed]);
-
   const contentStyle = useMemo(
     () => ({
       gridTemplateRows: `minmax(${MIN_MAIN_HEIGHT_PX}px, ${mainRatio}%) ${DIVIDER_SIZE_PX}px minmax(${MIN_INSPECTOR_HEIGHT_PX}px, calc(${100 - mainRatio}% - ${DIVIDER_SIZE_PX}px))`,
@@ -1268,20 +1160,11 @@ export function App(): ReactElement {
   const topPaneStyle = useMemo(
     () =>
       isCellsCollapsed
-        ? { gridTemplateColumns: `${DIVIDER_SIZE_PX}px minmax(${minCanvasPaneWidth}px, 1fr)` }
+        ? { gridTemplateColumns: `${DIVIDER_SIZE_PX}px minmax(${MIN_CANVAS_BODY_WIDTH_PX}px, 1fr)` }
         : {
-            gridTemplateColumns: `minmax(${MIN_NOTEBOOK_WIDTH_PX}px, ${notebookRatio}%) ${DIVIDER_SIZE_PX}px minmax(${minCanvasPaneWidth}px, calc(${100 - notebookRatio}% - ${DIVIDER_SIZE_PX}px))`,
+            gridTemplateColumns: `minmax(${MIN_NOTEBOOK_WIDTH_PX}px, ${notebookRatio}%) ${DIVIDER_SIZE_PX}px minmax(${MIN_CANVAS_BODY_WIDTH_PX}px, calc(${100 - notebookRatio}% - ${DIVIDER_SIZE_PX}px))`,
           },
-    [isCellsCollapsed, minCanvasPaneWidth, notebookRatio],
-  );
-
-  const canvasPaneStyle = useMemo(
-    () => ({
-      gridTemplateColumns: isPaletteCollapsed
-        ? "minmax(0, 1fr)"
-        : `minmax(${MIN_CANVAS_BODY_WIDTH_PX}px, 1fr) ${DIVIDER_SIZE_PX}px ${paletteWidth}px`,
-    }),
-    [isPaletteCollapsed, paletteWidth],
+    [isCellsCollapsed, notebookRatio],
   );
 
   return (
@@ -1584,164 +1467,54 @@ export function App(): ReactElement {
             <section className="flex min-h-0 min-w-0 flex-col">
               <div className="flex items-center justify-between border-b px-4 py-2 text-xs text-muted-foreground">
                 <span>Canvas</span>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="font-mono text-[10px]">
-                    {filteredPaletteNodes.length === paletteNodes.length
-                      ? paletteNodes.length
-                      : `${String(filteredPaletteNodes.length)}/${String(paletteNodes.length)}`}
-                  </Badge>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-[11px]"
-                    onClick={handleTogglePalette}
-                  >
-                    {isPaletteCollapsed ? "Show palette" : "Hide palette"}
-                  </Button>
-                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-[11px]"
+                  onClick={() => {
+                    setIsPaletteOpen(true);
+                  }}
+                  title="Add a node — opens the palette (Alt+A)"
+                >
+                  <Plus className="mr-1 size-3.5" />
+                  Add node
+                </Button>
               </div>
               <div
                 ref={canvasPaneRef}
-                className="grid min-h-0 flex-1 overflow-hidden bg-background"
-                style={canvasPaneStyle}
+                className="relative min-h-0 flex-1 overflow-hidden bg-background"
               >
-                <div className="relative min-h-0 flex-1">
-                  <Canvas
-                    graph={graph}
-                    onNodeRename={handleRename}
-                    onNodeSelect={setSelected}
-                    onInputsChange={handleInputsChange}
-                    onOutputsChange={handleOutputsChange}
-                    variablesByNode={variablesByNode}
-                    runtimeByNode={runtimeByNode}
-                    timingByNode={timingByNode}
-                    metaByNode={metaByNode}
-                    runSummary={runSummary}
-                    onPaneDrop={handlePaneDrop}
+                <Canvas
+                  graph={graph}
+                  onNodeRename={handleRename}
+                  onNodeSelect={setSelected}
+                  onInputsChange={handleInputsChange}
+                  onOutputsChange={handleOutputsChange}
+                  variablesByNode={variablesByNode}
+                  runtimeByNode={runtimeByNode}
+                  timingByNode={timingByNode}
+                  metaByNode={metaByNode}
+                  runSummary={runSummary}
+                  onPaneDrop={handlePaneDrop}
+                />
+                {isPaletteOpen && (
+                  <PaletteDrawer
+                    nodes={paletteNodes}
+                    filteredNodes={filteredPaletteNodes}
+                    error={paletteError}
+                    search={paletteSearch}
+                    tagFilter={paletteTagFilter}
+                    onSearchChange={setPaletteSearch}
+                    onToggleTag={togglePaletteTag}
+                    onClearFilters={clearPaletteFilters}
+                    onPick={(manifest) => {
+                      handleAddNode(manifest);
+                      setIsPaletteOpen(false);
+                    }}
+                    onClose={() => {
+                      setIsPaletteOpen(false);
+                    }}
                   />
-                </div>
-
-                {!isPaletteCollapsed && (
-                  <PaneDivider
-                    orientation="vertical"
-                    label="Resize palette and canvas panes"
-                    onPointerDown={handlePaletteDividerPointerDown}
-                    onKeyDown={handlePaletteDividerKeyDown}
-                  />
-                )}
-
-                {!isPaletteCollapsed && (
-                  <section className="flex min-h-0 min-w-0 flex-col border-l bg-muted/20">
-                    <div className="flex items-center gap-2 border-b px-4 py-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
-                      Palette
-                      <Badge variant="outline" className="font-mono text-[10px]">
-                        {filteredPaletteNodes.length === paletteNodes.length
-                          ? paletteNodes.length
-                          : `${String(filteredPaletteNodes.length)}/${String(paletteNodes.length)}`}
-                      </Badge>
-                    </div>
-                    {paletteNodes.length > 0 && (
-                      <div className="flex flex-col gap-2 border-b px-3 py-2">
-                        <input
-                          type="text"
-                          value={paletteSearch}
-                          onChange={(event) => {
-                            setPaletteSearch(event.target.value);
-                          }}
-                          placeholder="Search nodes…"
-                          aria-label="Search nodes"
-                          className="rounded border bg-background px-2 py-1 text-[11px] outline-none focus:ring-1 focus:ring-ring"
-                        />
-                        <div className="flex flex-wrap gap-1">
-                          <button
-                            type="button"
-                            onClick={clearPaletteFilters}
-                            className={cn(
-                              "rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors",
-                              paletteTagFilter.size === 0
-                                ? "border-foreground bg-foreground text-background"
-                                : "bg-background text-muted-foreground hover:bg-muted/70",
-                            )}
-                          >
-                            all
-                          </button>
-                          {TAG_ORDER.map((tag) => (
-                            <button
-                              key={tag}
-                              type="button"
-                              onClick={() => {
-                                togglePaletteTag(tag);
-                              }}
-                              className={cn(
-                                "rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors",
-                                paletteTagFilter.has(tag)
-                                  ? "border-foreground bg-foreground text-background"
-                                  : "bg-background text-muted-foreground hover:bg-muted/70",
-                              )}
-                            >
-                              {tag}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    <ScrollArea className="min-h-0 flex-1">
-                      <div className="flex flex-col gap-3 p-3">
-                        {paletteError !== null ? (
-                          <p className="text-[11px] italic text-muted-foreground">{paletteError}</p>
-                        ) : paletteNodes.length === 0 ? (
-                          <p className="text-[11px] italic text-muted-foreground">
-                            Loading node registry…
-                          </p>
-                        ) : filteredPaletteNodes.length === 0 ? (
-                          <p className="text-[11px] italic text-muted-foreground">
-                            No nodes match the current search or filter.
-                          </p>
-                        ) : (
-                          groupPalette(filteredPaletteNodes).map(([tag, nodes]) => (
-                            <section key={tag} className="flex flex-col gap-2">
-                              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                                {tag}
-                              </div>
-                              <div className="flex flex-col gap-2">
-                                {nodes.map((manifest) => (
-                                  <button
-                                    key={manifest.id}
-                                    type="button"
-                                    draggable
-                                    onDragStart={(event) => {
-                                      event.dataTransfer.setData(NODE_DRAG_MIME, manifest.id);
-                                      event.dataTransfer.effectAllowed = "copy";
-                                    }}
-                                    onClick={() => {
-                                      handleAddNode(manifest);
-                                    }}
-                                    title={`Click to append at the end, or drag onto the canvas to place at the drop point — ${manifest.name}`}
-                                    className="cursor-grab rounded-md border bg-background px-3 py-2 text-left transition-colors hover:bg-muted/70 active:cursor-grabbing"
-                                  >
-                                    <div className="flex items-center justify-between gap-2">
-                                      <span className="text-sm font-medium">{manifest.name}</span>
-                                      <Badge variant="secondary" className="font-mono text-[10px]">
-                                        {manifest.tag}
-                                      </Badge>
-                                    </div>
-                                    <div className="mt-1 font-mono text-[10px] text-muted-foreground">
-                                      {manifest.id}
-                                    </div>
-                                    {manifest.description !== "" && (
-                                      <p className="mt-2 whitespace-pre-wrap text-[11px] text-muted-foreground">
-                                        {manifest.description}
-                                      </p>
-                                    )}
-                                  </button>
-                                ))}
-                              </div>
-                            </section>
-                          ))
-                        )}
-                      </div>
-                    </ScrollArea>
-                  </section>
                 )}
               </div>
             </section>
@@ -2796,6 +2569,159 @@ function truncate(value: string, max: number): string {
     return value;
   }
   return `${value.slice(0, max)}…`;
+}
+
+interface PaletteDrawerProps {
+  nodes: NodeManifestDef[];
+  filteredNodes: NodeManifestDef[];
+  error: string | null;
+  search: string;
+  tagFilter: Set<NodeManifestDef["tag"]>;
+  onSearchChange: (next: string) => void;
+  onToggleTag: (tag: NodeManifestDef["tag"]) => void;
+  onClearFilters: () => void;
+  onPick: (manifest: NodeManifestDef) => void;
+  onClose: () => void;
+}
+
+// Right-side drawer that replaces the old docked palette pane. Opens via the
+// canvas "+ Add node" button or Alt+A; closes on Esc, the X, or after a pick.
+// Drag-onto-canvas still works because the drawer doesn't cover the canvas
+// with a drop-blocking backdrop.
+function PaletteDrawer({
+  nodes,
+  filteredNodes,
+  error,
+  search,
+  tagFilter,
+  onSearchChange,
+  onToggleTag,
+  onClearFilters,
+  onPick,
+  onClose,
+}: PaletteDrawerProps): ReactElement {
+  return (
+    <aside className="absolute right-0 top-0 z-20 flex h-full w-72 flex-col border-l bg-card shadow-xl">
+      <div className="flex items-center justify-between border-b px-3 py-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
+        <span className="flex items-center gap-2">
+          Palette
+          <Badge variant="outline" className="font-mono text-[10px]">
+            {filteredNodes.length === nodes.length
+              ? nodes.length
+              : `${String(filteredNodes.length)}/${String(nodes.length)}`}
+          </Badge>
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 px-1.5"
+          onClick={onClose}
+          aria-label="Close palette"
+        >
+          <X className="size-3.5" />
+        </Button>
+      </div>
+      {nodes.length > 0 && (
+        <div className="flex flex-col gap-2 border-b px-3 py-2">
+          <input
+            type="text"
+            value={search}
+            onChange={(event) => {
+              onSearchChange(event.target.value);
+            }}
+            placeholder="Search nodes…"
+            aria-label="Search nodes"
+            className="rounded border bg-background px-2 py-1 text-[11px] outline-none focus:ring-1 focus:ring-ring"
+          />
+          <div className="flex flex-wrap gap-1">
+            <button
+              type="button"
+              onClick={onClearFilters}
+              className={cn(
+                "rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors",
+                tagFilter.size === 0
+                  ? "border-foreground bg-foreground text-background"
+                  : "bg-background text-muted-foreground hover:bg-muted/70",
+              )}
+            >
+              all
+            </button>
+            {TAG_ORDER.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                onClick={() => {
+                  onToggleTag(tag);
+                }}
+                className={cn(
+                  "rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors",
+                  tagFilter.has(tag)
+                    ? "border-foreground bg-foreground text-background"
+                    : "bg-background text-muted-foreground hover:bg-muted/70",
+                )}
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="flex flex-col gap-3 p-3">
+          {error !== null ? (
+            <p className="text-[11px] italic text-muted-foreground">{error}</p>
+          ) : nodes.length === 0 ? (
+            <p className="text-[11px] italic text-muted-foreground">Loading node registry…</p>
+          ) : filteredNodes.length === 0 ? (
+            <p className="text-[11px] italic text-muted-foreground">
+              No nodes match the current search or filter.
+            </p>
+          ) : (
+            groupPalette(filteredNodes).map(([tag, groupNodes]) => (
+              <section key={tag} className="flex flex-col gap-2">
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                  {tag}
+                </div>
+                <div className="flex flex-col gap-2">
+                  {groupNodes.map((manifest) => (
+                    <button
+                      key={manifest.id}
+                      type="button"
+                      draggable
+                      onDragStart={(event) => {
+                        event.dataTransfer.setData(NODE_DRAG_MIME, manifest.id);
+                        event.dataTransfer.effectAllowed = "copy";
+                      }}
+                      onClick={() => {
+                        onPick(manifest);
+                      }}
+                      title={`Click to append at the end, or drag onto the canvas to place at the drop point — ${manifest.name}`}
+                      className="cursor-grab rounded-md border bg-background px-3 py-2 text-left transition-colors hover:bg-muted/70 active:cursor-grabbing"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium">{manifest.name}</span>
+                        <Badge variant="secondary" className="font-mono text-[10px]">
+                          {manifest.tag}
+                        </Badge>
+                      </div>
+                      <div className="mt-1 font-mono text-[10px] text-muted-foreground">
+                        {manifest.id}
+                      </div>
+                      {manifest.description !== "" && (
+                        <p className="mt-2 whitespace-pre-wrap text-[11px] text-muted-foreground">
+                          {manifest.description}
+                        </p>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ))
+          )}
+        </div>
+      </ScrollArea>
+    </aside>
+  );
 }
 
 function bootstrapFromFixture(): LoadedNotebook {
