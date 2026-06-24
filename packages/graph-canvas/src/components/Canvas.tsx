@@ -10,11 +10,13 @@
  */
 
 import dagre from "dagre";
-import type { ChangeEvent, DragEvent, ReactElement } from "react";
+import { Map as MapIcon, Network } from "lucide-react";
+import type { DragEvent, ReactElement } from "react";
 import { useCallback, useMemo, useState } from "react";
 import type { Connection, Edge, EdgeTypes, Node, NodeTypes } from "reactflow";
 import {
   Background,
+  ControlButton,
   Controls,
   MiniMap,
   Panel,
@@ -133,6 +135,10 @@ export interface CanvasProps {
    * Hosts typically look the manifest up and call their createNode flow.
    */
   onPaneDrop?: (manifestId: string, position: { x: number; y: number }) => void;
+  /** Whether the minimap is shown. Off by default; toggled by the host (M). */
+  showMinimap?: boolean;
+  /** Toggle the minimap from the canvas control cluster. */
+  onToggleMinimap?: () => void;
 }
 
 export function Canvas(props: CanvasProps): ReactElement {
@@ -161,6 +167,8 @@ function CanvasInner(props: CanvasProps): ReactElement {
     metaByNode,
     runSummary,
     onPaneDrop,
+    showMinimap,
+    onToggleMinimap,
   } = props;
 
   const [layout, setLayout] = useState<CanvasLayout>("manual");
@@ -298,21 +306,37 @@ function CanvasInner(props: CanvasProps): ReactElement {
         proOptions={{ hideAttribution: true }}
       >
         <Background />
-        <Controls />
-        <MiniMap
-          nodeColor={miniMapNodeColor}
-          nodeStrokeWidth={2}
-          pannable
-          zoomable
-          position="bottom-right"
-          ariaLabel="Canvas minimap"
-        />
-        <Panel position="top-left">
-          <KeyboardLegend />
-        </Panel>
-        <Panel position="top-center">
-          <LayoutSelector value={layout} onChange={setLayout} />
-        </Panel>
+        <Controls>
+          <ControlButton
+            onClick={onToggleMinimap}
+            title={showMinimap === true ? "Hide minimap (M)" : "Show minimap (M)"}
+            aria-label="Toggle minimap"
+          >
+            <MapIcon size={14} />
+          </ControlButton>
+          <ControlButton
+            onClick={() => {
+              setLayout((current) => (current === "manual" ? "dagre" : "manual"));
+            }}
+            title={`Layout: ${layout} — click to switch to ${
+              layout === "manual" ? "dagre (auto)" : "manual"
+            }`}
+            aria-label="Toggle layout"
+          >
+            <Network size={14} />
+          </ControlButton>
+        </Controls>
+        {showMinimap === true && (
+          <MiniMap
+            nodeColor={miniMapNodeColor}
+            nodeStrokeWidth={2}
+            pannable
+            zoomable
+            position="bottom-right"
+            ariaLabel="Canvas minimap"
+            className="!rounded-md !border !bg-card"
+          />
+        )}
         <Panel position="top-right">
           <CanvasBreadcrumbs graph={graph} />
         </Panel>
@@ -447,29 +471,6 @@ function buildNodes(
   return rfNodes;
 }
 
-const LEGEND_STYLE = {
-  display: "flex",
-  gap: 12,
-  alignItems: "center",
-  padding: "4px 10px",
-  borderRadius: 6,
-  background: "var(--notebookflow-legend-bg, rgba(255, 255, 255, 0.86))",
-  color: "var(--notebookflow-legend-fg, #4b5563)",
-  fontSize: 10,
-  fontFamily: "var(--notebookflow-font-family, ui-sans-serif, system-ui, sans-serif)",
-  letterSpacing: "0.02em",
-  border: "1px solid var(--notebookflow-legend-border, #e5e7eb)",
-  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.05)",
-  pointerEvents: "none",
-} as const;
-
-const LEGEND_KEY_STYLE = {
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-  fontSize: 9.5,
-  color: "var(--notebookflow-legend-fg, #1f2937)",
-  marginRight: 4,
-} as const;
-
 const BREADCRUMBS_STYLE = {
   display: "flex",
   gap: 8,
@@ -484,11 +485,6 @@ const BREADCRUMBS_STYLE = {
   border: "1px solid var(--notebookflow-legend-border, #e5e7eb)",
   boxShadow: "0 1px 2px rgba(15, 23, 42, 0.05)",
   pointerEvents: "none",
-} as const;
-
-const BREADCRUMBS_PATH_STYLE = {
-  color: "var(--notebookflow-legend-fg, #1f2937)",
-  fontWeight: 500,
 } as const;
 
 const RUN_SUMMARY_STYLE = {
@@ -582,99 +578,16 @@ function formatRunDuration(ms: number): string {
 
 function CanvasBreadcrumbs({ graph }: { graph: GraphModel }): ReactElement {
   const nodeCount = Object.keys(graph.nodes).length;
-  const groups = Object.values(graph.groups);
-  const singleGroup = groups.length === 1 ? groups[0] : undefined;
+  const groupCount = Object.keys(graph.groups).length;
   // useStore reads from React Flow's internal store; transform = [tx, ty, zoom]
   const zoom = useStore((state) => state.transform[2]);
   const zoomPct = `${String(Math.round(zoom * 100))}%`;
   return (
     <div role="img" aria-label="Canvas summary" style={BREADCRUMBS_STYLE}>
-      <span style={BREADCRUMBS_PATH_STYLE}>
-        Graph
-        {singleGroup === undefined ? "" : ` / ${singleGroup.name}`}
-      </span>
-      <span>· {nodeCount === 1 ? "1 node" : `${String(nodeCount)} nodes`}</span>
-      {groups.length > 1 && (
-        <span>· {groups.length === 1 ? "1 group" : `${String(groups.length)} groups`}</span>
-      )}
+      <span>{nodeCount === 1 ? "1 node" : `${String(nodeCount)} nodes`}</span>
+      {groupCount > 1 && <span>· {String(groupCount)} notebooks</span>}
       <span title="Use ⌘/Ctrl + wheel to zoom">· {zoomPct}</span>
     </div>
-  );
-}
-
-function KeyboardLegend(): ReactElement {
-  return (
-    <div role="img" aria-label="Canvas gesture hints" style={LEGEND_STYLE}>
-      <span>
-        <span style={LEGEND_KEY_STYLE}>drag</span>pan
-      </span>
-      <span>
-        <span style={LEGEND_KEY_STYLE}>⌘ + wheel</span>zoom
-      </span>
-      <span>
-        <span style={LEGEND_KEY_STYLE}>click</span>select
-      </span>
-      <span>
-        <span style={LEGEND_KEY_STYLE}>dblclick</span>rename
-      </span>
-    </div>
-  );
-}
-
-const LAYOUT_SELECTOR_STYLE = {
-  display: "flex",
-  alignItems: "center",
-  gap: 6,
-  padding: "4px 8px",
-  borderRadius: 6,
-  background: "var(--notebookflow-legend-bg, rgba(255, 255, 255, 0.92))",
-  color: "var(--notebookflow-legend-fg, #1f2937)",
-  fontSize: 10.5,
-  fontFamily: "var(--notebookflow-font-family, ui-sans-serif, system-ui, sans-serif)",
-  border: "1px solid var(--notebookflow-legend-border, #e5e7eb)",
-  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.05)",
-} as const;
-
-const LAYOUT_SELECT_STYLE = {
-  appearance: "none",
-  border: "none",
-  background: "transparent",
-  color: "inherit",
-  font: "inherit",
-  fontSize: 10.5,
-  padding: "0 14px 0 2px",
-  cursor: "pointer",
-  outline: "none",
-} as const;
-
-function LayoutSelector({
-  value,
-  onChange,
-}: {
-  value: CanvasLayout;
-  onChange: (next: CanvasLayout) => void;
-}): ReactElement {
-  const handleChange = (event: ChangeEvent<HTMLSelectElement>): void => {
-    const next = event.target.value;
-    if (next === "manual" || next === "dagre") {
-      onChange(next);
-    }
-  };
-  return (
-    <label style={LAYOUT_SELECTOR_STYLE} className="nodrag nopan">
-      <span style={{ letterSpacing: "0.04em", color: "var(--notebookflow-legend-fg, #4b5563)" }}>
-        layout
-      </span>
-      <select
-        value={value}
-        onChange={handleChange}
-        aria-label="Canvas layout"
-        style={LAYOUT_SELECT_STYLE}
-      >
-        <option value="manual">manual</option>
-        <option value="dagre">dagre (LR)</option>
-      </select>
-    </label>
   );
 }
 

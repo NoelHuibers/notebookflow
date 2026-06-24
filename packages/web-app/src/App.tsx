@@ -38,6 +38,7 @@ import {
   Copy,
   Download,
   ExternalLink,
+  Keyboard,
   MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
@@ -262,6 +263,8 @@ export function App(): ReactElement {
   const [askResult, setAskResult] = useState<AskAnswer | null>(null);
   const [askError, setAskError] = useState<string | null>(null);
   const [isOverflowOpen, setIsOverflowOpen] = useState(false);
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const [showMinimap, setShowMinimap] = useState(false);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(
     () => readPanelLayout().inspectorCollapsed,
   );
@@ -286,8 +289,9 @@ export function App(): ReactElement {
         : new EngineClient(settings.engineUrlOverride);
   }, [settings.engineUrlOverride]);
 
-  // Global shortcuts: Cmd/Ctrl+K toggles the Ask AI palette; Alt+A toggles
-  // the node palette drawer; Escape closes the drawer.
+  // Global shortcuts. Modifier combos fire anywhere; bare keys (m, ?) are
+  // suppressed while typing in an input / textarea / CodeMirror so they don't
+  // hijack editing.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       if ((event.metaKey || event.ctrlKey) && (event.key === "k" || event.key === "K")) {
@@ -302,6 +306,20 @@ export function App(): ReactElement {
       }
       if (event.key === "Escape") {
         setIsPaletteOpen((open) => (open ? false : open));
+        setIsShortcutsOpen((open) => (open ? false : open));
+        return;
+      }
+      if (isTypingTarget(event.target)) {
+        return;
+      }
+      if (event.key === "?") {
+        event.preventDefault();
+        setIsShortcutsOpen((open) => !open);
+        return;
+      }
+      if (event.key === "m" || event.key === "M") {
+        event.preventDefault();
+        setShowMinimap((on) => !on);
       }
     }
     document.addEventListener("keydown", onKeyDown);
@@ -309,6 +327,14 @@ export function App(): ReactElement {
       document.removeEventListener("keydown", onKeyDown);
     };
   }, []);
+
+  // Opening a node's inspector should be one click: selecting a node expands
+  // the (default-collapsed) inspector. Deselecting does not auto-collapse.
+  useEffect(() => {
+    if (selected !== null) {
+      setIsInspectorCollapsed(false);
+    }
+  }, [selected]);
   const fileHandleRef = useRef<FileSystemFileHandle | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -1188,14 +1214,6 @@ export function App(): ReactElement {
       <div className="flex h-screen overflow-hidden flex-col bg-background text-foreground font-sans">
         <header className="flex items-center gap-3 border-b bg-card px-4 py-2.5">
           <span className="font-semibold tracking-tight">NotebookFlow</span>
-          <Badge variant="secondary" className="font-mono" title={notebook.name}>
-            {isDirty && (
-              <span role="img" aria-label="Unsaved changes" className="mr-1 text-foreground">
-                ●
-              </span>
-            )}
-            {notebook.name}
-          </Badge>
           <EngineStatus client={clientRef.current} />
           <div className="ml-auto flex items-center gap-2">
             <div className="relative">
@@ -1323,6 +1341,18 @@ export function App(): ReactElement {
               variant="ghost"
               size="sm"
               className="px-2"
+              title="Keyboard shortcuts (?)"
+              aria-label="Keyboard shortcuts"
+              onClick={() => {
+                setIsShortcutsOpen((open) => !open);
+              }}
+            >
+              <Keyboard className="size-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="px-2"
               title="Settings"
               aria-label="Settings"
               onClick={() => {
@@ -1340,6 +1370,14 @@ export function App(): ReactElement {
             onChange={setSettings}
             onClose={() => {
               setIsSettingsOpen(false);
+            }}
+          />
+        )}
+
+        {isShortcutsOpen && (
+          <ShortcutsDialog
+            onClose={() => {
+              setIsShortcutsOpen(false);
             }}
           />
         )}
@@ -1413,37 +1451,12 @@ export function App(): ReactElement {
           <div ref={topPaneRef} className="grid min-h-0 overflow-hidden" style={topPaneStyle}>
             {!isCellsCollapsed && (
               <section className="flex min-h-0 min-w-0 flex-col">
-                <div className="flex items-center gap-2 border-b px-4 py-2 text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1.5">
-                    <span
-                      role="img"
-                      aria-label={isDirty ? "Out of sync" : "In sync"}
-                      title={
-                        isDirty
-                          ? "Cells diverge from the loaded .ipynb"
-                          : "Cells match the loaded .ipynb"
-                      }
-                      className={cn(
-                        "inline-block size-1.5 rounded-full",
-                        isDirty ? "bg-amber-500" : "bg-emerald-500",
-                      )}
-                    />
-                    Cells
-                  </span>
-                  {selected !== null && (
-                    <SelectedNodePill
-                      name={selected.name}
-                      tag={selected.tag}
-                      cellIndices={selected.cellIndices}
-                      onClear={() => {
-                        setSelected(null);
-                      }}
-                    />
-                  )}
+                <div className="flex items-center justify-between border-b px-4 py-2 text-xs text-muted-foreground">
+                  <span>Cells</span>
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="ml-auto h-7 px-1.5"
+                    className="h-7 px-1.5"
                     title="Collapse cell pane"
                     onClick={() => {
                       setIsCellsCollapsed(true);
@@ -1537,6 +1550,10 @@ export function App(): ReactElement {
                   metaByNode={metaByNode}
                   runSummary={runSummary}
                   onPaneDrop={handlePaneDrop}
+                  showMinimap={showMinimap}
+                  onToggleMinimap={() => {
+                    setShowMinimap((on) => !on);
+                  }}
                 />
                 {isPaletteOpen && (
                   <PaletteDrawer
@@ -1792,54 +1809,6 @@ function CellPaneFooter({ cells, isDirty }: CellPaneFooterProps): ReactElement {
         <span title="Edits re-ingest after a 300ms idle window">auto-ingest 300ms</span>
       </div>
     </div>
-  );
-}
-
-const TAG_PILL_DOT: Record<NodeModel["tag"], string> = {
-  input: "bg-blue-500",
-  transform: "bg-emerald-500",
-  output: "bg-red-500",
-  ai: "bg-purple-500",
-  io: "bg-orange-500",
-};
-
-interface SelectedNodePillProps {
-  name: string;
-  tag: NodeModel["tag"];
-  cellIndices: number[];
-  onClear: () => void;
-}
-
-function SelectedNodePill({
-  name,
-  tag,
-  cellIndices,
-  onClear,
-}: SelectedNodePillProps): ReactElement {
-  const range =
-    cellIndices.length === 0
-      ? null
-      : cellIndices.length === 1
-        ? `cell ${String(cellIndices[0])}`
-        : `cells ${String(cellIndices[0])}–${String(cellIndices[cellIndices.length - 1])}`;
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border bg-background px-2 py-0.5 font-mono text-[10px]">
-      <span
-        role="img"
-        aria-label={`Tag: ${tag}`}
-        className={cn("inline-block size-1.5 rounded-full", TAG_PILL_DOT[tag])}
-      />
-      <span className="font-medium text-foreground">{name}</span>
-      {range !== null && <span className="text-muted-foreground">· {range}</span>}
-      <button
-        type="button"
-        onClick={onClear}
-        aria-label="Clear node selection"
-        className="ml-0.5 rounded text-muted-foreground hover:text-foreground"
-      >
-        ✕
-      </button>
-    </span>
   );
 }
 
@@ -2646,6 +2615,20 @@ function truncate(value: string, max: number): string {
   return `${value.slice(0, max)}…`;
 }
 
+/** True when the event target is a text-editing surface (input/textarea/CodeMirror). */
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  const tag = target.tagName;
+  return (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    target.isContentEditable ||
+    target.closest(".cm-editor") !== null
+  );
+}
+
 interface PaletteDrawerProps {
   nodes: NodeManifestDef[];
   filteredNodes: NodeManifestDef[];
@@ -2796,6 +2779,53 @@ function PaletteDrawer({
         </div>
       </ScrollArea>
     </aside>
+  );
+}
+
+const SHORTCUTS: { keys: string; label: string }[] = [
+  { keys: "⌘/Ctrl + K", label: "Ask AI" },
+  { keys: "Alt + A", label: "Toggle node palette" },
+  { keys: "M", label: "Toggle minimap" },
+  { keys: "?", label: "This shortcuts list" },
+  { keys: "Esc", label: "Close palette / dialog" },
+  { keys: "Click", label: "Select node" },
+  { keys: "Double-click", label: "Rename node" },
+  { keys: "Drag", label: "Pan the canvas" },
+  { keys: "⌘/Ctrl + Wheel", label: "Zoom the canvas" },
+  { keys: "⌘/Ctrl + Enter", label: "Send (in Ask / Compose)" },
+];
+
+function ShortcutsDialog({ onClose }: { onClose: () => void }): ReactElement {
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-background/70 p-6 pt-[12vh] backdrop-blur">
+      <div className="w-full max-w-md rounded-md border bg-card p-4 shadow-xl">
+        <div className="mb-3 flex items-center justify-between">
+          <span className="flex items-center gap-2 text-sm font-semibold">
+            <Keyboard className="size-4 text-primary" />
+            Keyboard shortcuts
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-1.5"
+            onClick={onClose}
+            aria-label="Dismiss"
+          >
+            <X className="size-3.5" />
+          </Button>
+        </div>
+        <ul className="flex flex-col gap-1.5 text-[12px]">
+          {SHORTCUTS.map((s) => (
+            <li key={s.keys} className="flex items-center justify-between gap-4">
+              <span className="text-muted-foreground">{s.label}</span>
+              <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-[11px]">
+                {s.keys}
+              </kbd>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
   );
 }
 

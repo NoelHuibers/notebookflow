@@ -1,23 +1,27 @@
 /**
- * EngineStatus — top-bar badge showing engine reachability + host + latency.
+ * EngineStatus — minimal top-bar engine health indicator.
  *
- * Pings `/health` on mount and on demand. The badge surfaces the host:port
- * the client is talking to and the round-trip latency of the last probe so
- * users can sanity-check what they're hitting at a glance.
+ * Pings `/health` on mount and on demand. Shows a colored dot + the last
+ * probe's latency; the full engine URL lives in the hover title rather than
+ * cluttering the bar.
  */
 
 import type { ReactElement } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-
+import { useCallback, useEffect, useState } from "react";
 import type { EngineClient } from "../lib/EngineClient";
-
-import { Badge } from "./ui/badge";
+import { cn } from "../lib/utils";
 
 export type EngineState = "checking" | "ready" | "down";
 
 export interface EngineStatusProps {
   client: EngineClient;
 }
+
+const DOT_COLOR: Record<EngineState, string> = {
+  ready: "bg-emerald-500",
+  down: "bg-destructive",
+  checking: "bg-muted-foreground animate-pulse",
+};
 
 export function EngineStatus({ client }: EngineStatusProps): ReactElement {
   const [state, setState] = useState<EngineState>("checking");
@@ -36,15 +40,12 @@ export function EngineStatus({ client }: EngineStatusProps): ReactElement {
     void probe();
   }, [probe]);
 
-  const host = useMemo(() => extractHost(client.baseUrl), [client.baseUrl]);
-
-  const variant = state === "ready" ? "default" : state === "down" ? "destructive" : "secondary";
   const trailing =
     state === "ready" && latencyMs !== null
-      ? ` · ${String(latencyMs)}ms`
+      ? `${String(latencyMs)}ms`
       : state === "down"
-        ? " · unreachable"
-        : " · …";
+        ? "unreachable"
+        : "…";
 
   return (
     <button
@@ -52,22 +53,12 @@ export function EngineStatus({ client }: EngineStatusProps): ReactElement {
       onClick={() => {
         void probe();
       }}
-      title={`Engine URL: ${client.baseUrl}\nClick to re-check`}
-      className="cursor-pointer"
+      title={`Engine: ${client.baseUrl}\nClick to re-check`}
+      className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/60"
     >
-      <Badge variant={variant} className="font-mono">
-        engine · {host}
-        {trailing}
-      </Badge>
+      <span className={cn("inline-block size-1.5 rounded-full", DOT_COLOR[state])} />
+      engine
+      <span className="font-mono">{trailing}</span>
     </button>
   );
-}
-
-function extractHost(url: string): string {
-  try {
-    const parsed = new URL(url);
-    return parsed.host === "" ? url : parsed.host;
-  } catch {
-    return url;
-  }
 }
