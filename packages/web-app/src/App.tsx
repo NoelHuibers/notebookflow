@@ -16,6 +16,7 @@ import type {
   NodeModel,
   RunSummary,
   RuntimeState,
+  WireModel,
 } from "@notebookflow/graph-canvas";
 import {
   Canvas,
@@ -703,6 +704,37 @@ export function App(): ReactElement {
   const handleOutputsChange = useCallback((nodeId: string, nextOutputs: string[]): void => {
     void engineRef.current?.setNodeOutputs(nodeId, nextOutputs, Date.now());
   }, []);
+
+  // Draw a connection on the canvas → SyncEngine.createWire appends an `in=`
+  // ref to the target node's marker. Cross-file wires are recorded alias-
+  // qualified (`alias:Node.port`), so same-named nodes in different files
+  // stay distinct.
+  const handleWireCreate = useCallback((wire: Omit<WireModel, "id">): void => {
+    void engineRef.current?.createWire(
+      wire.sourceNodeId,
+      wire.sourcePort,
+      wire.targetNodeId,
+      wire.targetPort,
+      Date.now(),
+    );
+  }, []);
+
+  // Delete an edge → drop its ref from the target node's declared inputs.
+  const handleWireDelete = useCallback(
+    (wireId: string): void => {
+      const wire = graph.wires[wireId];
+      if (wire === undefined) {
+        return;
+      }
+      const target = graph.nodes[wire.targetNodeId];
+      if (target === undefined) {
+        return;
+      }
+      const nextInputs = target.inputs.filter((ref) => ref !== wire.targetPort);
+      void engineRef.current?.setNodeInputs(wire.targetNodeId, nextInputs, Date.now());
+    },
+    [graph],
+  );
 
   const handleAddNode = useCallback(
     (manifest: NodeManifestDef): void => {
@@ -1758,6 +1790,8 @@ export function App(): ReactElement {
                     onNodeSelect={setSelected}
                     onInputsChange={handleInputsChange}
                     onOutputsChange={handleOutputsChange}
+                    onWireCreate={handleWireCreate}
+                    onWireDelete={handleWireDelete}
                     variablesByNode={variablesByNode}
                     runtimeByNode={runtimeByNode}
                     timingByNode={timingByNode}

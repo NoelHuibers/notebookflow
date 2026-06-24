@@ -306,6 +306,11 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
           style={handleStyle(idx, data.inputs.length, data.tag)}
         />
       ))}
+      {/* Fallback drop target so a node with no declared inputs can still
+          receive a drawn connection; createWire appends the new in= ref. */}
+      {data.inputs.length === 0 && (
+        <Handle id="__in__" type="target" position={Position.Left} style={{ opacity: 0.45 }} />
+      )}
       {data.outputs.map((port, idx) => (
         <Handle
           key={`out-${port}`}

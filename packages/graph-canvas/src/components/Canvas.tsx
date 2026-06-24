@@ -678,12 +678,16 @@ function collectOutputSuggestions(
   return [...names].sort();
 }
 
-/** Upstream `nodeName.portName` refs a node can consume, for input autocomplete. */
+/** Upstream refs a node can consume, for input autocomplete. Refs to nodes in
+ * another notebook are alias-qualified (`alias:Node.port`) so cross-file wires
+ * resolve and same-named nodes in different files stay distinct. */
 function collectInputRefs(
   graph: GraphModel,
   variablesByNode: Record<string, string[]>,
   selfId: string,
 ): string[] {
+  const self = graph.nodes[selfId];
+  const selfGroupId = self?.groupId;
   const refs = new Set<string>();
   for (const node of Object.values(graph.nodes)) {
     if (node.id === selfId) {
@@ -695,8 +699,12 @@ function collectInputRefs(
         ports.add(name);
       }
     }
+    // Cross-notebook: prefix the upstream group's alias so the ref resolves to
+    // the right file (a bare `Node.port` only resolves within the same group).
+    const alias = node.groupId === selfGroupId ? "" : (graph.groups[node.groupId]?.alias ?? "");
+    const prefix = alias === "" ? "" : `${alias}:`;
     for (const port of ports) {
-      refs.add(`${node.name}.${port}`);
+      refs.add(`${prefix}${node.name}.${port}`);
     }
   }
   return [...refs].sort();
