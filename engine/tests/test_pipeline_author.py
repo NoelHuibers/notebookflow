@@ -1,14 +1,18 @@
-"""Tests for LLM PipelineAuthor (natural-language → pipeline draft)."""
+"""Tests for LLM PipelineAuthor (natural-language → pipeline draft), BYOK."""
 
 from __future__ import annotations
 
-import httpx
-import pytest
+from types import SimpleNamespace
+from typing import Any
 
 from notebookflow.llm import pipeline_author as pa_module
+from notebookflow.llm.client import LLMClient
+from notebookflow.llm.credentials import CredentialContext
 from notebookflow.llm.pipeline_author import PipelineAuthor, PipelineDraft
 from notebookflow.nodes import register as register_builtins
 from notebookflow.protocol.registry import Registry
+
+_CREDS = CredentialContext(provider="anthropic", model="claude-sonnet-4-6", api_key="sk-test")
 
 
 def _registry() -> Registry:
@@ -17,12 +21,28 @@ def _registry() -> Registry:
     return registry
 
 
-async def test_template_backend_picks_csv_filter_plot(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("NOTEBOOKFLOW_ANTHROPIC_API_KEY", raising=False)
+def _author_returning(text: str, *, registry: Registry | None = None) -> PipelineAuthor:
+    """A PipelineAuthor whose gateway returns `text` as the completion."""
 
+    async def fake(**_kwargs: Any) -> SimpleNamespace:
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=text))])
+
+    return PipelineAuthor(registry or _registry(), llm=LLMClient(acompletion=fake))
+
+
+def _author_raising() -> PipelineAuthor:
+    async def boom(**_kwargs: Any) -> Any:
+        raise RuntimeError("provider 502")
+
+    return PipelineAuthor(_registry(), llm=LLMClient(acompletion=boom))
+
+
+# ---------------------------------------------------------------------------
+# Template backend (no credentials)
+# ---------------------------------------------------------------------------
+
+
+async def test_template_backend_picks_csv_filter_plot() -> None:
     author = PipelineAuthor(_registry())
     draft: PipelineDraft = await author.propose(
         "Load CSV, filter EU rows, plot revenue by region",
@@ -34,24 +54,15 @@ async def test_template_backend_picks_csv_filter_plot(
     assert "notebookflow.parse_csv" in manifest_ids
     assert "notebookflow.filter_rows" in manifest_ids
     assert "notebookflow.plot_chart" in manifest_ids
-    # Cell sources are wired with markers + executable bodies.
     assert all(src.startswith("# @node:") for src in draft.cell_sources)
     assert any("read_csv" in src for src in draft.cell_sources)
-    # Edges connect adjacent nodes in declared order.
     assert len(draft.edges) == len(draft.nodes) - 1
 
 
-async def test_template_backend_returns_demo_when_no_keywords_match(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("NOTEBOOKFLOW_ANTHROPIC_API_KEY", raising=False)
-
+async def test_template_backend_returns_demo_when_no_keywords_match() -> None:
     author = PipelineAuthor(_registry())
     draft = await author.propose("zzz nothing matches here")
     assert draft.backend == "template"
-    # The fallback walks parse_csv -> filter_rows -> plot_chart so users always
-    # see a runnable starting point.
     assert [node["manifest_id"] for node in draft.nodes] == [
         "notebookflow.parse_csv",
         "notebookflow.filter_rows",
@@ -59,22 +70,20 @@ async def test_template_backend_returns_demo_when_no_keywords_match(
     ]
 
 
-async def test_template_draft_with_empty_registry(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("NOTEBOOKFLOW_ANTHROPIC_API_KEY", raising=False)
-
+async def test_template_draft_with_empty_registry() -> None:
     author = PipelineAuthor(Registry())
-    draft = await author.propose("Load CSV and plot.")
+    draft = await author.propose("Load CSV and plot.", credentials=_CREDS)
     assert draft.nodes == []
     assert draft.cell_sources == []
     assert "no manifests" in draft.warnings[0].lower()
 
 
-async def test_anthropic_backend_materialises_valid_response(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
+# ---------------------------------------------------------------------------
+# Gateway backend (credentials present)
+# ---------------------------------------------------------------------------
 
+
+async def test_gateway_backend_materialises_valid_response() -> None:
     payload_text = (
         '{"nodes": ['
         ' {"manifest_id": "notebookflow.parse_csv", "name": "Load CSV", '
@@ -87,31 +96,14 @@ async def test_anthropic_backend_materialises_valid_response(
         '  {"from": "Load CSV.df", "to": "Filter EU.df"},'
         '  {"from": "Filter EU.df", "to": "Plot.df"}]}'
     )
-
-    async def fake_post(
-        _self: httpx.AsyncClient, *_args: object, **_kwargs: object
-    ) -> httpx.Response:
-        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-        return httpx.Response(
-            status_code=200,
-            request=request,
-            json={"content": [{"type": "text", "text": payload_text}]},
-        )
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
-    draft = await PipelineAuthor(_registry()).propose("anything")
-    assert draft.backend == "anthropic"
+    draft = await _author_returning(payload_text).propose("anything", credentials=_CREDS)
+    assert draft.backend == "anthropic"  # the concrete provider used
     assert [node["name"] for node in draft.nodes] == ["Load CSV", "Filter EU", "Plot"]
-    # Anthropic-supplied config makes it through.
-    load_csv = draft.nodes[0]
-    assert load_csv["config"]["path"] == "sales.csv"
-    # Cell sources still carry markers + are non-empty.
+    assert draft.nodes[0]["config"]["path"] == "sales.csv"
     assert all("# @node:" in src for src in draft.cell_sources)
 
 
-async def test_anthropic_response_strips_code_fences(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
-
+async def test_gateway_response_strips_code_fences() -> None:
     fenced = (
         "```json\n"
         '{"nodes": ['
@@ -119,97 +111,39 @@ async def test_anthropic_response_strips_code_fences(monkeypatch: pytest.MonkeyP
         ' "edges": []}\n'
         "```"
     )
-
-    async def fake_post(
-        _self: httpx.AsyncClient, *_args: object, **_kwargs: object
-    ) -> httpx.Response:
-        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-        return httpx.Response(
-            status_code=200,
-            request=request,
-            json={"content": [{"type": "text", "text": fenced}]},
-        )
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
-    draft = await PipelineAuthor(_registry()).propose("load csv")
+    draft = await _author_returning(fenced).propose("load csv", credentials=_CREDS)
     assert draft.backend == "anthropic"
     assert len(draft.nodes) == 1
 
 
-async def test_anthropic_unknown_manifest_ids_are_dropped(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
-
+async def test_gateway_unknown_manifest_ids_are_dropped() -> None:
     payload_text = (
         '{"nodes": ['
         ' {"manifest_id": "notebookflow.parse_csv", "name": "Load", "config": {}},'
         ' {"manifest_id": "notebookflow.bogus_node", "name": "Bogus", "config": {}}],'
         ' "edges": []}'
     )
-
-    async def fake_post(
-        _self: httpx.AsyncClient, *_args: object, **_kwargs: object
-    ) -> httpx.Response:
-        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-        return httpx.Response(
-            status_code=200,
-            request=request,
-            json={"content": [{"type": "text", "text": payload_text}]},
-        )
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
-    draft = await PipelineAuthor(_registry()).propose("ignore")
+    draft = await _author_returning(payload_text).propose("ignore", credentials=_CREDS)
     assert [node["manifest_id"] for node in draft.nodes] == ["notebookflow.parse_csv"]
 
 
-async def test_anthropic_failure_falls_back_to_template(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
-
-    async def failing_post(
-        _self: httpx.AsyncClient, *_args: object, **_kwargs: object
-    ) -> httpx.Response:
-        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-        response = httpx.Response(status_code=502, request=request)
-        raise httpx.HTTPStatusError("Anthropic 502", request=request, response=response)
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", failing_post)
-    draft = await PipelineAuthor(_registry()).propose("plot revenue by region")
+async def test_gateway_failure_falls_back_to_template() -> None:
+    draft = await _author_raising().propose("plot revenue by region", credentials=_CREDS)
     assert draft.backend == "template"
     assert draft.warnings != []
     assert "fell back" in draft.warnings[0].lower()
 
 
-async def test_anthropic_empty_response_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
-
-    async def empty_post(
-        _self: httpx.AsyncClient, *_args: object, **_kwargs: object
-    ) -> httpx.Response:
-        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-        return httpx.Response(status_code=200, request=request, json={"content": []})
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", empty_post)
-    draft = await PipelineAuthor(_registry()).propose("plot revenue by region")
+async def test_gateway_empty_response_falls_back() -> None:
+    draft = await _author_returning("").propose("plot revenue by region", credentials=_CREDS)
     assert draft.backend == "template"
     assert any("empty" in w.lower() for w in draft.warnings)
 
 
-async def test_anthropic_invalid_json_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
-
-    async def bad_json(
-        _self: httpx.AsyncClient, *_args: object, **_kwargs: object
-    ) -> httpx.Response:
-        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-        return httpx.Response(
-            status_code=200,
-            request=request,
-            json={"content": [{"type": "text", "text": "definitely not json"}]},
-        )
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", bad_json)
-    draft = await PipelineAuthor(_registry()).propose("load csv and plot")
+async def test_gateway_invalid_json_falls_back() -> None:
+    draft = await _author_returning("definitely not json").propose(
+        "load csv and plot", credentials=_CREDS
+    )
     assert draft.backend == "template"
 
 

@@ -25,7 +25,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
 
-import httpx
 from dotenv import load_dotenv
 from fastapi import (
     Depends,
@@ -181,6 +180,15 @@ class RunResponse(_APIModel):
     results: list[ExecutionResultModel]
 
 
+class CredentialsModel(_APIModel):
+    """Per-request bring-your-own-key context from the web-app's Settings.
+    Never persisted, never logged."""
+
+    provider: str = ""
+    model: str = ""
+    api_key: str = ""
+
+
 class SynthesizeNodeRequest(_APIModel):
     manifest_id: str
     node_name: str
@@ -188,6 +196,7 @@ class SynthesizeNodeRequest(_APIModel):
     outputs: list[str] = Field(default_factory=list)
     config: dict[str, str] = Field(default_factory=dict)
     current_source: str = ""
+    credentials: CredentialsModel | None = None
 
 
 class SynthesizeNodeResponse(_APIModel):
@@ -199,6 +208,7 @@ class SynthesizeNodeResponse(_APIModel):
 class ExplainPipelineRequest(_APIModel):
     pipeline: PipelineDef
     instruction: str = ""
+    credentials: CredentialsModel | None = None
 
 
 class ExplainPipelineResponse(_APIModel):
@@ -210,6 +220,7 @@ class ExplainPipelineResponse(_APIModel):
 class ProposePipelineRequest(_APIModel):
     prompt: str
     notebook_path: str = "generated.ipynb"
+    credentials: CredentialsModel | None = None
 
 
 class ProposePipelineNode(_APIModel):
@@ -247,15 +258,6 @@ class TriggerFiringModel(_APIModel):
 
 class FireTriggerRequest(_APIModel):
     payload: dict[str, Any] = Field(default_factory=dict)
-
-
-class CredentialsModel(_APIModel):
-    """Per-request bring-your-own-key context from the web-app's Settings.
-    Never persisted, never logged."""
-
-    provider: str = ""
-    model: str = ""
-    api_key: str = ""
 
 
 class AskRequest(_APIModel):
@@ -520,22 +522,15 @@ async def synthesize_node(request: SynthesizeNodeRequest) -> SynthesizeNodeRespo
             detail=f"unknown manifest id: {request.manifest_id}",
         ) from exc
 
-    try:
-        result = await _code_synth(app).synthesize(
-            manifest,
-            node_name=request.node_name,
-            inputs=request.inputs,
-            outputs=request.outputs,
-            config=request.config,
-            current_source=request.current_source,
-        )
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"OpenAI request failed: {exc}") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
+    result = await _code_synth(app).synthesize(
+        manifest,
+        node_name=request.node_name,
+        inputs=request.inputs,
+        outputs=request.outputs,
+        config=request.config,
+        current_source=request.current_source,
+        credentials=_resolve_creds(request.credentials),
+    )
     return SynthesizeNodeResponse(
         source=result.source,
         backend=result.backend,
@@ -578,13 +573,17 @@ async def run_pipeline(pipeline_id: str, pipeline: PipelineDef) -> RunResponse:
 async def explain_pipeline(request: ExplainPipelineRequest) -> ExplainPipelineResponse:
     """Return a literate prose walkthrough of the pipeline.
 
-    Uses Anthropic when ANTHROPIC_API_KEY (or NOTEBOOKFLOW_ANTHROPIC_API_KEY)
-    is set; falls back to a deterministic template outline otherwise so the
-    canvas sidebar always has something to render.
+    Runs through the LLMClient gateway with the per-request provider/key
+    (bring-your-own-key) or a self-host env key; falls back to a deterministic
+    template outline otherwise so the canvas sidebar always has something.
     """
     try:
         dag = _build_dag(request.pipeline)
-        result = await _explainer(app).explain(dag, instruction=request.instruction)
+        result = await _explainer(app).explain(
+            dag,
+            instruction=request.instruction,
+            credentials=_resolve_creds(request.credentials),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -603,10 +602,11 @@ async def explain_pipeline(request: ExplainPipelineRequest) -> ExplainPipelineRe
 async def propose_pipeline(request: ProposePipelineRequest) -> ProposePipelineResponse:
     """Draft a new pipeline from a natural-language prompt.
 
-    Uses Anthropic when configured; falls back to a keyword-driven template
-    draft otherwise, so the canvas always gets something usable. The response
-    is everything the web-app needs to swap the current notebook contents
-    with the draft (cell_sources) or render a preview (nodes + edges).
+    Runs through the LLMClient gateway with the per-request provider/key
+    (bring-your-own-key) or a self-host env key; falls back to a keyword-driven
+    template draft otherwise, so the canvas always gets something usable. The
+    response is everything the web-app needs to swap the current notebook
+    contents with the draft (cell_sources) or render a preview (nodes + edges).
     """
     if request.prompt.strip() == "":
         raise HTTPException(
@@ -616,6 +616,7 @@ async def propose_pipeline(request: ProposePipelineRequest) -> ProposePipelineRe
     draft = await _pipeline_author(app).propose(
         request.prompt,
         notebook_path=request.notebook_path,
+        credentials=_resolve_creds(request.credentials),
     )
     return ProposePipelineResponse(
         notebook_path=draft.notebook_path,

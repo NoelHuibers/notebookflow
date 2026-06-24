@@ -276,10 +276,12 @@ export class EngineClient {
 
   async synthesizeNode(request: NodeSynthesisRequest): Promise<NodeSynthesisResponse> {
     const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/nodes/synthesize");
+    const credentials = this.credentialBody();
+    const body = credentials !== undefined ? { ...request, credentials } : request;
     const res = await fetch(httpUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...this.authHeaders() },
-      body: JSON.stringify(request),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       const message = await readErrorMessage(res);
@@ -290,15 +292,23 @@ export class EngineClient {
 
   /**
    * Ask the engine for a literate prose walkthrough of the current pipeline.
-   * Backed by Anthropic when configured server-side; otherwise a deterministic
-   * template outline.
+   * Runs through the user's configured provider (bring-your-own-key) when a key
+   * is set, an engine env key otherwise, and a deterministic template last.
    */
   async explainPipeline(pipeline: PipelineDef, instruction = ""): Promise<PipelineExplanation> {
     const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/pipelines/explain");
+    const body: { pipeline: PipelineDef; instruction: string; credentials?: Credentials } = {
+      pipeline,
+      instruction,
+    };
+    const credentials = this.credentialBody();
+    if (credentials !== undefined) {
+      body.credentials = credentials;
+    }
     const res = await fetch(httpUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...this.authHeaders() },
-      body: JSON.stringify({ pipeline, instruction }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       const message = await readErrorMessage(res);
@@ -308,9 +318,9 @@ export class EngineClient {
   }
 
   /**
-   * Free-form Q&A backing the Cmd/Ctrl+K command palette. Backed by
-   * Anthropic when configured; falls back to a keyword-driven template
-   * hint that nudges the user toward the matching button.
+   * Free-form Q&A backing the Cmd/Ctrl+K command palette. Runs through the
+   * user's configured provider (bring-your-own-key) when a key is set; falls
+   * back to a keyword-driven template hint that nudges toward the right button.
    */
   async askLLM(prompt: string, pipeline?: PipelineDef): Promise<AskAnswer> {
     const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/llm/ask");
@@ -341,9 +351,13 @@ export class EngineClient {
    */
   async proposePipeline(prompt: string, notebookPath = ""): Promise<PipelineProposal> {
     const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/pipelines/propose");
-    const body: { prompt: string; notebookPath?: string } = { prompt };
+    const body: { prompt: string; notebookPath?: string; credentials?: Credentials } = { prompt };
     if (notebookPath !== "") {
       body.notebookPath = notebookPath;
+    }
+    const credentials = this.credentialBody();
+    if (credentials !== undefined) {
+      body.credentials = credentials;
     }
     const res = await fetch(httpUrl, {
       method: "POST",

@@ -5,30 +5,24 @@ topological order and asks an LLM to produce a paragraph-per-section
 overview of what the pipeline does.
 
 Backends:
-    * anthropic: HTTPX call to Claude when ANTHROPIC_API_KEY or
-      NOTEBOOKFLOW_ANTHROPIC_API_KEY is set.
+    * gateway: the user's chosen provider via the LLMClient (BYOK) when a
+      CredentialContext is supplied.
     * template: deterministic outline derived from node names + tags +
-      wires. Used when no API key is configured, or as a fallback when
-      the Anthropic call fails.
+      wires. Used when no key is configured, or as a fallback when the
+      gateway call fails.
 
-Mirrors the CodeSynth fallback pattern so callers can rely on
-``ExplanationResult.prose`` always being non-empty.
+Callers can rely on ``ExplanationResult.prose`` always being non-empty.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, field
-from typing import Any
-
-import httpx
 
 from notebookflow.core.dag import DAG, DAGEdge, DAGNode
+from notebookflow.llm.client import LLMClient, LLMError
+from notebookflow.llm.credentials import CredentialContext
 
-_DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6"
-_DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
-_ANTHROPIC_VERSION = "2023-06-01"
 _MAX_TOKENS = 1024
 
 _SYSTEM_PROMPT = """You explain data pipelines to a technical reader.
@@ -49,103 +43,43 @@ in under a minute.
 @dataclass(slots=True)
 class ExplanationResult:
     prose: str
-    backend: str  # "anthropic" or "template"
+    backend: str  # the concrete provider used, or "template"
     warnings: list[str] = field(default_factory=list)
 
 
 class Explainer:
-    async def explain(self, dag: DAG, *, instruction: str = "") -> ExplanationResult:
+    def __init__(self, llm: LLMClient | None = None) -> None:
+        self._llm = llm if llm is not None else LLMClient()
+
+    async def explain(
+        self,
+        dag: DAG,
+        *,
+        instruction: str = "",
+        credentials: CredentialContext | None = None,
+    ) -> ExplanationResult:
         ordered = dag.topological_order()
         edges = dag.edges()
 
-        api_key = _anthropic_api_key()
-        if api_key is None:
+        if credentials is None:
             return ExplanationResult(prose=_template_prose(ordered, edges), backend="template")
 
         try:
-            prose = await self._explain_with_anthropic(
-                ordered=ordered,
-                edges=edges,
-                instruction=instruction,
-                api_key=api_key,
+            prose = await self._llm.complete(
+                provider=credentials.provider,
+                model=credentials.model,
+                api_key=credentials.api_key,
+                messages=[{"role": "user", "content": _build_prompt(ordered, edges, instruction)}],
+                system=_SYSTEM_PROMPT,
+                max_tokens=_MAX_TOKENS,
             )
-        except (httpx.HTTPError, RuntimeError) as exc:
+        except LLMError as exc:
             return ExplanationResult(
                 prose=_template_prose(ordered, edges),
                 backend="template",
-                warnings=[_anthropic_failure_warning(exc)],
+                warnings=[f"{exc}; fell back to a template outline."],
             )
-        if prose == "":
-            return ExplanationResult(
-                prose=_template_prose(ordered, edges),
-                backend="template",
-                warnings=["Anthropic returned an empty response; fell back to template outline"],
-            )
-        return ExplanationResult(prose=prose, backend="anthropic")
-
-    async def _explain_with_anthropic(
-        self,
-        *,
-        ordered: list[DAGNode],
-        edges: list[DAGEdge],
-        instruction: str,
-        api_key: str,
-    ) -> str:
-        base_url = os.environ.get(
-            "NOTEBOOKFLOW_ANTHROPIC_BASE_URL",
-            _DEFAULT_ANTHROPIC_BASE_URL,
-        )
-        model = os.environ.get("NOTEBOOKFLOW_ANTHROPIC_MODEL", _DEFAULT_ANTHROPIC_MODEL)
-        prompt = _build_prompt(ordered, edges, instruction)
-
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                f"{base_url.rstrip('/')}/v1/messages",
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": _ANTHROPIC_VERSION,
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": model,
-                    "max_tokens": _MAX_TOKENS,
-                    "system": _SYSTEM_PROMPT,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
-
-        return _extract_anthropic_text(payload)
-
-
-def _anthropic_api_key() -> str | None:
-    return os.environ.get("NOTEBOOKFLOW_ANTHROPIC_API_KEY") or os.environ.get(
-        "ANTHROPIC_API_KEY",
-    )
-
-
-def _anthropic_failure_warning(exc: Exception) -> str:
-    return (
-        f"Anthropic call failed ({type(exc).__name__}: {exc}); "
-        "fell back to a deterministic template outline."
-    )
-
-
-def _extract_anthropic_text(payload: dict[str, Any]) -> str:
-    blocks = payload.get("content")
-    if not isinstance(blocks, list):
-        return ""
-    parts: list[str] = []
-    for block in blocks:
-        if not isinstance(block, dict):
-            continue
-        if block.get("type") != "text":
-            continue
-        text = block.get("text")
-        if isinstance(text, str):
-            parts.append(text)
-    return "".join(parts).strip()
+        return ExplanationResult(prose=prose, backend=credentials.provider)
 
 
 def _build_prompt(ordered: list[DAGNode], edges: list[DAGEdge], instruction: str) -> str:

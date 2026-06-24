@@ -6,13 +6,30 @@ import os
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from notebookflow import server
 
 app = server.app
+
+_LLM_ENV_KEYS = (
+    "NOTEBOOKFLOW_LLM_API_KEY",
+    "NOTEBOOKFLOW_LLM_PROVIDER",
+    "NOTEBOOKFLOW_LLM_MODEL",
+    "NOTEBOOKFLOW_ANTHROPIC_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "NOTEBOOKFLOW_OPENAI_API_KEY",
+)
+
+
+@pytest.fixture(autouse=True)
+def _clear_llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep credential resolution deterministic: no ambient provider key leaks
+    into the no-credentials template-fallback tests."""
+    for key in _LLM_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
 
 
 @pytest.fixture
@@ -247,19 +264,17 @@ def test_synthesize_node_falls_back_to_template_when_openai_missing(
     assert body["warnings"] != []
 
 
-def test_synthesize_node_falls_back_to_template_when_openai_request_fails(
+def test_synthesize_node_falls_back_to_template_when_provider_fails(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
-    response = httpx.Response(status_code=401, request=request)
+    from notebookflow.llm.client import LLMError
 
-    async def failing_openai(*args: Any, **kwargs: Any) -> str:
-        raise httpx.HTTPStatusError("401 Unauthorized", request=request, response=response)
+    async def failing_gateway(*_args: Any, **_kwargs: Any) -> str:
+        raise LLMError("anthropic request failed (HTTPStatusError)")
 
-    monkeypatch.setenv("OPENAI_API_KEY", "invalid-test-key")
-    monkeypatch.delenv("NOTEBOOKFLOW_OPENAI_API_KEY", raising=False)
-    monkeypatch.setattr(server.CodeSynth, "_synthesize_with_openai", failing_openai)
+    monkeypatch.setattr(server.CodeSynth, "_synthesize_with_gateway", failing_gateway)
 
+    # Per-request credentials so the endpoint takes the gateway path (not template).
     r = client.post(
         "/nodes/synthesize",
         json={
@@ -268,6 +283,7 @@ def test_synthesize_node_falls_back_to_template_when_openai_request_fails(
             "inputs": ["Load CSV.df"],
             "outputs": ["result"],
             "config": {"instruction": "Calculate the top 5 customers by revenue."},
+            "credentials": {"provider": "anthropic", "model": "claude-x", "apiKey": "sk-test"},
         },
     )
 
@@ -275,7 +291,7 @@ def test_synthesize_node_falls_back_to_template_when_openai_request_fails(
     body = r.json()
     assert body["backend"] == "template"
     assert "result = None" in body["source"]
-    assert any("OpenAI rejected the configured API key" in warning for warning in body["warnings"])
+    assert any("fell back" in warning.lower() for warning in body["warnings"])
 
 
 def test_run_pipeline_executes_in_topo_order(client: TestClient) -> None:

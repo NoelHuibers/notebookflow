@@ -1,15 +1,17 @@
 """PipelineAuthor — natural-language description -> full pipeline graph.
 
-Given a user prompt and the current node registry, asks Claude to propose a
-graph (nodes + wires) using only manifests that exist. Returns a ``PipelineDraft``
-the web-app can either preview or apply as a fresh notebook.
+Given a user prompt and the current node registry, asks the user's chosen
+provider (via the LLMClient gateway) to propose a graph (nodes + wires) using
+only manifests that exist. Returns a ``PipelineDraft`` the web-app can either
+preview or apply as a fresh notebook.
 
 Backends:
-    * anthropic: HTTPX call to Claude with a JSON-only system prompt and a
-      registry summary scoped to the live manifests. Result is validated
-      against the registry so the LLM can't reference unknown nodes.
+    * gateway: the user's provider via the LLMClient (bring-your-own-key) with
+      a JSON-only system prompt and a registry summary scoped to the live
+      manifests. Result is validated against the registry so the LLM can't
+      reference unknown nodes.
     * template: keyword-match heuristic over manifest names + descriptions.
-      Used when no API key is configured or the LLM call fails. Returns a
+      Used when no key is configured or the LLM call fails. Returns a
       best-effort 1-3 node draft so the demo still produces something.
 
 Both backends end up calling ``Loader.render_template`` per node so the
@@ -20,20 +22,16 @@ returned cell sources are immediately runnable -- and each carries a
 from __future__ import annotations
 
 import json
-import os
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
-import httpx
-
+from notebookflow.llm.client import LLMClient, LLMError
+from notebookflow.llm.credentials import CredentialContext
 from notebookflow.protocol.loader import Loader
 from notebookflow.protocol.manifest import NodeManifest
 from notebookflow.protocol.registry import Registry
 
-_DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6"
-_DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
-_ANTHROPIC_VERSION = "2023-06-01"
 _MAX_TOKENS = 2048
 
 _SYSTEM_PROMPT = """You design notebook pipelines as JSON.
@@ -116,15 +114,17 @@ class PipelineDraft:
 
 
 class PipelineAuthor:
-    def __init__(self, registry: Registry) -> None:
+    def __init__(self, registry: Registry, llm: LLMClient | None = None) -> None:
         self._registry = registry
         self._loader = Loader(registry)
+        self._llm = llm if llm is not None else LLMClient()
 
     async def propose(
         self,
         prompt: str,
         *,
         notebook_path: str = "generated.ipynb",
+        credentials: CredentialContext | None = None,
     ) -> PipelineDraft:
         manifests = list(self._registry.all())
         if not manifests:
@@ -134,23 +134,22 @@ class PipelineAuthor:
                 warnings=["No manifests registered; cannot draft a pipeline."],
             )
 
-        api_key = _anthropic_api_key()
-        if api_key is None:
+        if credentials is None:
             return self._template_draft(prompt, notebook_path=notebook_path, manifests=manifests)
 
         try:
-            structured = await self._propose_with_anthropic(
+            structured = await self._propose_with_gateway(
                 prompt=prompt,
-                api_key=api_key,
+                credentials=credentials,
                 manifests=manifests,
             )
-        except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+        except (LLMError, ValueError) as exc:
             fallback = self._template_draft(
                 prompt,
                 notebook_path=notebook_path,
                 manifests=manifests,
             )
-            fallback.warnings = [_anthropic_failure_warning(exc), *fallback.warnings]
+            fallback.warnings = [f"{exc}; fell back to a template draft.", *fallback.warnings]
             return fallback
 
         if not structured["nodes"]:
@@ -160,51 +159,31 @@ class PipelineAuthor:
                 manifests=manifests,
             )
             fallback.warnings = [
-                "Anthropic returned no usable nodes; fell back to template draft.",
+                f"{credentials.provider} returned no usable nodes; fell back to template draft.",
                 *fallback.warnings,
             ]
             return fallback
         return self._materialise(
             structured,
             notebook_path=notebook_path,
-            backend="anthropic",
+            backend=credentials.provider,
         )
 
-    async def _propose_with_anthropic(
+    async def _propose_with_gateway(
         self,
         *,
         prompt: str,
-        api_key: str,
+        credentials: CredentialContext,
         manifests: list[NodeManifest],
     ) -> dict[str, Any]:
-        base_url = os.environ.get(
-            "NOTEBOOKFLOW_ANTHROPIC_BASE_URL",
-            _DEFAULT_ANTHROPIC_BASE_URL,
+        text = await self._llm.complete(
+            provider=credentials.provider,
+            model=credentials.model,
+            api_key=credentials.api_key,
+            messages=[{"role": "user", "content": _build_prompt(prompt, manifests)}],
+            system=_SYSTEM_PROMPT,
+            max_tokens=_MAX_TOKENS,
         )
-        model = os.environ.get("NOTEBOOKFLOW_ANTHROPIC_MODEL", _DEFAULT_ANTHROPIC_MODEL)
-        user_prompt = _build_prompt(prompt, manifests)
-
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                f"{base_url.rstrip('/')}/v1/messages",
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": _ANTHROPIC_VERSION,
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": model,
-                    "max_tokens": _MAX_TOKENS,
-                    "system": _SYSTEM_PROMPT,
-                    "messages": [{"role": "user", "content": user_prompt}],
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
-
-        text = _extract_anthropic_text(payload)
-        if text == "":
-            raise RuntimeError("Anthropic returned an empty response")
         return _parse_and_validate(text, manifests)
 
     def _template_draft(
@@ -298,19 +277,6 @@ class PipelineAuthor:
 # ---------------------------------------------------------------------------
 
 
-def _anthropic_api_key() -> str | None:
-    return os.environ.get("NOTEBOOKFLOW_ANTHROPIC_API_KEY") or os.environ.get(
-        "ANTHROPIC_API_KEY",
-    )
-
-
-def _anthropic_failure_warning(exc: Exception) -> str:
-    return (
-        f"Anthropic call failed ({type(exc).__name__}: {exc}); "
-        "fell back to a deterministic template draft."
-    )
-
-
 def _build_prompt(prompt: str, manifests: list[NodeManifest]) -> str:
     catalog_entries = []
     for manifest in manifests:
@@ -333,28 +299,12 @@ def _build_prompt(prompt: str, manifests: list[NodeManifest]) -> str:
     )
 
 
-def _extract_anthropic_text(payload: dict[str, Any]) -> str:
-    blocks = payload.get("content")
-    if not isinstance(blocks, list):
-        return ""
-    parts: list[str] = []
-    for block in blocks:
-        if not isinstance(block, dict):
-            continue
-        if block.get("type") != "text":
-            continue
-        text = block.get("text")
-        if isinstance(text, str):
-            parts.append(text)
-    return "".join(parts).strip()
-
-
 def _parse_and_validate(text: str, manifests: list[NodeManifest]) -> dict[str, Any]:
     cleaned = _strip_code_fences(text)
     try:
         payload = json.loads(cleaned)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"Anthropic JSON parse failed: {exc}") from exc
+        raise ValueError(f"LLM JSON parse failed: {exc}") from exc
     if not isinstance(payload, dict):
         raise ValueError("Anthropic response is not a JSON object")
 

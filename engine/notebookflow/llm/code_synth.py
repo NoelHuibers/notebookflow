@@ -8,15 +8,15 @@ that satisfies the manifest contract.
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, field
-from typing import Any
 
-import httpx
-
+from notebookflow.llm.client import LLMClient, LLMError
+from notebookflow.llm.credentials import CredentialContext
 from notebookflow.protocol.loader import Loader
 from notebookflow.protocol.manifest import NodeManifest
 from notebookflow.protocol.registry import Registry
+
+_MAX_TOKENS = 1024
 
 _SYSTEM_PROMPT = """You write Python source for exactly one notebook cell.
 
@@ -41,8 +41,9 @@ class SynthesisResult:
 
 
 class CodeSynth:
-    def __init__(self, registry: Registry) -> None:
+    def __init__(self, registry: Registry, llm: LLMClient | None = None) -> None:
         self._loader = Loader(registry)
+        self._llm = llm if llm is not None else LLMClient()
 
     async def synthesize(
         self,
@@ -53,6 +54,7 @@ class CodeSynth:
         outputs: list[str],
         config: dict[str, str],
         current_source: str = "",
+        credentials: CredentialContext | None = None,
     ) -> SynthesisResult:
         input_vars = _input_vars(manifest, inputs)
         output_vars = _output_vars(manifest, outputs)
@@ -66,8 +68,7 @@ class CodeSynth:
                 config=config,
             )
 
-        api_key = _openai_api_key()
-        if api_key is None:
+        if credentials is None:
             return self._template_result(
                 manifest,
                 node_name=node_name,
@@ -75,32 +76,31 @@ class CodeSynth:
                 output_vars=output_vars,
                 config=config,
                 warnings=[
-                    "OpenAI is not configured. Set OPENAI_API_KEY or "
-                    "NOTEBOOKFLOW_OPENAI_API_KEY in the shell or a local .env file "
-                    "to enable LLM synthesis."
+                    "No AI provider configured. Add a provider + API key in Settings "
+                    "(bring-your-own-key) to enable LLM synthesis."
                 ],
             )
 
         try:
-            source = await self._synthesize_with_openai(
+            source = await self._synthesize_with_gateway(
                 manifest=manifest,
                 node_name=node_name,
                 input_vars=input_vars,
                 output_vars=output_vars,
                 config=config,
                 current_source=current_source,
-                api_key=api_key,
+                credentials=credentials,
             )
-        except (httpx.HTTPError, RuntimeError) as exc:
+        except LLMError as exc:
             return self._template_result(
                 manifest,
                 node_name=node_name,
                 input_vars=input_vars,
                 output_vars=output_vars,
                 config=config,
-                warnings=[_openai_failure_warning(exc)],
+                warnings=[f"{exc}; fell back to the template."],
             )
-        return SynthesisResult(source=source, backend="openai")
+        return SynthesisResult(source=source, backend=credentials.provider)
 
     def _template_result(
         self,
@@ -123,7 +123,7 @@ class CodeSynth:
         )
         return SynthesisResult(source=source, backend="template", warnings=warnings or [])
 
-    async def _synthesize_with_openai(
+    async def _synthesize_with_gateway(
         self,
         *,
         manifest: NodeManifest,
@@ -132,10 +132,8 @@ class CodeSynth:
         output_vars: list[str],
         config: dict[str, str],
         current_source: str,
-        api_key: str,
+        credentials: CredentialContext,
     ) -> str:
-        base_url = os.environ.get("NOTEBOOKFLOW_OPENAI_BASE_URL", "https://api.openai.com/v1")
-        model = os.environ.get("NOTEBOOKFLOW_OPENAI_MODEL", "gpt-4o-mini")
         prompt = self._build_prompt(
             manifest=manifest,
             node_name=node_name,
@@ -144,31 +142,18 @@ class CodeSynth:
             config=config,
             current_source=current_source,
         )
-
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                f"{base_url.rstrip('/')}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": model,
-                    "temperature": 0.2,
-                    "messages": [
-                        {"role": "system", "content": _SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
-
-        content = _extract_message_text(payload)
-        if content == "":
-            raise RuntimeError("OpenAI returned an empty completion")
+        content = await self._llm.complete(
+            provider=credentials.provider,
+            model=credentials.model,
+            api_key=credentials.api_key,
+            messages=[{"role": "user", "content": prompt}],
+            system=_SYSTEM_PROMPT,
+            max_tokens=_MAX_TOKENS,
+        )
         stripped = _strip_code_fences(content).strip()
-        return f"{stripped}\n" if stripped != "" else ""
+        if stripped == "":
+            raise LLMError(f"{credentials.provider} returned an empty completion")
+        return f"{stripped}\n"
 
     def _build_prompt(
         self,
@@ -226,35 +211,6 @@ def _output_vars(manifest: NodeManifest, outputs: list[str]) -> list[str]:
     return [port.name for port in manifest.outputs]
 
 
-def _openai_api_key() -> str | None:
-    return os.environ.get("NOTEBOOKFLOW_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
-
-
-def _extract_message_text(payload: dict[str, Any]) -> str:
-    choices = payload.get("choices")
-    if not isinstance(choices, list) or not choices:
-        return ""
-    first = choices[0]
-    if not isinstance(first, dict):
-        return ""
-    message = first.get("message")
-    if not isinstance(message, dict):
-        return ""
-    content = message.get("content")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if not isinstance(item, dict):
-                continue
-            text = item.get("text")
-            if isinstance(text, str):
-                parts.append(text)
-        return "\n".join(parts)
-    return ""
-
-
 def _strip_code_fences(source: str) -> str:
     stripped = source.strip()
     if not stripped.startswith("```"):
@@ -263,23 +219,3 @@ def _strip_code_fences(source: str) -> str:
     if len(lines) >= 2 and lines[0].startswith("```") and lines[-1] == "```":
         return "\n".join(lines[1:-1])
     return source
-
-
-def _openai_failure_warning(exc: Exception) -> str:
-    if isinstance(exc, httpx.HTTPStatusError):
-        status_code = exc.response.status_code
-        if status_code == 401:
-            return (
-                "OpenAI rejected the configured API key (401 Unauthorized). "
-                "Check OPENAI_API_KEY or NOTEBOOKFLOW_OPENAI_API_KEY in .env or the shell, "
-                "make sure it matches NOTEBOOKFLOW_OPENAI_BASE_URL if you changed the base URL, "
-                "then restart the engine. Falling back to the template."
-            )
-        if status_code == 429:
-            return "OpenAI rate limited the request (429). Falling back to the template."
-        reason = exc.response.reason_phrase or "request failed"
-        return (
-            f"OpenAI request failed with {status_code} {reason}. "
-            "Falling back to the template."
-        )
-    return f"OpenAI synthesis failed, falling back to the template: {exc}"
