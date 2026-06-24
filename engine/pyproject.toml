@@ -20,6 +20,7 @@ dependencies = [
     "croniter>=6.2.2",
     "anthropic>=0.100.0",
     "httpx>=0.28.1",
+    "litellm>=1.0.0",
 ]
 
 [project.optional-dependencies]
