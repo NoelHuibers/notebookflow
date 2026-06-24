@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -212,6 +214,20 @@ async def test_run_node_without_plot_emits_no_figure(bus: DataBus) -> None:
     result = await Executor(DAG(), bus).run_node(node, inputs={})
     assert result.status == "ok"
     assert all("image/png" not in out.get("data", {}) for out in result.outputs)
+
+
+async def test_run_node_reads_uploaded_file_from_data_dir(
+    bus: DataBus, tmp_path: Path
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "nums.csv").write_text("value\n1\n2\n3\n")
+    src = "import pandas as pd\nrows = len(pd.read_csv('nums.csv'))\n"
+    node = DAGNode(id="a", name="A", tag="input", outputs=["rows"], source=src)
+    executor = Executor(DAG(), bus, data_dir=data_dir)
+    result = await executor.run_node(node, inputs={})
+    assert result.status == "ok"
+    assert executor.namespace["rows"] == 3
 
 
 async def test_run_node_emits_error_output_for_exception(bus: DataBus) -> None:

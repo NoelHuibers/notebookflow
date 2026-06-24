@@ -78,6 +78,7 @@ import { bootstrapBaselineSources, bootstrapFromFixture } from "@/lib/bootstrap"
 import { applyCellPatch } from "@/lib/cellPatch";
 import type {
   AskAnswer,
+  DataFile,
   EngineEvent,
   NbOutput,
   PipelineDef,
@@ -501,6 +502,52 @@ export function App(): ReactElement {
     };
     input.click();
   }, [handleFile]);
+
+  // Uploaded data files (CSVs etc.) a pipeline can read by name. Lives on the
+  // engine; the Files panel lists them.
+  const [dataFiles, setDataFiles] = useState<DataFile[]>([]);
+  const refreshDataFiles = useCallback(async (): Promise<void> => {
+    try {
+      setDataFiles(await clientRef.current.listDataFiles());
+    } catch {
+      // Engine offline / older engine without /files -- leave the list empty.
+    }
+  }, []);
+  const triggerUploadData = useCallback((): void => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".csv,.tsv,.json,.parquet,.txt,.xlsx";
+    input.onchange = (): void => {
+      const file = input.files?.[0];
+      if (file === undefined) {
+        return;
+      }
+      void clientRef.current
+        .uploadDataFile(file)
+        .then(() => refreshDataFiles())
+        .catch((err: unknown) => {
+          setError(err instanceof Error ? err.message : "Upload failed");
+        });
+    };
+    input.click();
+  }, [refreshDataFiles]);
+  const handleDeleteData = useCallback(
+    (name: string): void => {
+      void clientRef.current
+        .deleteDataFile(name)
+        .then(() => refreshDataFiles())
+        .catch((err: unknown) => {
+          setError(err instanceof Error ? err.message : "Delete failed");
+        });
+    },
+    [refreshDataFiles],
+  );
+  // Load (and reload) the data-file list when the engine target changes
+  // (the client is rebuilt then, so we refetch from the new engine).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: engineUrlOverride is the intended refetch trigger, not read in the body
+  useEffect(() => {
+    void refreshDataFiles();
+  }, [refreshDataFiles, settings.engineUrlOverride]);
 
   const handleCellsChange = useCallback((next: NotebookCell[]): void => {
     setNotebook((prev) => ({ ...prev, cells: next }));
@@ -1609,9 +1656,12 @@ export function App(): ReactElement {
             activeFileId={activeFileId}
             activeDirty={isDirty}
             collapsed={isFilesCollapsed}
+            dataFiles={dataFiles}
             onSelect={switchToFile}
             onClose={closeFile}
             onOpen={triggerOpenFile}
+            onUploadData={triggerUploadData}
+            onDeleteData={handleDeleteData}
             onToggleCollapse={() => {
               setIsFilesCollapsed((c) => !c);
             }}

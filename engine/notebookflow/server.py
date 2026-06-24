@@ -23,15 +23,17 @@ import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from dotenv import load_dotenv
 from fastapi import (
     Depends,
     FastAPI,
+    File,
     HTTPException,
     Request,
     Response,
+    UploadFile,
     WebSocket,
     WebSocketDisconnect,
 )
@@ -375,6 +377,31 @@ def _resolve_creds(credentials: CredentialsModel | None) -> CredentialContext | 
     return resolve_credentials(credentials.provider, credentials.model, credentials.api_key)
 
 
+def _data_dir(app_ref: FastAPI) -> Path:
+    """The directory holding uploaded data files (e.g. CSVs).
+
+    One directory per engine process today (a single-tenant local store); the
+    hosted product swaps this for a per-tenant location. Configurable via
+    NOTEBOOKFLOW_DATA_DIR, else a temp dir created once.
+    """
+    existing = getattr(app_ref.state, "data_dir", None)
+    if isinstance(existing, Path):
+        return existing
+    configured = os.environ.get("NOTEBOOKFLOW_DATA_DIR", "").strip()
+    path = Path(configured) if configured != "" else Path(tempfile.mkdtemp(prefix="nbf-data-"))
+    path.mkdir(parents=True, exist_ok=True)
+    app_ref.state.data_dir = path
+    return path
+
+
+def _safe_data_name(name: str) -> str:
+    """Reject path traversal -- uploads are flat files keyed by basename."""
+    base = os.path.basename(name.strip())
+    if base in ("", ".", "..") or "/" in base or "\\" in base:
+        raise HTTPException(status_code=400, detail="invalid file name")
+    return base
+
+
 def _collect_target_names(target: ast.expr, into: list[str], seen: set[str]) -> None:
     """Collect names bound by an assignment / loop / with target.
 
@@ -490,7 +517,7 @@ async def _run_pipeline(pipeline_id: str, pipeline: PipelineDef) -> list[Executi
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     with tempfile.TemporaryDirectory(prefix="nbf-spill-") as spill_dir:
         bus = DataBus(spill_dir=Path(spill_dir), pipeline_run_id=pipeline_id)
-        executor = Executor(dag=dag, bus=bus)
+        executor = Executor(dag=dag, bus=bus, data_dir=_data_dir(app))
         try:
             return await executor.run_pipeline()
         except ValueError as exc:
@@ -551,6 +578,40 @@ async def analyze_cells(request: AnalyzeRequest) -> AnalyzeResponse:
     whole request, so the canvas keeps working while the user is mid-edit.
     """
     return AnalyzeResponse(cells=[_analyze_cell(cell.source) for cell in request.cells])
+
+
+class DataFileModel(_APIModel):
+    name: str
+    size: int
+
+
+@app.get("/files", response_model=list[DataFileModel], dependencies=[Depends(require_auth)])
+async def list_data_files() -> list[DataFileModel]:
+    """Uploaded data files (CSVs etc.) a pipeline can read by name."""
+    data_dir = _data_dir(app)
+    return [
+        DataFileModel(name=entry.name, size=entry.stat().st_size)
+        for entry in sorted(data_dir.iterdir())
+        if entry.is_file()
+    ]
+
+
+@app.post("/files", response_model=DataFileModel, dependencies=[Depends(require_auth)])
+async def upload_data_file(file: Annotated[UploadFile, File()]) -> DataFileModel:
+    """Store an uploaded data file so cells can `read_csv("name")` it on run."""
+    name = _safe_data_name(file.filename or "")
+    contents = await file.read()
+    target = _data_dir(app) / name
+    target.write_bytes(contents)
+    return DataFileModel(name=name, size=len(contents))
+
+
+@app.delete("/files/{name}", dependencies=[Depends(require_auth)])
+async def delete_data_file(name: str) -> dict[str, str]:
+    target = _data_dir(app) / _safe_data_name(name)
+    if target.is_file():
+        target.unlink()
+    return {"status": "ok"}
 
 
 @app.post(
@@ -829,7 +890,7 @@ async def _stream_run(
     results: list[ExecutionResult] = []
     with tempfile.TemporaryDirectory(prefix="nbf-spill-") as spill_dir:
         bus = DataBus(spill_dir=Path(spill_dir), pipeline_run_id=pipeline_id)
-        executor = Executor(dag=dag, bus=bus)
+        executor = Executor(dag=dag, bus=bus, data_dir=_data_dir(app))
 
         async def on_node_started(node: DAGNode) -> None:
             # iter_pipeline awaits this before running each node, so the

@@ -15,11 +15,13 @@ from __future__ import annotations
 import base64
 import contextlib
 import io
+import os
 import sys
 import time
 import traceback
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from notebookflow.core.dag import DAG, DAGNode
@@ -179,9 +181,13 @@ def _introspect_outputs(namespace: dict[str, Any], ports: list[str]) -> dict[str
 
 
 class Executor:
-    def __init__(self, dag: DAG, bus: DataBus) -> None:
+    def __init__(self, dag: DAG, bus: DataBus, data_dir: Path | None = None) -> None:
         self._dag = dag
         self._bus = bus
+        # Directory holding uploaded data files. When set, each cell runs with
+        # this as the working directory so `pd.read_csv("orders.csv")` resolves
+        # against the user's uploads.
+        self._data_dir = data_dir
         self._namespace: dict[str, Any] = {}
 
     async def run_pipeline(self) -> list[ExecutionResult]:
@@ -240,7 +246,7 @@ class Executor:
         try:
             with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
                 if node.source:
-                    exec(node.source, self._namespace)  # noqa: S102
+                    self._exec_source(node.source)
         except Exception as exc:  # noqa: BLE001 — we deliberately surface every error
             duration_ms = (time.monotonic() - start) * 1000.0
             tb_lines = traceback.format_exception(type(exc), exc, exc.__traceback__)
@@ -273,6 +279,22 @@ class Executor:
             outputs=outputs,
             metadata=_introspect_outputs(self._namespace, node.outputs),
         )
+
+    def _exec_source(self, source: str) -> None:
+        """Run cell source, optionally with the uploaded-data dir as the CWD.
+
+        chdir is wrapped tightly around the synchronous ``exec`` (no awaits in
+        between), so it stays correct even if pipelines run concurrently.
+        """
+        if self._data_dir is None or not self._data_dir.is_dir():
+            exec(source, self._namespace)  # noqa: S102
+            return
+        previous = os.getcwd()
+        os.chdir(self._data_dir)
+        try:
+            exec(source, self._namespace)  # noqa: S102
+        finally:
+            os.chdir(previous)
 
     def _gather_inputs(
         self, node: DAGNode, id_index: dict[tuple[str, str], str]

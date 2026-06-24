@@ -294,6 +294,53 @@ def test_synthesize_node_falls_back_to_template_when_provider_fails(
     assert any("fell back" in warning.lower() for warning in body["warnings"])
 
 
+def test_upload_list_and_delete_data_file(client: TestClient) -> None:
+    payload = b"region,revenue\nNorth,10\nSouth,20\n"
+    r = client.post("/files", files={"file": ("orders.csv", payload, "text/csv")})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["name"] == "orders.csv"
+    assert body["size"] == len(payload)
+
+    listing = client.get("/files")
+    assert listing.status_code == 200
+    assert "orders.csv" in [entry["name"] for entry in listing.json()]
+
+    deleted = client.delete("/files/orders.csv")
+    assert deleted.status_code == 200
+    after = client.get("/files")
+    assert "orders.csv" not in [entry["name"] for entry in after.json()]
+
+
+def test_upload_strips_path_traversal_from_filename(client: TestClient) -> None:
+    r = client.post("/files", files={"file": ("../../etc/evil.csv", b"x\n", "text/csv")})
+    assert r.status_code == 200
+    # The path is reduced to its basename; nothing escapes the data dir.
+    assert r.json()["name"] == "evil.csv"
+    client.delete("/files/evil.csv")
+
+
+def test_uploaded_file_is_readable_during_a_run(client: TestClient) -> None:
+    client.post("/files", files={"file": ("nums.csv", b"value\n1\n2\n3\n", "text/csv")})
+    pipeline = {
+        "nodes": [
+            {
+                "id": "a",
+                "name": "Load",
+                "tag": "input",
+                "inputs": [],
+                "outputs": ["count"],
+                "source": "import pandas as pd\ncount = len(pd.read_csv('nums.csv'))\n",
+            },
+        ],
+        "edges": [],
+    }
+    r = client.post("/pipelines/files-demo/run", json=pipeline)
+    assert r.status_code == 200
+    assert r.json()["results"][0]["status"] == "ok"
+    client.delete("/files/nums.csv")
+
+
 def test_run_pipeline_executes_in_topo_order(client: TestClient) -> None:
     r = client.post("/pipelines/demo/run", json=_linear_pipeline())
     assert r.status_code == 200

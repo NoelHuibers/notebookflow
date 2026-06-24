@@ -372,6 +372,50 @@ export class EngineClient {
   }
 
   // ---------------------------------------------------------------------
+  // Data files (uploaded CSVs etc.). A pipeline reads them by name
+  // (`pd.read_csv("orders.csv")`); the engine stores them in its data dir
+  // and runs cells with that as the working directory.
+  // ---------------------------------------------------------------------
+
+  private filesUrl(name?: string): string {
+    const suffix = name === undefined ? "/files" : `/files/${encodeURIComponent(name)}`;
+    return this.url.replace(/^ws/, "http").replace(/\/ws$/, suffix);
+  }
+
+  async listDataFiles(): Promise<DataFile[]> {
+    const res = await fetch(this.filesUrl(), { headers: this.authHeaders() });
+    if (!res.ok) {
+      throw new Error(`EngineClient.listDataFiles: ${await readErrorMessage(res)}`);
+    }
+    return (await res.json()) as DataFile[];
+  }
+
+  async uploadDataFile(file: File): Promise<DataFile> {
+    const form = new FormData();
+    form.append("file", file);
+    // No Content-Type header — the browser sets the multipart boundary.
+    const res = await fetch(this.filesUrl(), {
+      method: "POST",
+      headers: this.authHeaders(),
+      body: form,
+    });
+    if (!res.ok) {
+      throw new Error(`EngineClient.uploadDataFile: ${await readErrorMessage(res)}`);
+    }
+    return (await res.json()) as DataFile;
+  }
+
+  async deleteDataFile(name: string): Promise<void> {
+    const res = await fetch(this.filesUrl(name), {
+      method: "DELETE",
+      headers: this.authHeaders(),
+    });
+    if (!res.ok) {
+      throw new Error(`EngineClient.deleteDataFile: ${await readErrorMessage(res)}`);
+    }
+  }
+
+  // ---------------------------------------------------------------------
   // Triggers (manual / cron / file_watch / webhook). Backs the Triggers
   // dialog in the top bar; engine REST surface lives in server.py at
   // /triggers, /triggers/{id}/fire, /triggers/{id}/firings.
@@ -466,6 +510,11 @@ export interface AskAnswer {
   answer: string;
   backend: string;
   warnings: string[];
+}
+
+export interface DataFile {
+  name: string;
+  size: number;
 }
 
 export interface PipelineProposalNode {
