@@ -186,6 +186,34 @@ async def test_run_node_captures_display_data_with_html_for_dataframe(bus: DataB
     assert "text/plain" in out["data"]
 
 
+async def test_run_node_captures_matplotlib_figure_as_png(bus: DataBus) -> None:
+    src = (
+        "import matplotlib\n"
+        "matplotlib.use('Agg')\n"
+        "import matplotlib.pyplot as plt\n"
+        "fig, ax = plt.subplots()\n"
+        "ax.bar(['a', 'b'], [1, 2])\n"
+    )
+    node = DAGNode(id="a", name="Plot", tag="output", source=src)
+    result = await Executor(DAG(), bus).run_node(node, inputs={})
+    assert result.status == "ok"
+    pngs = [
+        out
+        for out in result.outputs
+        if out["output_type"] == "display_data" and "image/png" in out["data"]
+    ]
+    assert len(pngs) == 1
+    assert isinstance(pngs[0]["data"]["image/png"], str)
+    assert pngs[0]["data"]["image/png"] != ""
+
+
+async def test_run_node_without_plot_emits_no_figure(bus: DataBus) -> None:
+    node = DAGNode(id="a", name="A", tag="transform", source="x = 1 + 1\n")
+    result = await Executor(DAG(), bus).run_node(node, inputs={})
+    assert result.status == "ok"
+    assert all("image/png" not in out.get("data", {}) for out in result.outputs)
+
+
 async def test_run_node_emits_error_output_for_exception(bus: DataBus) -> None:
     node = DAGNode(id="a", name="A", tag="transform", source="raise RuntimeError('boom')\n")
     result = await Executor(DAG(), bus).run_node(node, inputs={})

@@ -12,7 +12,10 @@ slot in without changing call sites.
 
 from __future__ import annotations
 
+import base64
 import contextlib
+import io
+import sys
 import time
 import traceback
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -83,6 +86,35 @@ def _format_display(obj: Any) -> dict[str, str]:
         if isinstance(html, str):
             data["text/html"] = html
     return data
+
+
+def _capture_matplotlib_figures(outputs: list[NbOutput]) -> None:
+    """Append any open matplotlib figures as image/png display_data outputs.
+
+    Mirrors a Jupyter inline backend: after a cell runs, every open figure is
+    rendered to PNG and emitted, then closed so it doesn't leak into the next
+    node. Only touches matplotlib if the cell actually imported it -- no figures
+    when the user never plotted, and no hard dependency on matplotlib.
+    """
+    if "matplotlib.pyplot" not in sys.modules:
+        return
+    try:
+        plt = sys.modules["matplotlib.pyplot"]
+        for num in plt.get_fignums():
+            figure = plt.figure(num)
+            buffer = io.BytesIO()
+            figure.savefig(buffer, format="png", bbox_inches="tight")
+            encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+            outputs.append(
+                {
+                    "output_type": "display_data",
+                    "data": {"image/png": encoded},
+                    "metadata": {},
+                },
+            )
+            plt.close(figure)
+    except Exception:  # noqa: BLE001 -- a plotting hiccup must not kill the result
+        return
 
 
 def _make_display(outputs: list[NbOutput]) -> Callable[..., None]:
@@ -228,6 +260,7 @@ class Executor:
                 outputs=outputs,
             )
         duration_ms = (time.monotonic() - start) * 1000.0
+        _capture_matplotlib_figures(outputs)
 
         for port in node.outputs:
             if port in self._namespace:

@@ -129,6 +129,19 @@ function RichOutput({ data }: { data: Record<string, string> }): ReactElement {
     });
   }, [html]);
 
+  // Images (e.g. captured matplotlib figures) — the src is a controlled
+  // base64 data URI the engine produced, not user-authored HTML.
+  const png = data["image/png"];
+  if (png !== undefined) {
+    return (
+      <img
+        src={`data:image/png;base64,${png}`}
+        alt="Cell output figure"
+        className="max-w-full rounded border bg-white"
+      />
+    );
+  }
+
   if (sanitized !== null) {
     return (
       <div
