@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { NodeTag } from "../types";
 import twoNode from "./fixtures/two-node.ipynb.json";
 import type { NotebookCell } from "./MarkerParser";
-import { MarkerParser } from "./MarkerParser";
+import { defaultAliasForPath, formatRef, MarkerParser, parseRef } from "./MarkerParser";
 
 interface IpynbCell {
   cell_type: string;
@@ -200,5 +200,76 @@ describe("MarkerParser.parseNotebook", () => {
     const result = MarkerParser.parseNotebook("nb.ipynb", cells);
     expect(result.markers).toHaveLength(1);
     expect(result.markers[0]?.name).toBe("Real");
+  });
+});
+
+describe("MarkerParser — notebook alias (#18)", () => {
+  it("defaults the alias to the sanitised filename stem", () => {
+    const result = MarkerParser.parseNotebook("path/to/Orders 2026.ipynb", []);
+    expect(result.alias).toBe("orders_2026");
+  });
+
+  it("prefixes a stem that does not start with a letter", () => {
+    expect(defaultAliasForPath("2026-report.ipynb")).toBe("nb_2026-report");
+  });
+
+  it("reads an explicit `# @notebook:` header", () => {
+    const cells: NotebookCell[] = [
+      { cellType: "code", source: "# @notebook: orders\nimport pandas as pd" },
+      { cellType: "code", source: "# @node: Load  [input]  out=df" },
+    ];
+    const result = MarkerParser.parseNotebook("whatever.ipynb", cells);
+    expect(result.alias).toBe("orders");
+    // The header cell is not itself a node.
+    expect(result.markers).toHaveLength(1);
+    expect(result.markers[0]?.name).toBe("Load");
+  });
+
+  it("reports an invalid alias as a parse error and falls back to the stem", () => {
+    const cells: NotebookCell[] = [{ cellType: "code", source: "# @notebook: Bad Alias" }];
+    const result = MarkerParser.parseNotebook("nb.ipynb", cells);
+    expect(result.errors).toHaveLength(1);
+    expect(result.alias).toBe("nb");
+  });
+
+  it("parses an alias-qualified input ref and round-trips it", () => {
+    const body = MarkerParser.parseLine("# @node: Filter  [transform]  in=orders:Load CSV.df");
+    expect(body?.inputs).toEqual(["orders:Load CSV.df"]);
+  });
+
+  it("keeps local and qualified refs distinct in one marker", () => {
+    const body = MarkerParser.parseLine("# @node: Join  [transform]  in=Local.a,other:Remote.b");
+    expect(body?.inputs).toEqual(["Local.a", "other:Remote.b"]);
+  });
+
+  it("rejects a ref with an invalid alias", () => {
+    expect(() => MarkerParser.parseLine("# @node: X  [transform]  in=Bad Alias:Node.p")).toThrow();
+  });
+});
+
+describe("parseRef / formatRef helpers", () => {
+  it("parses a local ref", () => {
+    expect(parseRef("Load CSV.df")).toEqual({
+      alias: null,
+      nodeName: "Load CSV",
+      portName: "df",
+    });
+  });
+
+  it("parses a qualified ref", () => {
+    expect(parseRef("orders:Load CSV.df")).toEqual({
+      alias: "orders",
+      nodeName: "Load CSV",
+      portName: "df",
+    });
+  });
+
+  it("returns null for a structurally invalid ref", () => {
+    expect(parseRef("no-dot-here")).toBeNull();
+  });
+
+  it("round-trips through formatRef", () => {
+    expect(formatRef({ alias: "a", nodeName: "N", portName: "p" })).toBe("a:N.p");
+    expect(formatRef({ alias: null, nodeName: "N", portName: "p" })).toBe("N.p");
   });
 });
