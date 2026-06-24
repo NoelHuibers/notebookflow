@@ -19,6 +19,7 @@ Multi-run isolation:
 
 from __future__ import annotations
 
+import copy
 import json
 import uuid
 from dataclasses import dataclass, field
@@ -95,7 +96,15 @@ class DataBus:
         if payload.kind == "dataframe" and isinstance(payload.value, Path):
             df = pd.read_parquet(payload.value)
             return Payload(kind="dataframe", value=df, meta=dict(payload.meta))
-        return Payload(kind=payload.kind, value=payload.value, meta=dict(payload.meta))
+        # JSON payloads are stored by reference. Deep-copy on read so that a
+        # node fanning out to several consumers gives each an independent
+        # value -- one branch mutating a list/dict in place must not leak into
+        # a sibling branch reading the same cached output.
+        return Payload(
+            kind=payload.kind,
+            value=copy.deepcopy(payload.value),
+            meta=dict(payload.meta),
+        )
 
     def clear_node(self, node_id: str) -> None:
         keys_to_drop = [k for k in self._store if k[0] == self._run_id and k[1] == node_id]

@@ -134,3 +134,25 @@ def test_internal_store_holds_path_not_dataframe(bus: DataBus) -> None:
     payload = bus.get("n1", "df")
     assert isinstance(payload.value, pd.DataFrame)
     assert payload.value["a"].tolist() == [1]
+
+
+def test_get_isolates_mutable_json_between_consumers(bus: DataBus) -> None:
+    """Fan-out: two consumers of a list output must not see each other's
+    in-place mutations. get() deep-copies JSON payloads on read."""
+    bus.put("src", "rows", [1, 2, 3])
+
+    first = bus.get("src", "rows")
+    first.value.append(999)  # one branch mutates its copy
+
+    second = bus.get("src", "rows")
+    assert second.value == [1, 2, 3]  # sibling branch is unaffected
+
+    # The stored value itself is untouched too.
+    assert bus.get("src", "rows").value == [1, 2, 3]
+
+
+def test_get_isolates_nested_dict_payloads(bus: DataBus) -> None:
+    bus.put("src", "cfg", {"opts": {"n": 1}})
+    a = bus.get("src", "cfg")
+    a.value["opts"]["n"] = 42
+    assert bus.get("src", "cfg").value == {"opts": {"n": 1}}

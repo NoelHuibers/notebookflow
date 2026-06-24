@@ -385,3 +385,38 @@ async def test_cross_notebook_same_name_nodes_do_not_collide(bus: DataBus) -> No
     await Executor(dag, bus).run_pipeline()
     # c references b's Load (99), not a's (10).
     assert bus.get("c::0", "got").value == 99
+
+
+async def test_fanout_branches_get_isolated_copies(bus: DataBus) -> None:
+    # One source fans out to two consumers; one mutates its input in place.
+    # The other branch must compute against an untouched copy.
+    dag = DAG()
+    dag.add_node(
+        DAGNode(id="src", name="Src", tag="input", outputs=["rows"], source="rows = [1, 2, 3]\n")
+    )
+    dag.add_node(
+        DAGNode(
+            id="mut",
+            name="Mut",
+            tag="transform",
+            inputs=["Src.rows"],
+            outputs=["n"],
+            source="rows.append(99)\nn = len(rows)\n",
+        )
+    )
+    dag.add_node(
+        DAGNode(
+            id="pure",
+            name="Pure",
+            tag="transform",
+            inputs=["Src.rows"],
+            outputs=["n"],
+            source="n = len(rows)\n",
+        )
+    )
+    dag.add_edge(DAGEdge("src", "rows", "mut", "Src.rows"))
+    dag.add_edge(DAGEdge("src", "rows", "pure", "Src.rows"))
+
+    await Executor(dag, bus).run_pipeline()
+    assert bus.get("mut", "n").value == 4  # mutated branch saw its append
+    assert bus.get("pure", "n").value == 3  # sibling branch unaffected
