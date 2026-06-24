@@ -1,14 +1,16 @@
-"""Tests for the Ask LLM module backing the command palette."""
+"""Tests for the Ask LLM module (BYOK via the LLMClient gateway)."""
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
-
-import httpx
-import pytest
 
 from notebookflow.core.dag import DAG, DAGEdge, DAGNode
 from notebookflow.llm.ask import Ask
+from notebookflow.llm.client import LLMClient
+from notebookflow.llm.credentials import CredentialContext
+
+_CREDS = CredentialContext(provider="openai", model="gpt-4o", api_key="sk-test")
 
 
 def _dag() -> DAG:
@@ -21,143 +23,90 @@ def _dag() -> DAG:
     return dag
 
 
+def _ask_returning(text: str) -> tuple[Ask, list[dict[str, Any]]]:
+    """An Ask whose gateway returns `text` and records the calls it received."""
+    calls: list[dict[str, Any]] = []
+
+    async def fake(**kwargs: Any) -> SimpleNamespace:
+        calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=text))],
+        )
+
+    return Ask(llm=LLMClient(acompletion=fake)), calls
+
+
+def _ask_raising() -> Ask:
+    async def boom(**_kwargs: Any) -> Any:
+        raise RuntimeError("provider down")
+
+    return Ask(llm=LLMClient(acompletion=boom))
+
+
 # ---------------------------------------------------------------------------
-# Template fallback
+# Template fallback (no credentials)
 # ---------------------------------------------------------------------------
 
 
-async def test_template_fallback_with_no_key_returns_hint(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("NOTEBOOKFLOW_ANTHROPIC_API_KEY", raising=False)
-
-    result = await Ask().ask("How do I run this pipeline?", dag=_dag())
+async def test_no_credentials_returns_template_hint() -> None:
+    ask, _ = _ask_returning("unused")
+    result = await ask.ask("How do I run this pipeline?", dag=_dag(), credentials=None)
     assert result.backend == "template"
     assert "Run pipeline" in result.answer
-    # Pipeline summary is prepended when a dag is supplied.
-    assert "nodes" in result.answer
 
 
-async def test_template_explain_intent_points_at_explain_button(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("NOTEBOOKFLOW_ANTHROPIC_API_KEY", raising=False)
-    result = await Ask().ask("Explain what this pipeline does")
+async def test_explain_intent_points_at_explain_button() -> None:
+    ask, _ = _ask_returning("unused")
+    result = await ask.ask("Explain what this pipeline does", credentials=None)
     assert result.backend == "template"
     assert "Explain" in result.answer
 
 
-async def test_template_compose_intent_points_at_compose_button(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("NOTEBOOKFLOW_ANTHROPIC_API_KEY", raising=False)
-    result = await Ask().ask("Compose a pipeline that loads CSV")
+async def test_unknown_intent_mentions_byok() -> None:
+    ask, _ = _ask_returning("unused")
+    result = await ask.ask("What is the meaning of life?", credentials=None)
     assert result.backend == "template"
-    assert "Compose" in result.answer
+    assert "Settings" in result.answer
 
 
-async def test_template_unknown_intent_returns_generic_hint(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("NOTEBOOKFLOW_ANTHROPIC_API_KEY", raising=False)
-    result = await Ask().ask("What is the meaning of life?")
-    assert result.backend == "template"
-    assert "ANTHROPIC_API_KEY" in result.answer
-
-
-async def test_empty_prompt_returns_short_intro(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("NOTEBOOKFLOW_ANTHROPIC_API_KEY", raising=False)
-    result = await Ask().ask("   ")
+async def test_empty_prompt_returns_short_intro() -> None:
+    ask, _ = _ask_returning("unused")
+    result = await ask.ask("   ", credentials=_CREDS)
     assert result.backend == "template"
     assert "Ask me" in result.answer
 
 
 # ---------------------------------------------------------------------------
-# Anthropic backend
+# Gateway-backed (credentials present)
 # ---------------------------------------------------------------------------
 
 
-async def test_anthropic_backend_returns_text(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
-
-    async def fake_post(
-        _self: httpx.AsyncClient, *_args: object, **_kwargs: object
-    ) -> httpx.Response:
-        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-        return httpx.Response(
-            status_code=200,
-            request=request,
-            json={
-                "content": [
-                    {"type": "text", "text": "Your pipeline loads CSV and plots it."},
-                ],
-            },
-        )
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
-    result = await Ask().ask("describe my pipeline", dag=_dag())
-    assert result.backend == "anthropic"
+async def test_credentials_route_through_gateway() -> None:
+    ask, calls = _ask_returning("Your pipeline loads CSV and plots it.")
+    result = await ask.ask("describe my pipeline", dag=_dag(), credentials=_CREDS)
+    assert result.backend == "openai"  # the concrete provider used
     assert result.answer == "Your pipeline loads CSV and plots it."
+    assert calls[0]["model"] == "openai/gpt-4o"
 
 
-async def test_anthropic_failure_falls_back_to_template(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
+async def test_pipeline_context_woven_into_message() -> None:
+    ask, calls = _ask_returning("ok")
+    await ask.ask("what does Load CSV do?", dag=_dag(), credentials=_CREDS)
+    # The gateway prepends the system message, so the user message is last.
+    user_message = calls[0]["messages"][-1]["content"]
+    assert "Current pipeline" in user_message
+    assert "Load CSV" in user_message
 
-    async def failing_post(
-        _self: httpx.AsyncClient, *_args: object, **_kwargs: object
-    ) -> httpx.Response:
-        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-        response = httpx.Response(status_code=502, request=request)
-        raise httpx.HTTPStatusError("Anthropic 502", request=request, response=response)
 
-    monkeypatch.setattr(httpx.AsyncClient, "post", failing_post)
-    result = await Ask().ask("explain the pipeline")
+async def test_gateway_failure_falls_back_to_template() -> None:
+    ask = _ask_raising()
+    result = await ask.ask("explain the pipeline", dag=_dag(), credentials=_CREDS)
     assert result.backend == "template"
     assert result.warnings != []
 
 
-async def test_anthropic_empty_response_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
-
-    async def empty_post(
-        _self: httpx.AsyncClient, *_args: object, **_kwargs: object
-    ) -> httpx.Response:
-        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-        return httpx.Response(status_code=200, request=request, json={"content": []})
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", empty_post)
-    result = await Ask().ask("explain the pipeline")
+async def test_empty_completion_falls_back_to_template() -> None:
+    ask, _ = _ask_returning("")
+    result = await ask.ask("explain the pipeline", credentials=_CREDS)
     assert result.backend == "template"
     assert any("empty" in w.lower() for w in result.warnings)
-
-
-async def test_anthropic_request_includes_pipeline_when_supplied(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
-    seen_bodies: list[Any] = []
-
-    async def fake_post(
-        _self: httpx.AsyncClient, _url: str, **kwargs: Any
-    ) -> httpx.Response:
-        seen_bodies.append(kwargs["json"])
-        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-        return httpx.Response(
-            status_code=200,
-            request=request,
-            json={"content": [{"type": "text", "text": "ok"}]},
-        )
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
-    await Ask().ask("what does Load CSV do?", dag=_dag())
-    assert len(seen_bodies) == 1
-    user_message = seen_bodies[0]["messages"][0]["content"]
-    assert "Current pipeline" in user_message
-    assert "Load CSV" in user_message

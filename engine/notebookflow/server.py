@@ -46,6 +46,7 @@ from notebookflow.core.executor import ExecutionResult, Executor
 from notebookflow.core.triggers import Trigger, TriggerFiring, TriggerManager
 from notebookflow.llm.ask import Ask
 from notebookflow.llm.code_synth import CodeSynth
+from notebookflow.llm.credentials import CredentialContext, resolve_credentials
 from notebookflow.llm.explainer import Explainer
 from notebookflow.llm.pipeline_author import PipelineAuthor
 from notebookflow.protocol.registry import Registry
@@ -248,9 +249,19 @@ class FireTriggerRequest(_APIModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class CredentialsModel(_APIModel):
+    """Per-request bring-your-own-key context from the web-app's Settings.
+    Never persisted, never logged."""
+
+    provider: str = ""
+    model: str = ""
+    api_key: str = ""
+
+
 class AskRequest(_APIModel):
     prompt: str
     pipeline: PipelineDef | None = None
+    credentials: CredentialsModel | None = None
 
 
 class AskResponse(_APIModel):
@@ -353,6 +364,13 @@ def _ask(app_ref: FastAPI) -> Ask:
         ask = Ask()
         app_ref.state.ask = ask
     return ask
+
+
+def _resolve_creds(credentials: CredentialsModel | None) -> CredentialContext | None:
+    """Per-request key wins; else a self-host env key; else None (template)."""
+    if credentials is None:
+        return resolve_credentials()
+    return resolve_credentials(credentials.provider, credentials.model, credentials.api_key)
 
 
 def _collect_target_names(target: ast.expr, into: list[str], seen: set[str]) -> None:
@@ -712,9 +730,9 @@ async def list_firings(trigger_id: str) -> list[dict[str, Any]]:
 async def ask_llm(request: AskRequest) -> AskResponse:
     """Free-form Q&A backing the web-app's Cmd/Ctrl+K command palette.
 
-    Backed by Anthropic when configured; falls back to a keyword-driven
-    template hint that nudges the user toward the matching button
-    (Explain / Compose / Run / triggers).
+    Runs through the LLMClient gateway using the per-request provider/key
+    (bring-your-own-key), or a self-host env key, and otherwise falls back to
+    a keyword-driven template hint.
     """
     if request.prompt.strip() == "":
         raise HTTPException(status_code=400, detail="prompt must not be empty")
@@ -724,7 +742,11 @@ async def ask_llm(request: AskRequest) -> AskResponse:
             dag = _build_dag(request.pipeline)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-    result = await _ask(app).ask(request.prompt, dag=dag)
+    result = await _ask(app).ask(
+        request.prompt,
+        dag=dag,
+        credentials=_resolve_creds(request.credentials),
+    )
     return AskResponse(answer=result.answer, backend=result.backend, warnings=result.warnings)
 
 

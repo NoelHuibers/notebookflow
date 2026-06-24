@@ -1,11 +1,10 @@
 """Ask — free-form Q&A backing the web-app's command palette.
 
 The user opens the palette with Cmd/Ctrl+K, types a question, and the
-engine pipes it to Claude (when ANTHROPIC_API_KEY is set) or to a small
-keyword-driven template fallback (otherwise). The template fallback
-exists so the palette is useful for self-hosters without an API key --
-it nudges them to the right button (Explain / Compose / Run) based on
-the intent it can detect in their prompt.
+engine pipes it to their chosen provider via the LLMClient gateway
+(bring-your-own-key) or to a small keyword-driven template fallback when
+no key is configured. The template fallback nudges the user to the right
+button (Explain / Compose / Run) based on the intent in their prompt.
 
 Mirrors the Explainer / PipelineAuthor template-fallback pattern so the
 endpoint contract is always ``AskAnswer.answer != ""``.
@@ -14,17 +13,12 @@ endpoint contract is always ``AskAnswer.answer != ""``.
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, field
-from typing import Any
-
-import httpx
 
 from notebookflow.core.dag import DAG, DAGEdge, DAGNode
+from notebookflow.llm.client import LLMClient, LLMError
+from notebookflow.llm.credentials import CredentialContext
 
-_DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6"
-_DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
-_ANTHROPIC_VERSION = "2023-06-01"
 _MAX_TOKENS = 1024
 
 _SYSTEM_PROMPT = """You are NotebookFlow's AI copilot.
@@ -45,18 +39,22 @@ bullet list only if the question explicitly asks for one. Keep it short
 @dataclass(slots=True)
 class AskAnswer:
     answer: str
-    backend: str  # "anthropic" or "template"
+    backend: str  # the concrete provider used ("anthropic", "openai", …) or "template"
     warnings: list[str] = field(default_factory=list)
 
 
 class Ask:
-    """Wraps a single async ``ask`` entry point, mirroring Explainer.
+    """Wraps a single async ``ask`` entry point. Stateless and safe to share."""
 
-    Stateless: one instance per app is fine; concurrent calls are safe
-    because each call opens its own httpx.AsyncClient.
-    """
+    def __init__(self, llm: LLMClient | None = None) -> None:
+        self._llm = llm if llm is not None else LLMClient()
 
-    async def ask(self, prompt: str, dag: DAG | None = None) -> AskAnswer:
+    async def ask(
+        self,
+        prompt: str,
+        dag: DAG | None = None,
+        credentials: CredentialContext | None = None,
+    ) -> AskAnswer:
         trimmed = prompt.strip()
         if trimmed == "":
             return AskAnswer(
@@ -64,92 +62,25 @@ class Ask:
                 backend="template",
             )
 
-        api_key = _anthropic_api_key()
-        if api_key is None:
+        if credentials is None:
             return AskAnswer(answer=_template_answer(trimmed, dag), backend="template")
 
         try:
-            answer = await self._ask_with_anthropic(
-                prompt=trimmed,
-                dag=dag,
-                api_key=api_key,
+            answer = await self._llm.complete(
+                provider=credentials.provider,
+                model=credentials.model,
+                api_key=credentials.api_key,
+                messages=[{"role": "user", "content": _build_user_message(trimmed, dag)}],
+                system=_SYSTEM_PROMPT,
+                max_tokens=_MAX_TOKENS,
             )
-        except (httpx.HTTPError, RuntimeError) as exc:
+        except LLMError as exc:
             return AskAnswer(
                 answer=_template_answer(trimmed, dag),
                 backend="template",
-                warnings=[_anthropic_failure_warning(exc)],
+                warnings=[f"{exc}; fell back to a template hint."],
             )
-        if answer == "":
-            return AskAnswer(
-                answer=_template_answer(trimmed, dag),
-                backend="template",
-                warnings=["Anthropic returned an empty response; fell back to a template hint"],
-            )
-        return AskAnswer(answer=answer, backend="anthropic")
-
-    async def _ask_with_anthropic(
-        self,
-        *,
-        prompt: str,
-        dag: DAG | None,
-        api_key: str,
-    ) -> str:
-        base_url = os.environ.get(
-            "NOTEBOOKFLOW_ANTHROPIC_BASE_URL",
-            _DEFAULT_ANTHROPIC_BASE_URL,
-        )
-        model = os.environ.get("NOTEBOOKFLOW_ANTHROPIC_MODEL", _DEFAULT_ANTHROPIC_MODEL)
-        user_message = _build_user_message(prompt, dag)
-
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                f"{base_url.rstrip('/')}/v1/messages",
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": _ANTHROPIC_VERSION,
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": model,
-                    "max_tokens": _MAX_TOKENS,
-                    "system": _SYSTEM_PROMPT,
-                    "messages": [{"role": "user", "content": user_message}],
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
-
-        return _extract_anthropic_text(payload)
-
-
-def _anthropic_api_key() -> str | None:
-    return os.environ.get("NOTEBOOKFLOW_ANTHROPIC_API_KEY") or os.environ.get(
-        "ANTHROPIC_API_KEY",
-    )
-
-
-def _anthropic_failure_warning(exc: Exception) -> str:
-    return (
-        f"Anthropic call failed ({type(exc).__name__}: {exc}); "
-        "fell back to a deterministic template hint."
-    )
-
-
-def _extract_anthropic_text(payload: dict[str, Any]) -> str:
-    blocks = payload.get("content")
-    if not isinstance(blocks, list):
-        return ""
-    parts: list[str] = []
-    for block in blocks:
-        if not isinstance(block, dict):
-            continue
-        if block.get("type") != "text":
-            continue
-        text = block.get("text")
-        if isinstance(text, str):
-            parts.append(text)
-    return "".join(parts).strip()
+        return AskAnswer(answer=answer, backend=credentials.provider)
 
 
 def _build_user_message(prompt: str, dag: DAG | None) -> str:
@@ -224,9 +155,9 @@ def _template_answer(prompt: str, dag: DAG | None) -> str:
     if hint is not None:
         return f"{summary}{hint}".strip() + "\n"
     return (
-        f"{summary}I can answer richer questions when ANTHROPIC_API_KEY is set on the "
-        "engine. Without a key I can still nudge you to the right button -- try keywords "
-        "like 'explain', 'compose', 'run', or 'trigger'.\n"
+        f"{summary}I can answer richer questions once you add a provider + API key in "
+        "Settings (bring-your-own-key). Without one I can still nudge you to the right "
+        "button -- try keywords like 'explain', 'compose', 'run', or 'trigger'.\n"
     )
 
 

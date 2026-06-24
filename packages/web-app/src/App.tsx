@@ -116,11 +116,19 @@ type Theme = "light" | "dark" | "system";
 interface UserSettings {
   engineUrlOverride: string;
   theme: Theme;
+  // Bring-your-own-key: the LLM provider, model, and key sent with each AI
+  // request. Stored only in this browser, never server-side.
+  llmProvider: string;
+  llmModel: string;
+  llmApiKey: string;
 }
 
 const DEFAULT_USER_SETTINGS: UserSettings = {
   engineUrlOverride: "",
   theme: "system",
+  llmProvider: "anthropic",
+  llmModel: "",
+  llmApiKey: "",
 };
 
 function readUserSettings(): UserSettings {
@@ -140,6 +148,9 @@ function readUserSettings(): UserSettings {
         parsed.theme === "light" || parsed.theme === "dark" || parsed.theme === "system"
           ? parsed.theme
           : "system",
+      llmProvider: typeof parsed.llmProvider === "string" ? parsed.llmProvider : "anthropic",
+      llmModel: typeof parsed.llmModel === "string" ? parsed.llmModel : "",
+      llmApiKey: typeof parsed.llmApiKey === "string" ? parsed.llmApiKey : "",
     };
   } catch {
     return DEFAULT_USER_SETTINGS;
@@ -315,14 +326,25 @@ export function App(): ReactElement {
       : new EngineClient(settings.engineUrlOverride),
   );
 
-  // If the user changes the engine URL override in Settings, rebuild the
-  // EngineClient so subsequent runs hit the new host.
+  // Rebuild the EngineClient when the engine URL changes, and (re)apply the
+  // bring-your-own-key credentials whenever the LLM settings change. Both go
+  // through one effect so a fresh client never loses its credentials.
   useEffect(() => {
-    clientRef.current =
+    const client =
       settings.engineUrlOverride === ""
         ? new EngineClient()
         : new EngineClient(settings.engineUrlOverride);
-  }, [settings.engineUrlOverride]);
+    client.setCredentials(
+      settings.llmApiKey.trim() === ""
+        ? null
+        : {
+            provider: settings.llmProvider,
+            model: settings.llmModel,
+            apiKey: settings.llmApiKey,
+          },
+    );
+    clientRef.current = client;
+  }, [settings.engineUrlOverride, settings.llmProvider, settings.llmModel, settings.llmApiKey]);
 
   // Global shortcuts. Modifier combos fire anywhere; bare keys (m, ?) are
   // suppressed while typing in an input / textarea / CodeMirror so they don't
@@ -2061,6 +2083,58 @@ function SettingsDialog({ settings, onChange, onClose }: SettingsDialogProps): R
             <option value="dark">Dark</option>
           </select>
         </label>
+
+        <div className="mt-1 border-t pt-3">
+          <span className="font-semibold tracking-tight">AI provider (bring your own key)</span>
+          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-muted-foreground">Provider</span>
+              <select
+                value={settings.llmProvider}
+                onChange={(event) => {
+                  onChange({ ...settings, llmProvider: event.target.value });
+                }}
+                className="rounded-md border bg-background px-2 py-1 text-[11px]"
+              >
+                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="openai">OpenAI (GPT)</option>
+                <option value="moonshot">Moonshot (Kimi)</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="qwen">Qwen</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-muted-foreground">Model</span>
+              <input
+                type="text"
+                value={settings.llmModel}
+                onChange={(event) => {
+                  onChange({ ...settings, llmModel: event.target.value });
+                }}
+                placeholder="(provider default)"
+                className="rounded-md border bg-background px-2 py-1 font-mono text-[11px] outline-none focus:ring-1 focus:ring-ring"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-muted-foreground">API key</span>
+              <input
+                type="password"
+                value={settings.llmApiKey}
+                onChange={(event) => {
+                  onChange({ ...settings, llmApiKey: event.target.value });
+                }}
+                placeholder="sk-…"
+                autoComplete="off"
+                className="rounded-md border bg-background px-2 py-1 font-mono text-[11px] outline-none focus:ring-1 focus:ring-ring"
+              />
+            </label>
+          </div>
+          <span className="mt-1 block text-[10px] italic text-muted-foreground">
+            Used for Ask / Compose / Explain / node synthesis. Stored only in this browser and sent
+            per request — never saved on the server. Leave the key blank to use the engine's own key
+            or the template fallback.
+          </span>
+        </div>
       </div>
     </div>
   );

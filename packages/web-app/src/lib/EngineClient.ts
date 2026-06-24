@@ -134,9 +134,18 @@ export interface RunOptions {
   url?: string;
 }
 
+export interface Credentials {
+  provider: string;
+  model: string;
+  apiKey: string;
+}
+
 export class EngineClient {
   private readonly url: string;
   private readonly token: string;
+  // Bring-your-own-key context sent with each LLM request. Set from the
+  // web-app Settings; null means "let the engine use its env key / template".
+  private credentials: Credentials | null = null;
 
   constructor(url: string = DEFAULT_ENGINE_URL, token: string = DEFAULT_ENGINE_TOKEN) {
     this.url = url;
@@ -145,6 +154,18 @@ export class EngineClient {
 
   get baseUrl(): string {
     return this.url;
+  }
+
+  /** Set (or clear) the per-request LLM credentials. */
+  setCredentials(credentials: Credentials | null): void {
+    this.credentials = credentials;
+  }
+
+  /** The credential block to attach to an LLM request, or undefined to omit. */
+  private credentialBody(): Credentials | undefined {
+    return this.credentials !== null && this.credentials.apiKey !== ""
+      ? this.credentials
+      : undefined;
   }
 
   private authHeaders(): Record<string, string> {
@@ -293,9 +314,13 @@ export class EngineClient {
    */
   async askLLM(prompt: string, pipeline?: PipelineDef): Promise<AskAnswer> {
     const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/llm/ask");
-    const body: { prompt: string; pipeline?: PipelineDef } = { prompt };
+    const body: { prompt: string; pipeline?: PipelineDef; credentials?: Credentials } = { prompt };
     if (pipeline !== undefined) {
       body.pipeline = pipeline;
+    }
+    const credentials = this.credentialBody();
+    if (credentials !== undefined) {
+      body.credentials = credentials;
     }
     const res = await fetch(httpUrl, {
       method: "POST",
