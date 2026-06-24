@@ -38,6 +38,7 @@ import {
   Copy,
   Download,
   ExternalLink,
+  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   Play,
@@ -93,6 +94,9 @@ import twoNode from "./fixtures/two-node.ipynb.json";
 
 const EMPTY_GRAPH: GraphModel = { nodes: {}, groups: {}, wires: {} };
 const DIVIDER_SIZE_PX = 10;
+// Cell-patches inspector panel is a dev-only debugging view.
+const DEV_MODE = import.meta.env.DEV;
+
 const MIN_NOTEBOOK_WIDTH_PX = 280;
 const MIN_CANVAS_BODY_WIDTH_PX = 320;
 const MIN_MAIN_HEIGHT_PX = 220;
@@ -152,10 +156,12 @@ function applyTheme(theme: Theme): void {
 
 interface PanelLayoutState {
   cellsCollapsed: boolean;
+  inspectorCollapsed: boolean;
 }
 
 const DEFAULT_PANEL_LAYOUT: PanelLayoutState = {
   cellsCollapsed: false,
+  inspectorCollapsed: true,
 };
 
 function readPanelLayout(): PanelLayoutState {
@@ -170,6 +176,8 @@ function readPanelLayout(): PanelLayoutState {
     const parsed = JSON.parse(raw) as Partial<PanelLayoutState>;
     return {
       cellsCollapsed: parsed.cellsCollapsed === true,
+      // Inspector defaults to collapsed; only an explicit false expands it.
+      inspectorCollapsed: parsed.inspectorCollapsed !== false,
     };
   } catch {
     return DEFAULT_PANEL_LAYOUT;
@@ -253,6 +261,10 @@ export function App(): ReactElement {
   const [isAsking, setIsAsking] = useState(false);
   const [askResult, setAskResult] = useState<AskAnswer | null>(null);
   const [askError, setAskError] = useState<string | null>(null);
+  const [isOverflowOpen, setIsOverflowOpen] = useState(false);
+  const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(
+    () => readPanelLayout().inspectorCollapsed,
+  );
   const [isTriggersOpen, setIsTriggersOpen] = useState(false);
   const [triggers, setTriggers] = useState<TriggerSpec[]>([]);
   const [triggersError, setTriggersError] = useState<string | null>(null);
@@ -340,12 +352,13 @@ export function App(): ReactElement {
         PANEL_STORAGE_KEY,
         JSON.stringify({
           cellsCollapsed: isCellsCollapsed,
+          inspectorCollapsed: isInspectorCollapsed,
         }),
       );
     } catch {
       // Quota / disabled storage -- silently keep working in-memory.
     }
-  }, [isCellsCollapsed]);
+  }, [isCellsCollapsed, isInspectorCollapsed]);
 
   // Persist Settings dialog state (engine URL override + theme) and apply the
   // theme to the <html> element. "system" tracks prefers-color-scheme.
@@ -1151,10 +1164,13 @@ export function App(): ReactElement {
   );
 
   const contentStyle = useMemo(
-    () => ({
-      gridTemplateRows: `minmax(${MIN_MAIN_HEIGHT_PX}px, ${mainRatio}%) ${DIVIDER_SIZE_PX}px minmax(${MIN_INSPECTOR_HEIGHT_PX}px, calc(${100 - mainRatio}% - ${DIVIDER_SIZE_PX}px))`,
-    }),
-    [mainRatio],
+    () =>
+      isInspectorCollapsed
+        ? { gridTemplateRows: "minmax(0, 1fr) 0px auto" }
+        : {
+            gridTemplateRows: `minmax(${MIN_MAIN_HEIGHT_PX}px, ${mainRatio}%) ${DIVIDER_SIZE_PX}px minmax(${MIN_INSPECTOR_HEIGHT_PX}px, calc(${100 - mainRatio}% - ${DIVIDER_SIZE_PX}px))`,
+          },
+    [isInspectorCollapsed, mainRatio],
   );
 
   const topPaneStyle = useMemo(
@@ -1182,23 +1198,48 @@ export function App(): ReactElement {
           </Badge>
           <EngineStatus client={clientRef.current} />
           <div className="ml-auto flex items-center gap-2">
-            {JUPYTER_URL !== "" && (
+            <div className="relative">
               <Button
                 variant="ghost"
                 size="sm"
+                className="px-2"
                 onClick={() => {
-                  openInJupyterLab(JUPYTER_URL, notebook.name);
+                  setIsOverflowOpen((open) => !open);
                 }}
-                title={`Open ${notebook.name} in JupyterLab at ${JUPYTER_URL}`}
+                title="More actions"
+                aria-label="More actions"
               >
-                <ExternalLink className="mr-1.5 size-3.5" />
-                Edit in JupyterLab
+                <MoreHorizontal className="size-3.5" />
               </Button>
-            )}
-            <Button variant="ghost" size="sm" onClick={handleReingest}>
-              <RotateCcw className="mr-1.5 size-3.5" />
-              Re-ingest
-            </Button>
+              {isOverflowOpen && (
+                <div className="absolute right-0 top-full z-30 mt-1 w-48 rounded-md border bg-popover text-popover-foreground shadow-md">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleReingest();
+                      setIsOverflowOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/70"
+                  >
+                    <RotateCcw className="size-3.5" />
+                    Re-ingest
+                  </button>
+                  {JUPYTER_URL !== "" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        openInJupyterLab(JUPYTER_URL, notebook.name);
+                        setIsOverflowOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/70"
+                    >
+                      <ExternalLink className="size-3.5" />
+                      Edit in JupyterLab
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
             {canSaveInPlace && (
               <Button
                 variant="outline"
@@ -1520,84 +1561,118 @@ export function App(): ReactElement {
             </section>
           </div>
 
-          <PaneDivider
-            orientation="horizontal"
-            label="Resize editor and inspector panes"
-            onPointerDown={handleHorizontalDividerPointerDown}
-            onKeyDown={handleHorizontalDividerKeyDown}
-          />
+          {!isInspectorCollapsed && (
+            <PaneDivider
+              orientation="horizontal"
+              label="Resize editor and inspector panes"
+              onPointerDown={handleHorizontalDividerPointerDown}
+              onKeyDown={handleHorizontalDividerKeyDown}
+            />
+          )}
 
-          <aside className="min-h-0 grid grid-cols-3 divide-x bg-muted/30 text-xs">
-            <InspectorPanel
-              title="Selected"
-              count={selected === null ? 0 : 1}
-              empty="Click a node."
+          <aside className="flex min-h-0 flex-col bg-muted/30 text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                setIsInspectorCollapsed((open) => !open);
+              }}
+              className="flex items-center gap-2 border-t px-4 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-muted/50"
+              aria-label={isInspectorCollapsed ? "Expand inspector" : "Collapse inspector"}
             >
-              {selected !== null &&
-              selectedManifest !== null &&
-              selectedManifest.configFields.length > 0 ? (
-                <NodeConfigEditor
-                  manifest={selectedManifest}
-                  values={configDraft}
-                  isDirty={isConfigDirty}
-                  isSubmitting={isConfigSubmitting}
-                  isDisabled={isConfigBlocked}
-                  error={configError}
-                  warnings={configWarnings}
-                  status={configStatus}
-                  onChange={(key, value) => {
-                    setConfigDraft((current) => ({ ...current, [key]: value }));
-                  }}
-                  onSubmit={handleApplySelectedConfig}
-                />
+              {isInspectorCollapsed ? (
+                <ChevronRight className="size-3" />
               ) : (
-                <pre className="overflow-x-auto rounded-md border bg-background p-2 font-mono text-[11px]">
-                  {JSON.stringify(selected, null, 2)}
-                </pre>
+                <ChevronDown className="size-3" />
               )}
-            </InspectorPanel>
-
-            <InspectorPanel
-              title="Execution events"
-              count={events.length}
-              empty="Click Run to dispatch this pipeline."
-            >
-              <ul className="flex flex-col gap-1">
-                {events.map((event, idx) => (
-                  <li
-                    key={`${event.type}-${String(idx)}`}
-                    className="rounded border bg-background px-2 py-1 font-mono text-[11px]"
-                  >
-                    {renderEvent(event)}
-                  </li>
-                ))}
-              </ul>
-            </InspectorPanel>
-
-            <InspectorPanel
-              title="Cell patches"
-              count={patches.length}
-              empty="Rename a node in the canvas to see one."
-            >
-              {patches.map((patch, idx) => (
-                <div
-                  key={`${patch.notebookPath}-${String(patch.cellIndex)}-${String(idx)}`}
-                  className="rounded border bg-background p-2"
+              <span className="uppercase tracking-wider">Inspector</span>
+              {selected !== null && (
+                <span className="font-mono text-[10px]">· {selected.name}</span>
+              )}
+              {events.length > 0 && (
+                <span className="font-mono text-[10px]">· {events.length} events</span>
+              )}
+            </button>
+            {!isInspectorCollapsed && (
+              <div
+                className={cn(
+                  "grid min-h-0 flex-1 divide-x",
+                  DEV_MODE ? "grid-cols-3" : "grid-cols-2",
+                )}
+              >
+                <InspectorPanel
+                  title="Selected"
+                  count={selected === null ? 0 : 1}
+                  empty="Click a node."
                 >
-                  <div className="mb-1 flex items-center gap-2 text-[10px] text-muted-foreground">
-                    <Badge variant="outline" className="font-mono uppercase">
-                      {patch.operation}
-                    </Badge>
-                    <Badge variant="secondary" className="font-mono">
-                      cell {patch.cellIndex}
-                    </Badge>
-                  </div>
-                  <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[11px]">
-                    {patch.newSource ?? "(deleted)"}
-                  </pre>
-                </div>
-              ))}
-            </InspectorPanel>
+                  {selected !== null &&
+                  selectedManifest !== null &&
+                  selectedManifest.configFields.length > 0 ? (
+                    <NodeConfigEditor
+                      manifest={selectedManifest}
+                      values={configDraft}
+                      isDirty={isConfigDirty}
+                      isSubmitting={isConfigSubmitting}
+                      isDisabled={isConfigBlocked}
+                      error={configError}
+                      warnings={configWarnings}
+                      status={configStatus}
+                      onChange={(key, value) => {
+                        setConfigDraft((current) => ({ ...current, [key]: value }));
+                      }}
+                      onSubmit={handleApplySelectedConfig}
+                    />
+                  ) : (
+                    <pre className="overflow-x-auto rounded-md border bg-background p-2 font-mono text-[11px]">
+                      {JSON.stringify(selected, null, 2)}
+                    </pre>
+                  )}
+                </InspectorPanel>
+
+                <InspectorPanel
+                  title="Execution events"
+                  count={events.length}
+                  empty="Click Run to dispatch this pipeline."
+                >
+                  <ul className="flex flex-col gap-1">
+                    {events.map((event, idx) => (
+                      <li
+                        key={`${event.type}-${String(idx)}`}
+                        className="rounded border bg-background px-2 py-1 font-mono text-[11px]"
+                      >
+                        {renderEvent(event)}
+                      </li>
+                    ))}
+                  </ul>
+                </InspectorPanel>
+
+                {DEV_MODE && (
+                  <InspectorPanel
+                    title="Cell patches"
+                    count={patches.length}
+                    empty="Rename a node in the canvas to see one."
+                  >
+                    {patches.map((patch, idx) => (
+                      <div
+                        key={`${patch.notebookPath}-${String(patch.cellIndex)}-${String(idx)}`}
+                        className="rounded border bg-background p-2"
+                      >
+                        <div className="mb-1 flex items-center gap-2 text-[10px] text-muted-foreground">
+                          <Badge variant="outline" className="font-mono uppercase">
+                            {patch.operation}
+                          </Badge>
+                          <Badge variant="secondary" className="font-mono">
+                            cell {patch.cellIndex}
+                          </Badge>
+                        </div>
+                        <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[11px]">
+                          {patch.newSource ?? "(deleted)"}
+                        </pre>
+                      </div>
+                    ))}
+                  </InspectorPanel>
+                )}
+              </div>
+            )}
           </aside>
         </div>
       </div>
