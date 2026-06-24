@@ -703,7 +703,13 @@ function spliceMarkerLine(source: string, newMarkerLine: string): string {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line !== undefined && line.trim() !== "") {
-      lines[i] = newMarkerLine;
+      // Replace the marker line and drop any multi-line continuation comments
+      // that follow it, so emit normalises to the canonical single-line form.
+      let end = i + 1;
+      while (end < lines.length && MarkerParser.isContinuationLine(lines[end] ?? "")) {
+        end++;
+      }
+      lines.splice(i, end - i, newMarkerLine);
       return lines.join("\n");
     }
   }

@@ -486,3 +486,22 @@ describe("SyncEngine.getGraph", () => {
     expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::1`]).toBeDefined();
   });
 });
+
+describe("SyncEngine — multi-line marker normalisation (#51)", () => {
+  it("rewrites a multi-line marker to a single line on emit", async () => {
+    const adapter = recordingAdapter();
+    const engine = new SyncEngine(adapter.options);
+    const source = ["# @node: Gen", "# @outputs: out", "# @tag: input", "out = 1"].join("\n");
+    const cells: NotebookCell[] = [{ cellType: "code", source }];
+    await engine.ingestNotebook("nb/x.ipynb", cells, 100);
+
+    // The multi-line form parsed into a proper input node.
+    expect(engine.getGraph().nodes["nb/x.ipynb::0"]?.outputs).toEqual(["out"]);
+
+    await engine.renameNode("nb/x.ipynb::0", "Generator", 200);
+    // The continuation comments are gone; the marker is one canonical line.
+    expect(adapter.patches.at(-1)?.newSource).toBe(
+      "# @node: Generator  [input]  out=out\nout = 1",
+    );
+  });
+});

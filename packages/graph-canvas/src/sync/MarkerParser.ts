@@ -1,10 +1,26 @@
 /**
  * MarkerParser — extracts `# @node` markers from notebook cells.
  *
- * Marker grammar (single line, must be first non-blank line of the cell):
+ * Two equivalent grammars are accepted on parse (#51). The `# @node:` line must
+ * be the first non-blank line of the cell either way.
+ *
+ * Single-line (canonical — what we EMIT):
  *
  *   # @node: <name>  [<tag>]                       — minimal form
  *   # @node: <name>  [<tag>]  in=a.x,b.y  out=df   — with declared refs/ports
+ *
+ * Multi-line (also ACCEPTED — the tag may move to `# @tag:`, and refs/ports to
+ * their own continuation comment lines immediately following `# @node:`):
+ *
+ *   # @node: <name>
+ *   # @inputs: a.x, b.y        (alias: # @in:)
+ *   # @outputs: df             (alias: # @out:)
+ *   # @tag: <tag>
+ *
+ * Decision (#51): liberal in, conservative out — accept both forms, but
+ * normalise to the single-line form on emit (SyncEngine rewrites the whole
+ * marker block to one line). Inline values on the `# @node:` line win over
+ * continuation lines when both are present.
  *
  * A notebook may also declare an alias for cross-notebook references:
  *
@@ -22,7 +38,7 @@
  * The parser is forgiving: cells without a marker are simply ignored; cells
  * with a malformed marker yield a ParseError but never throw out of
  * parseNotebook, so the whole notebook can still be parsed even if one cell
- * is broken. parseLine itself throws on malformed markers; parseNotebook
+ * is broken. parseMarkerBlock itself throws on malformed markers; parseNotebook
  * catches and routes them into ParseResult.errors.
  */
 
@@ -69,7 +85,8 @@ const NAME_RE = /^[A-Za-z0-9 _-]+$/;
 const PORT_RE = /^[a-z][a-z0-9_]*$/;
 const ALIAS_RE = /^[a-z][a-z0-9_-]*$/;
 const MARKER_PREFIX_RE = /^#\s+@node:/;
-const MARKER_RE = /^#\s+@node:\s*([^[]*)\[([^\]]+)\]\s*(.*)$/;
+// Continuation comment lines for the multi-line form, e.g. `# @inputs: a.x`.
+const CONTINUATION_RE = /^#\s+@(inputs|in|outputs|out|tag)\s*:\s*(.*)$/;
 const NOTEBOOK_PREFIX_RE = /^#\s+@notebook:/;
 const NOTEBOOK_RE = /^#\s+@notebook:\s*(\S+)\s*$/;
 
@@ -107,7 +124,7 @@ export class MarkerParser {
       }
 
       try {
-        const body = MarkerParser.parseLine(firstLine);
+        const body = MarkerParser.parseMarkerBlock(leadingMarkerBlock(cell.source));
         if (body === null) {
           continue;
         }
@@ -138,35 +155,57 @@ export class MarkerParser {
     return alias;
   }
 
-  /** Parse a single line. Returns null if the line is not a marker. */
+  /** Parse a single marker line (no continuation lines). Kept for callers /
+   * tests that have one line; delegates to parseMarkerBlock. */
   static parseLine(line: string): MarkerBody | null {
-    const trimmed = line.trim();
-    if (!MARKER_PREFIX_RE.test(trimmed)) {
+    return MarkerParser.parseMarkerBlock([line]);
+  }
+
+  /**
+   * Parse a marker block: the `# @node:` line plus any following multi-line
+   * continuation comment lines. Returns null if the first line is not a `@node`
+   * marker; throws MarkerParseError on a malformed one.
+   */
+  static parseMarkerBlock(lines: string[]): MarkerBody | null {
+    const first = lines[0];
+    if (first === undefined || !MARKER_PREFIX_RE.test(first.trim())) {
       return null;
     }
 
-    const match = MARKER_RE.exec(trimmed);
-    if (match === null) {
-      throw new MarkerParseError("Malformed @node marker: expected `# @node: <name> [<tag>] ...`");
+    const node = parseNodeLine(first.trim());
+    let tag: string | null = node.tag;
+    let inputs = node.inputs;
+    let outputs = node.outputs;
+
+    // Continuation lines fill any value the `# @node:` line did not provide.
+    for (let i = 1; i < lines.length; i++) {
+      const cont = parseContinuationLine((lines[i] ?? "").trim());
+      if (cont === null) {
+        continue;
+      }
+      if (cont.kind === "tag") {
+        tag = tag ?? cont.value;
+      } else if (cont.kind === "inputs") {
+        inputs = inputs.length > 0 ? inputs : parseInputRefs(cont.value);
+      } else {
+        outputs = outputs.length > 0 ? outputs : parsePortNames(cont.value);
+      }
     }
 
-    const rawName = (match[1] ?? "").trim();
-    const rawTag = (match[2] ?? "").trim();
-    const tail = (match[3] ?? "").trim();
-
-    if (rawName === "") {
-      throw new MarkerParseError("Marker name is empty");
+    if (tag === null || tag === "") {
+      throw new MarkerParseError("Marker is missing a tag (use `[tag]` or `# @tag: <tag>`)");
     }
-    if (!NAME_RE.test(rawName)) {
-      throw new MarkerParseError(`Invalid marker name: ${JSON.stringify(rawName)}`);
-    }
-    if (!MarkerParser.isValidTag(rawTag)) {
-      throw new MarkerParseError(`Invalid tag: ${JSON.stringify(rawTag)}`);
+    if (!MarkerParser.isValidTag(tag)) {
+      throw new MarkerParseError(`Invalid tag: ${JSON.stringify(tag)}`);
     }
 
-    const { inputs, outputs } = parseTail(tail);
+    return { name: node.name, tag, inputs, outputs };
+  }
 
-    return { name: rawName, tag: rawTag, inputs, outputs };
+  /** True for a multi-line continuation comment (`# @inputs:` / `@outputs:` /
+   * `@tag:`). Used on emit to strip the block down to a single line. */
+  static isContinuationLine(line: string): boolean {
+    return CONTINUATION_RE.test(line.trim());
   }
 
   /** Render a marker back to a single-line `# @node:` string for cell injection. */
@@ -200,6 +239,93 @@ function firstNonBlankLine(source: string): string | null {
     }
   }
   return null;
+}
+
+/** The leading marker block of a cell: the first non-blank line plus any
+ * immediately-following continuation comment lines. */
+function leadingMarkerBlock(source: string): string[] {
+  const lines = source.split("\n");
+  let i = 0;
+  while (i < lines.length && (lines[i] ?? "").trim() === "") {
+    i++;
+  }
+  const head = lines[i];
+  if (head === undefined) {
+    return [];
+  }
+  const block = [head];
+  for (let j = i + 1; j < lines.length; j++) {
+    const line = lines[j] ?? "";
+    if (CONTINUATION_RE.test(line.trim())) {
+      block.push(line);
+    } else {
+      break;
+    }
+  }
+  return block;
+}
+
+/** Parse the `# @node:` line: name, an optional inline `[tag]`, and an optional
+ * `in=`/`out=` tail. The tag is null when not given inline. */
+function parseNodeLine(trimmed: string): {
+  name: string;
+  tag: string | null;
+  inputs: string[];
+  outputs: string[];
+} {
+  const afterPrefix = trimmed.replace(MARKER_PREFIX_RE, "").trim();
+  let name: string;
+  let tag: string | null = null;
+  let tail = "";
+
+  const open = afterPrefix.indexOf("[");
+  if (open !== -1) {
+    const close = afterPrefix.indexOf("]", open);
+    if (close === -1) {
+      throw new MarkerParseError("Malformed @node marker: unclosed [tag]");
+    }
+    name = afterPrefix.slice(0, open).trim();
+    tag = afterPrefix.slice(open + 1, close).trim();
+    tail = afterPrefix.slice(close + 1).trim();
+  } else {
+    const kv = afterPrefix.search(/\b(?:in|out)=/);
+    if (kv === -1) {
+      name = afterPrefix.trim();
+    } else {
+      name = afterPrefix.slice(0, kv).trim();
+      tail = afterPrefix.slice(kv).trim();
+    }
+  }
+
+  if (name === "") {
+    throw new MarkerParseError("Marker name is empty");
+  }
+  if (!NAME_RE.test(name)) {
+    throw new MarkerParseError(`Invalid marker name: ${JSON.stringify(name)}`);
+  }
+
+  const { inputs, outputs } = parseTail(tail);
+  return { name, tag, inputs, outputs };
+}
+
+/** Parse one multi-line continuation comment. Returns null if the line isn't
+ * a continuation marker. */
+function parseContinuationLine(
+  trimmed: string,
+): { kind: "inputs" | "outputs" | "tag"; value: string } | null {
+  const match = CONTINUATION_RE.exec(trimmed);
+  if (match === null) {
+    return null;
+  }
+  const key = match[1] ?? "";
+  const value = (match[2] ?? "").trim();
+  if (key === "inputs" || key === "in") {
+    return { kind: "inputs", value };
+  }
+  if (key === "outputs" || key === "out") {
+    return { kind: "outputs", value };
+  }
+  return { kind: "tag", value };
 }
 
 function parseTail(tail: string): { inputs: string[]; outputs: string[] } {

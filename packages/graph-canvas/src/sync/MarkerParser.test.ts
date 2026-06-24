@@ -203,6 +203,70 @@ describe("MarkerParser.parseNotebook", () => {
   });
 });
 
+describe("MarkerParser — multi-line marker form (#51)", () => {
+  it("parses the multi-line form via parseNotebook", () => {
+    const cells: NotebookCell[] = [
+      {
+        cellType: "code",
+        source: [
+          "# @node: LLM Generate",
+          "# @inputs: clean.out",
+          "# @outputs: summary_md",
+          "# @tag: ai",
+          "summary_md = generate(clean)",
+        ].join("\n"),
+      },
+    ];
+    const result = MarkerParser.parseNotebook("nb.ipynb", cells);
+    expect(result.errors).toEqual([]);
+    expect(result.markers).toHaveLength(1);
+    expect(result.markers[0]).toMatchObject({
+      name: "LLM Generate",
+      tag: "ai",
+      inputs: ["clean.out"],
+      outputs: ["summary_md"],
+    });
+  });
+
+  it("accepts @in/@out aliases and comma-separated refs", () => {
+    const lines = ["# @node: Merge [transform]", "# @in: A.x, B.y", "# @out: merged", "z = 1"];
+    const marker = MarkerParser.parseMarkerBlock(lines);
+    expect(marker).toMatchObject({
+      name: "Merge",
+      tag: "transform",
+      inputs: ["A.x", "B.y"],
+      outputs: ["merged"],
+    });
+  });
+
+  it("lets an inline [tag] win over a @tag: continuation line", () => {
+    const marker = MarkerParser.parseMarkerBlock(["# @node: N [input]", "# @tag: ai"]);
+    expect(marker?.tag).toBe("input");
+  });
+
+  it("throws when no tag is given in either form", () => {
+    expect(() => MarkerParser.parseMarkerBlock(["# @node: N", "# @inputs: a.b"])).toThrow();
+  });
+
+  it("ignores continuation lines that are not part of the leading block", () => {
+    const cells: NotebookCell[] = [
+      { cellType: "code", source: "# @node: N [input]\nx = 1\n# @inputs: should.ignore" },
+    ];
+    const result = MarkerParser.parseNotebook("nb.ipynb", cells);
+    expect(result.markers[0]).toMatchObject({ name: "N", tag: "input", inputs: [] });
+  });
+});
+
+describe("MarkerParser.isContinuationLine", () => {
+  it("recognises continuation comments only", () => {
+    expect(MarkerParser.isContinuationLine("# @inputs: a.b")).toBe(true);
+    expect(MarkerParser.isContinuationLine("# @out: df")).toBe(true);
+    expect(MarkerParser.isContinuationLine("# @tag: ai")).toBe(true);
+    expect(MarkerParser.isContinuationLine("# @node: N [input]")).toBe(false);
+    expect(MarkerParser.isContinuationLine("x = 1")).toBe(false);
+  });
+});
+
 describe("MarkerParser — notebook alias (#18)", () => {
   it("defaults the alias to the sanitised filename stem", () => {
     const result = MarkerParser.parseNotebook("path/to/Orders 2026.ipynb", []);
