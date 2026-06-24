@@ -376,11 +376,33 @@ export function App(): ReactElement {
   const topPaneRef = useRef<HTMLDivElement | null>(null);
   const canvasPaneRef = useRef<HTMLDivElement | null>(null);
 
-  // Construct the SyncEngine for the active file. Re-created when the active
-  // file changes so the canvas reflects only that notebook (the composed
-  // union across files is the separate UI B2 slice). The `[notebook]` ingest
-  // effect below repopulates it after each switch / edit.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: activeFileId is the intended reset trigger, not read in the body
+  // Cells of every open file, keyed by notebook path (= file name). The active
+  // file is live; inactive files come from their frozen snapshots. Drives both
+  // the workspace ingest and the composed pipeline's per-node source lookup.
+  const cellsByPath = useMemo<Map<string, NotebookCell[]>>(() => {
+    const map = new Map<string, NotebookCell[]>();
+    for (const file of openFiles) {
+      if (file.id === activeFileId) {
+        map.set(file.name, notebook.cells);
+      } else {
+        const snap = snapshotsRef.current.get(file.id);
+        if (snap !== undefined) {
+          map.set(file.name, snap.cells);
+        }
+      }
+    }
+    return map;
+    // A rename of the active file flows through openFiles, so it's covered here.
+  }, [openFiles, activeFileId, notebook.cells]);
+
+  // Identity of the open-file set; changes only when a file is opened/closed,
+  // not on edits or switches.
+  const openFilesKey = openFiles.map((f) => f.id).join("|");
+
+  // Construct the SyncEngine for the workspace. Re-created when the set of open
+  // files changes so closed notebooks drop out of the union graph; the ingest
+  // effect below repopulates it with every open file.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: openFilesKey is the intended reset trigger, not read in the body
   useEffect(() => {
     const engine = new SyncEngine({
       onGraphUpdate: setGraph,
@@ -391,16 +413,23 @@ export function App(): ReactElement {
       },
     });
     engineRef.current = engine;
-  }, [activeFileId]);
+  }, [openFilesKey]);
 
-  // Re-ingest whenever the cell array changes.
+  // Ingest every open file so the canvas is the union pipeline across files;
+  // cross-notebook (alias:Node.port) refs resolve between groups. Each ingest
+  // recomputes all wires, so file order doesn't matter.
   useEffect(() => {
     const engine = engineRef.current;
     if (engine === null) {
       return;
     }
-    void engine.ingestNotebook(notebook.name, notebook.cells, Date.now());
-  }, [notebook]);
+    for (const file of openFiles) {
+      const cells = cellsByPath.get(file.name);
+      if (cells !== undefined) {
+        void engine.ingestNotebook(file.name, cells, Date.now());
+      }
+    }
+  }, [openFiles, cellsByPath]);
 
   // Keep the Files rail label in sync when the active notebook is renamed
   // (e.g. applying a Compose draft swaps in a new filename).
@@ -795,9 +824,32 @@ export function App(): ReactElement {
   }, [graph, notebook.cells, rowsByNode]);
 
   const pipelineDef = useMemo<PipelineDef>(
-    () => buildPipelineDef(graph, notebook.cells, notebook.name),
-    [graph, notebook],
+    () => buildPipelineDef(graph, cellsByPath),
+    [graph, cellsByPath],
   );
+
+  // Input refs that don't resolve to a wire — typically a cross-notebook
+  // `alias:Node.port` pointing at a missing alias/node. Surfaced on the canvas.
+  const unresolvedByNode = useMemo<Record<string, string[]>>(() => {
+    const resolvedByTarget = new Map<string, Set<string>>();
+    for (const wire of Object.values(graph.wires)) {
+      let set = resolvedByTarget.get(wire.targetNodeId);
+      if (set === undefined) {
+        set = new Set();
+        resolvedByTarget.set(wire.targetNodeId, set);
+      }
+      set.add(wire.targetPort);
+    }
+    const result: Record<string, string[]> = {};
+    for (const node of Object.values(graph.nodes)) {
+      const resolved = resolvedByTarget.get(node.id) ?? new Set<string>();
+      const unresolved = node.inputs.filter((ref) => !resolved.has(ref));
+      if (unresolved.length > 0) {
+        result[node.id] = unresolved;
+      }
+    }
+    return result;
+  }, [graph]);
 
   // Ask the engine for a prose walkthrough of the current pipeline. Backed by
   // Anthropic when configured server-side; falls back to a template outline.
@@ -1688,6 +1740,7 @@ export function App(): ReactElement {
                     runtimeByNode={runtimeByNode}
                     timingByNode={timingByNode}
                     metaByNode={metaByNode}
+                    unresolvedByNode={unresolvedByNode}
                     runSummary={runSummary}
                     onPaneDrop={handlePaneDrop}
                     showMinimap={showMinimap}
@@ -3111,10 +3164,15 @@ function openInJupyterLab(baseUrl: string, notebookName: string): void {
 
 function buildPipelineDef(
   graph: GraphModel,
-  cells: NotebookCell[],
-  notebookPath: string,
+  cellsByPath: Map<string, NotebookCell[]>,
 ): PipelineDef {
   const nodes = Object.values(graph.nodes).map((node) => {
+    // Each node's source + alias come from its own notebook (group), so a
+    // workspace spanning several files composes into one pipeline.
+    const group = graph.groups[node.groupId];
+    const notebookPath = group?.notebookPath ?? node.groupId;
+    const alias = group?.alias ?? "";
+    const cells = cellsByPath.get(notebookPath) ?? [];
     const cellIndex = node.cellIndices[0] ?? 0;
     const source = cells[cellIndex]?.source ?? "";
     return {
@@ -3126,6 +3184,7 @@ function buildPipelineDef(
       source: stripMarkerLine(source),
       notebookPath,
       cellIndices: node.cellIndices,
+      alias,
     };
   });
   const edges = Object.values(graph.wires).map((wire) => ({

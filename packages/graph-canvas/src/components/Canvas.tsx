@@ -124,6 +124,8 @@ export interface CanvasProps {
    * row count (post-run). Either field may be absent.
    */
   metaByNode?: Record<string, { filename?: string; rows?: number }>;
+  /** Per-node input refs that don't resolve to a wire (shown as unresolved). */
+  unresolvedByNode?: Record<string, string[]>;
   /**
    * Summary of the most recent pipeline run, rendered as a bottom-center
    * overlay. Hosts compute it from pipelineCompleted events.
@@ -165,6 +167,7 @@ function CanvasInner(props: CanvasProps): ReactElement {
     runtimeByNode,
     timingByNode,
     metaByNode,
+    unresolvedByNode,
     runSummary,
     onPaneDrop,
     showMinimap,
@@ -185,6 +188,7 @@ function CanvasInner(props: CanvasProps): ReactElement {
       runtimeByNode,
       timingByNode,
       metaByNode,
+      unresolvedByNode,
     });
     if (layout === "manual") {
       return manualNodes;
@@ -202,6 +206,7 @@ function CanvasInner(props: CanvasProps): ReactElement {
     runtimeByNode,
     timingByNode,
     metaByNode,
+    unresolvedByNode,
   ]);
 
   const handleConnect = useCallback(
@@ -361,6 +366,7 @@ function buildNodes(
     runtimeByNode: CanvasProps["runtimeByNode"];
     timingByNode: CanvasProps["timingByNode"];
     metaByNode: CanvasProps["metaByNode"];
+    unresolvedByNode: CanvasProps["unresolvedByNode"];
   },
 ): Node[] {
   const {
@@ -372,11 +378,13 @@ function buildNodes(
     runtimeByNode,
     timingByNode,
     metaByNode,
+    unresolvedByNode,
   } = callbacks;
   const vars = variablesByNode ?? {};
   const runtime = runtimeByNode ?? {};
   const timing = timingByNode ?? {};
   const metas = metaByNode ?? {};
+  const unresolved = unresolvedByNode ?? {};
   const rfNodes: Node[] = [];
   const groupIds = Object.keys(graph.groups).sort();
 
@@ -439,6 +447,10 @@ function buildNodes(
       const meta = metas[node.id];
       if (meta !== undefined) {
         nodeData.meta = meta;
+      }
+      const unresolvedRefs = unresolved[node.id];
+      if (unresolvedRefs !== undefined && unresolvedRefs.length > 0) {
+        nodeData.unresolvedInputs = unresolvedRefs;
       }
       if (onRename !== undefined) {
         nodeData.onRename = onRename;

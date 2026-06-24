@@ -275,6 +275,41 @@ describe("NotebookNode", () => {
     expect(container.textContent).not.toContain("rows");
   });
 
+  it("renders an unresolved-refs warning when inputs don't resolve", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    document.body.appendChild(container);
+    mounts.push({ container, root });
+
+    act(() => {
+      root.render(
+        <NotebookNode
+          id="node-1"
+          type="notebook"
+          selected={false}
+          xPos={0}
+          yPos={0}
+          zIndex={0}
+          isConnectable
+          dragging={false}
+          data={{
+            id: "node-1",
+            name: "Filter",
+            tag: "transform",
+            inputs: ["missing:Load.df"],
+            outputs: ["clean"],
+            cellIndices: [0],
+            groupId: "group-b",
+            unresolvedInputs: ["missing:Load.df"],
+          }}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("unresolved");
+    expect(container.textContent).toContain("missing:Load.df");
+  });
+
   it("opens inline rename from a title double click", () => {
     const onRename = vi.fn();
     const container = document.createElement("div");

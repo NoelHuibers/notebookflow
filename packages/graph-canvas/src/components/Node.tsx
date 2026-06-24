@@ -40,6 +40,9 @@ export interface NotebookNodeData extends NodeModel {
    * absent; both absent means no meta line renders.
    */
   meta?: { filename?: string; rows?: number };
+  /** Declared input refs that don't resolve to any wire (e.g. a missing
+   * cross-notebook alias/node). Surfaced as a warning on the node. */
+  unresolvedInputs?: string[];
 }
 
 interface RuntimeBadge {
@@ -245,6 +248,14 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
             style={{ fontSize: 10, color: NODE_MUTED, fontVariantNumeric: "tabular-nums" }}
           >
             {metaLabel}
+          </div>
+        )}
+        {data.unresolvedInputs !== undefined && data.unresolvedInputs.length > 0 && (
+          <div
+            title={`Unresolved input refs:\n${data.unresolvedInputs.join("\n")}`}
+            style={{ fontSize: 10, color: "#b45309", fontWeight: 500 }}
+          >
+            ⚠ unresolved: {data.unresolvedInputs.join(", ")}
           </div>
         )}
         {showInput &&

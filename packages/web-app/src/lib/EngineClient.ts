@@ -26,6 +26,8 @@ interface NodeDef {
   source: string;
   notebookPath: string;
   cellIndices: number[];
+  /** Notebook alias for resolving cross-notebook input refs (empty = single-file). */
+  alias: string;
 }
 
 interface EdgeDef {
