@@ -9,6 +9,7 @@ const baseGroup = {
   id: "group-a",
   notebookPath: "data/pipelines/main.ipynb",
   name: "main.ipynb",
+  alias: "main",
   nodeIds: ["n1", "n2"],
   collapsed: false,
 };

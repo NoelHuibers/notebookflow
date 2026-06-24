@@ -130,6 +130,59 @@ describe("SyncEngine.ingestNotebook", () => {
   });
 });
 
+describe("SyncEngine — cross-notebook aliasing (#18)", () => {
+  it("defaults a group's alias to its filename stem", async () => {
+    const adapter = recordingAdapter();
+    const engine = new SyncEngine(adapter.options);
+    await engine.ingestNotebook(A_PATH, toNotebookCells(crossA), 100);
+    expect(engine.getGraph().groups[A_PATH]?.alias).toBe("a");
+  });
+
+  it("resolves a qualified cross-notebook ref to the aliased node", async () => {
+    const adapter = recordingAdapter();
+    const engine = new SyncEngine(adapter.options);
+    await engine.ingestNotebook(A_PATH, toNotebookCells(crossA), 100);
+    await engine.ingestNotebook(B_PATH, toNotebookCells(crossB), 100);
+
+    const wires = Object.values(engine.getGraph().wires);
+    expect(wires).toHaveLength(1);
+    expect(wires[0]).toMatchObject({
+      sourceNodeId: `${A_PATH}::0`,
+      sourcePort: "df",
+      targetNodeId: `${B_PATH}::0`,
+      targetPort: "a:Load CSV.df",
+    });
+  });
+
+  it("does NOT resolve a bare cross-notebook ref (no global-name fallback)", async () => {
+    const adapter = recordingAdapter();
+    const engine = new SyncEngine(adapter.options);
+    await engine.ingestNotebook(A_PATH, toNotebookCells(crossA), 100);
+    // B uses a bare `Load CSV.df` (no alias) — resolves locally in B only.
+    const bareB: NotebookCell[] = [
+      { cellType: "code", source: "# @node: Filter  [transform]  in=Load CSV.df  out=clean\n" },
+    ];
+    await engine.ingestNotebook(B_PATH, bareB, 100);
+    expect(Object.keys(engine.getGraph().wires)).toHaveLength(0);
+  });
+
+  it("honours an explicit `# @notebook:` alias header", async () => {
+    const adapter = recordingAdapter();
+    const engine = new SyncEngine(adapter.options);
+    const aCells: NotebookCell[] = [
+      { cellType: "code", source: "# @notebook: upstream\n" },
+      { cellType: "code", source: "# @node: Load  [input]  out=df\n" },
+    ];
+    const bCells: NotebookCell[] = [
+      { cellType: "code", source: "# @node: Use  [transform]  in=upstream:Load.df  out=r\n" },
+    ];
+    await engine.ingestNotebook(A_PATH, aCells, 100);
+    expect(engine.getGraph().groups[A_PATH]?.alias).toBe("upstream");
+    await engine.ingestNotebook(B_PATH, bCells, 100);
+    expect(Object.keys(engine.getGraph().wires)).toHaveLength(1);
+  });
+});
+
 describe("SyncEngine.markCellEdited", () => {
   it("blocks a rename when the cell-edit timestamp is newer than the rename timestamp", async () => {
     const adapter = recordingAdapter();
@@ -197,23 +250,26 @@ describe("SyncEngine.renameNode", () => {
     expect(wires[0]?.targetPort).toBe("Loader.df");
   });
 
-  it("does not rewrite cross-notebook refs", async () => {
+  it("cascades a rename to cross-notebook qualified refs", async () => {
     const adapter = recordingAdapter();
     const engine = new SyncEngine(adapter.options);
     const cellsA = toNotebookCells(crossA);
     const cellsB = toNotebookCells(crossB);
+    // A's alias defaults to its stem "a"; B references it via `a:Load CSV.df`.
     await engine.ingestNotebook(A_PATH, cellsA, 100);
     await engine.ingestNotebook(B_PATH, cellsB, 100);
+    expect(Object.keys(engine.getGraph().wires)).toHaveLength(1);
 
     await engine.renameNode(`${A_PATH}::0`, "Loader", 200);
 
-    // Only A's cell got patched; B's stale ref stays untouched on disk.
-    expect(adapter.patches).toHaveLength(1);
-    expect(adapter.patches[0]?.notebookPath).toBe(A_PATH);
+    // Both A's cell and B's referencing cell get patched.
+    expect(adapter.patches.map((p) => p.notebookPath).sort()).toEqual([A_PATH, B_PATH]);
+    const bPatch = adapter.patches.find((p) => p.notebookPath === B_PATH);
+    expect(bPatch?.newSource).toContain("in=a:Loader.df");
 
-    // After A's rename, B's marker still says `in=Load CSV.df`. Re-ingest B → wire drops.
-    await engine.ingestNotebook(B_PATH, cellsB, 300);
-    expect(Object.keys(engine.getGraph().wires)).toHaveLength(0);
+    // B's ref now points at the renamed node, so the cross-notebook wire survives.
+    expect(engine.getGraph().nodes[`${B_PATH}::0`]?.inputs).toEqual(["a:Loader.df"]);
+    expect(Object.keys(engine.getGraph().wires)).toHaveLength(1);
   });
 
   it("throws when the node id is not found", async () => {

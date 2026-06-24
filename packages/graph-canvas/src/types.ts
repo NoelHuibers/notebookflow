@@ -69,6 +69,11 @@ export interface NodeGroupModel {
   notebookPath: string;
   /** Display name (usually the notebook filename). */
   name: string;
+  /**
+   * Alias used to reference this notebook's nodes from other notebooks
+   * (`alias:Node.port`). Explicit `# @notebook:` value or the sanitised stem.
+   */
+  alias: string;
   /** Node ids contained in this group. */
   nodeIds: string[];
   /** Whether the group is rendered collapsed on the canvas. */

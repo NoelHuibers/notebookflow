@@ -16,7 +16,7 @@
 
 import type { GraphModel, NodeModel, NodeTag } from "../types";
 import type { NotebookCell, ParseResult } from "./MarkerParser";
-import { MarkerParser } from "./MarkerParser";
+import { formatRef, MarkerParser, parseRef } from "./MarkerParser";
 
 export type SyncDirection = "cell-to-graph" | "graph-to-cell";
 
@@ -107,9 +107,8 @@ export class SyncEngine {
     const parseResult: ParseResult = MarkerParser.parseNotebook(notebookPath, cells);
     const groupId = notebookPath;
 
-    this.upsertGroup(groupId, notebookPath);
+    this.upsertGroup(groupId, notebookPath, parseResult.alias);
     this.dropNodesInGroup(groupId);
-    this.dropWiresTargetingGroup(groupId);
     this.refreshSourceCache(notebookPath, cells);
 
     const groupNodeIds: string[] = [];
@@ -135,7 +134,10 @@ export class SyncEngine {
       group.nodeIds = groupNodeIds;
     }
 
-    this.rebuildWiresForGroup(groupId);
+    // Recompute every wire across the whole workspace: a notebook's edit can
+    // change which cross-notebook refs resolve, so per-group rebuilding isn't
+    // enough once files compose into one pipeline.
+    this.recomputeAllWires();
     this.clearLastCellEditsFor(notebookPath);
 
     this.opts.onGraphUpdate(this.getGraph());
@@ -170,6 +172,7 @@ export class SyncEngine {
     if (cellIndex === undefined) {
       throw new Error(`SyncEngine.renameNode: node ${nodeId} has no cell index`);
     }
+    const sourceAlias = this.graph.groups[node.groupId]?.alias ?? null;
 
     let didChange = false;
 
@@ -184,11 +187,17 @@ export class SyncEngine {
       didChange = true;
     }
 
+    // Cascade to every ref that points at the renamed node: same-notebook
+    // local refs (NodeName.port) and cross-notebook qualified refs from any
+    // file (sourceAlias:NodeName.port). Matched by the OLD name so it works
+    // regardless of when node.name is updated above.
     for (const other of Object.values(this.graph.nodes)) {
-      if (other.groupId !== node.groupId || other.id === nodeId) {
+      if (other.id === nodeId) {
         continue;
       }
-      const newInputs = other.inputs.map((ref) => rewriteInputRef(ref, oldName, nextName));
+      const newInputs = other.inputs.map((ref) =>
+        rewriteRefForRename(ref, node.groupId, other.groupId, sourceAlias, oldName, nextName),
+      );
       if (arraysEqual(newInputs, other.inputs)) {
         continue;
       }
@@ -197,19 +206,19 @@ export class SyncEngine {
         continue;
       }
       const patched = await this.applyMarkerPatch(
-        notebookPath,
+        this.notebookPathOf(other),
         otherCellIndex,
         { name: other.name, tag: other.tag, inputs: newInputs, outputs: other.outputs },
         timestamp,
       );
       if (patched) {
         other.inputs = newInputs;
-        this.rewriteWiresInto(other.id, oldName, nextName);
         didChange = true;
       }
     }
 
     if (didChange) {
+      this.recomputeAllWires();
       this.opts.onGraphUpdate(this.getGraph());
     }
   }
@@ -231,7 +240,14 @@ export class SyncEngine {
       throw new Error(`SyncEngine.createWire: target node ${targetNodeId} not found`);
     }
 
-    const refStr = `${source.name}.${sourcePort}`;
+    // A wire to a node in another notebook is recorded as an alias-qualified
+    // ref; a same-notebook wire stays a bare local ref.
+    const sameGroup = source.groupId === target.groupId;
+    const sourceAlias = this.graph.groups[source.groupId]?.alias;
+    const refStr =
+      sameGroup || sourceAlias === undefined
+        ? `${source.name}.${sourcePort}`
+        : `${sourceAlias}:${source.name}.${sourcePort}`;
     if (target.inputs.includes(refStr)) {
       return;
     }
@@ -365,17 +381,21 @@ export class SyncEngine {
     return structuredClone(this.graph);
   }
 
-  private upsertGroup(groupId: string, notebookPath: string): void {
+  private upsertGroup(groupId: string, notebookPath: string, alias: string): void {
     const existing = this.graph.groups[groupId];
     if (existing === undefined) {
       this.graph.groups[groupId] = {
         id: groupId,
         notebookPath,
         name: basenameOf(notebookPath),
+        alias,
         nodeIds: [],
         collapsed: false,
       };
+      return;
     }
+    // A re-ingest may change the declared alias.
+    existing.alias = alias;
   }
 
   private dropNodesInGroup(groupId: string): void {
@@ -387,19 +407,6 @@ export class SyncEngine {
       Reflect.deleteProperty(this.graph.nodes, nodeId);
     }
     group.nodeIds = [];
-  }
-
-  private dropWiresTargetingGroup(groupId: string): void {
-    const prefix = `${groupId}::`;
-    for (const wireId of Object.keys(this.graph.wires)) {
-      const wire = this.graph.wires[wireId];
-      if (wire === undefined) {
-        continue;
-      }
-      if (wire.targetNodeId.startsWith(prefix)) {
-        Reflect.deleteProperty(this.graph.wires, wireId);
-      }
-    }
   }
 
   private refreshSourceCache(notebookPath: string, cells: NotebookCell[]): void {
@@ -417,44 +424,44 @@ export class SyncEngine {
     }
   }
 
-  private rebuildWiresForGroup(groupId: string): void {
-    const group = this.graph.groups[groupId];
-    if (group === undefined) {
-      return;
-    }
-    const nameIndex = this.buildNameIndex();
-    for (const nodeId of group.nodeIds) {
-      const target = this.graph.nodes[nodeId];
-      if (target === undefined) {
-        continue;
-      }
-      for (const ref of target.inputs) {
-        const parsed = splitRef(ref);
-        if (parsed === null) {
-          continue;
-        }
-        const source = nameIndex.get(parsed.nodeName);
-        if (source === undefined) {
-          continue;
-        }
-        const wireId = makeWireId(source.id, parsed.portName, target.id, ref);
-        this.graph.wires[wireId] = {
-          id: wireId,
-          sourceNodeId: source.id,
-          sourcePort: parsed.portName,
-          targetNodeId: target.id,
-          targetPort: ref,
-        };
+  /** Map an alias to the group declaring it. First match wins on collision. */
+  private groupIdForAlias(alias: string): string | null {
+    for (const group of Object.values(this.graph.groups)) {
+      if (group.alias === alias) {
+        return group.id;
       }
     }
+    return null;
   }
 
-  private buildNameIndex(): Map<string, NodeModel> {
-    const index = new Map<string, NodeModel>();
-    for (const node of Object.values(this.graph.nodes)) {
-      index.set(node.name, node);
+  /**
+   * Resolve an `in=` ref to its source node + port. Local refs (no alias)
+   * resolve strictly within `targetGroupId`; qualified `alias:Node.port` refs
+   * resolve within the aliased group. There is no global-name fallback.
+   */
+  private resolveRef(
+    ref: string,
+    targetGroupId: string,
+  ): { source: NodeModel; portName: string } | null {
+    const parsed = parseRef(ref);
+    if (parsed === null) {
+      return null;
     }
-    return index;
+    const groupId = parsed.alias === null ? targetGroupId : this.groupIdForAlias(parsed.alias);
+    if (groupId === null) {
+      return null;
+    }
+    const group = this.graph.groups[groupId];
+    if (group === undefined) {
+      return null;
+    }
+    for (const nodeId of group.nodeIds) {
+      const node = this.graph.nodes[nodeId];
+      if (node?.name === parsed.nodeName) {
+        return { source: node, portName: parsed.portName };
+      }
+    }
+    return null;
   }
 
   private clearLastCellEditsFor(notebookPath: string): void {
@@ -543,23 +550,6 @@ export class SyncEngine {
     }
   }
 
-  private rewriteWiresInto(targetNodeId: string, oldName: string, newName: string): void {
-    const prefix = `${oldName}.`;
-    for (const wireId of Object.keys(this.graph.wires)) {
-      const wire = this.graph.wires[wireId];
-      if (wire === undefined) {
-        continue;
-      }
-      if (wire.targetNodeId !== targetNodeId || !wire.targetPort.startsWith(prefix)) {
-        continue;
-      }
-      const newPort = `${newName}.${wire.targetPort.slice(prefix.length)}`;
-      const newId = makeWireId(wire.sourceNodeId, wire.sourcePort, wire.targetNodeId, newPort);
-      Reflect.deleteProperty(this.graph.wires, wireId);
-      this.graph.wires[newId] = { ...wire, id: newId, targetPort: newPort };
-    }
-  }
-
   private async applyPorts(
     node: NodeModel,
     nextInputs: string[],
@@ -589,25 +579,23 @@ export class SyncEngine {
     this.opts.onGraphUpdate(this.getGraph());
   }
 
-  /** Rebuild every wire from the nodes' current input refs and declared outputs. */
+  /**
+   * Rebuild every wire from the nodes' current input refs, resolving each
+   * ref alias-scoped and keeping only wires to a declared output port.
+   */
   private recomputeAllWires(): void {
     this.graph.wires = {};
-    const nameIndex = this.buildNameIndex();
     for (const target of Object.values(this.graph.nodes)) {
       for (const ref of target.inputs) {
-        const parsed = splitRef(ref);
-        if (parsed === null) {
+        const resolved = this.resolveRef(ref, target.groupId);
+        if (resolved === null || !resolved.source.outputs.includes(resolved.portName)) {
           continue;
         }
-        const source = nameIndex.get(parsed.nodeName);
-        if (source === undefined || !source.outputs.includes(parsed.portName)) {
-          continue;
-        }
-        const wireId = makeWireId(source.id, parsed.portName, target.id, ref);
+        const wireId = makeWireId(resolved.source.id, resolved.portName, target.id, ref);
         this.graph.wires[wireId] = {
           id: wireId,
-          sourceNodeId: source.id,
-          sourcePort: parsed.portName,
+          sourceNodeId: resolved.source.id,
+          sourcePort: resolved.portName,
           targetNodeId: target.id,
           targetPort: ref,
         };
@@ -633,20 +621,30 @@ function basenameOf(path: string): string {
   return lastSlash === -1 ? path : path.slice(lastSlash + 1);
 }
 
-function splitRef(ref: string): { nodeName: string; portName: string } | null {
-  const dotIdx = ref.lastIndexOf(".");
-  if (dotIdx === -1) {
-    return null;
-  }
-  return { nodeName: ref.slice(0, dotIdx), portName: ref.slice(dotIdx + 1) };
-}
-
-function rewriteInputRef(ref: string, oldName: string, newName: string): string {
-  const parsed = splitRef(ref);
-  if (parsed === null) {
+/**
+ * Rewrite a ref during a node rename. A ref points at the renamed node when
+ * its node name matches the old name AND either it's a local ref in the same
+ * notebook, or a qualified ref whose alias is the renamed node's notebook.
+ * The alias prefix is preserved.
+ */
+function rewriteRefForRename(
+  ref: string,
+  renamedGroupId: string,
+  refOwnerGroupId: string,
+  renamedGroupAlias: string | null,
+  oldName: string,
+  newName: string,
+): string {
+  const parsed = parseRef(ref);
+  if (parsed === null || parsed.nodeName !== oldName) {
     return ref;
   }
-  return parsed.nodeName === oldName ? `${newName}.${parsed.portName}` : ref;
+  const isLocalToRenamed = parsed.alias === null && refOwnerGroupId === renamedGroupId;
+  const isQualifiedToRenamed = parsed.alias !== null && parsed.alias === renamedGroupAlias;
+  if (!isLocalToRenamed && !isQualifiedToRenamed) {
+    return ref;
+  }
+  return formatRef({ ...parsed, nodeName: newName });
 }
 
 function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
@@ -666,16 +664,13 @@ function normalizeInputs(inputs: string[]): string[] {
   const result: string[] = [];
   for (const raw of inputs) {
     const ref = raw.trim();
-    const parsed = splitRef(ref);
+    // parseRef accepts both local `Node.port` and qualified `alias:Node.port`,
+    // and validates the alias / name / port charsets.
+    const parsed = parseRef(ref);
     if (parsed === null) {
-      throw new Error(`SyncEngine: input ref ${JSON.stringify(ref)} must be nodeName.portName`);
-    }
-    const nodeName = parsed.nodeName.trim();
-    const portName = parsed.portName.trim();
-    if (!NAME_RE.test(nodeName) || !PORT_RE.test(portName)) {
       throw new Error(`SyncEngine: invalid input ref ${JSON.stringify(ref)}`);
     }
-    const normalized = `${nodeName}.${portName}`;
+    const normalized = formatRef(parsed);
     if (!seen.has(normalized)) {
       seen.add(normalized);
       result.push(normalized);
