@@ -64,21 +64,6 @@ export function CellToolbar(props: CellToolbarProps): ReactElement {
 
   return (
     <div className="flex items-center gap-1 border-b bg-card/60 px-3 py-1.5">
-      {onCollapse !== undefined && (
-        <>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-1.5"
-            title="Collapse cell pane"
-            aria-label="Collapse cell pane"
-            onClick={onCollapse}
-          >
-            <PanelLeftClose className="size-3.5" />
-          </Button>
-          <Separator />
-        </>
-      )}
       <div className="relative">
         <Button
           variant="ghost"
@@ -172,9 +157,18 @@ export function CellToolbar(props: CellToolbarProps): ReactElement {
         ))}
       </select>
 
-      <span className="ml-auto font-mono text-[10px] text-muted-foreground">
-        {focusedCellIndex === null ? "—" : `cell ${String(focusedCellIndex)}`}
-      </span>
+      {onCollapse !== undefined && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="ml-auto h-7 px-1.5"
+          title="Collapse cell pane"
+          aria-label="Collapse cell pane"
+          onClick={onCollapse}
+        >
+          <PanelLeftClose className="size-3.5" />
+        </Button>
+      )}
     </div>
   );
 }
