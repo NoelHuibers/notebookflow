@@ -719,6 +719,38 @@ export function App(): ReactElement {
     [notebook.name],
   );
 
+  // One-click: turn an uploaded data file into an input node that reads it.
+  // The output port is a safe identifier derived from the file name, and the
+  // cell body assigns that variable so downstream nodes can consume it.
+  const handleAddCsvNode = useCallback(
+    (fileName: string): void => {
+      const engine = engineRef.current;
+      if (engine === null) {
+        return;
+      }
+      const stem = fileName.replace(/\.[^.]+$/, "");
+      let port = stem.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+      if (!/^[a-z]/.test(port)) {
+        port = `data_${port}`;
+      }
+      if (port === "") {
+        port = "data";
+      }
+      const bodySource = `import pandas as pd\n${port} = pd.read_csv(${JSON.stringify(fileName)})\n`;
+      setError(null);
+      void engine
+        .createNode(
+          notebook.name,
+          { name: `Load ${stem}`, tag: "input", outputs: [port], bodySource },
+          Date.now(),
+        )
+        .catch((err: unknown) => {
+          setError(err instanceof Error ? err.message : "Could not add node");
+        });
+    },
+    [notebook.name],
+  );
+
   // Drag-from-palette drop handler: look the manifest up by id, then funnel
   // through the same add-node flow as a click. The drop position is currently
   // ignored at the SyncEngine layer (node layout is derived from cellIndex);
@@ -1662,6 +1694,7 @@ export function App(): ReactElement {
             onOpen={triggerOpenFile}
             onUploadData={triggerUploadData}
             onDeleteData={handleDeleteData}
+            onAddDataNode={handleAddCsvNode}
             onToggleCollapse={() => {
               setIsFilesCollapsed((c) => !c);
             }}

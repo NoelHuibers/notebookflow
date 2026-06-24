@@ -18,6 +18,7 @@ interface FilesRailProps {
   onOpen: () => void;
   onUploadData: () => void;
   onDeleteData: (name: string) => void;
+  onAddDataNode: (name: string) => void;
   onToggleCollapse: () => void;
 }
 
@@ -45,6 +46,7 @@ export function FilesRail({
   onOpen,
   onUploadData,
   onDeleteData,
+  onAddDataNode,
   onToggleCollapse,
 }: FilesRailProps): ReactElement {
   if (collapsed) {
@@ -173,6 +175,17 @@ export function FilesRail({
                   <Database className="size-3 shrink-0 text-muted-foreground" />
                   <span className="truncate font-mono text-[11px]">{dataFile.name}</span>
                 </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onAddDataNode(dataFile.name);
+                  }}
+                  className="shrink-0 rounded text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"
+                  aria-label={`Add a node that loads ${dataFile.name}`}
+                  title="Add a Load CSV node for this file"
+                >
+                  <Plus className="size-3" />
+                </button>
                 <button
                   type="button"
                   onClick={() => {
