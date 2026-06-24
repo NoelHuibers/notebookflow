@@ -46,7 +46,6 @@ import {
   Save,
   Settings as SettingsIcon,
   Sparkles,
-  Square,
   Trash2,
   Wand2,
   X,
@@ -1019,7 +1018,6 @@ export function App(): ReactElement {
     void engine.ingestNotebook(notebook.name, notebook.cells, Date.now());
   }, [notebook]);
 
-  const nodeCount = Object.keys(graph.nodes).length;
   const isDirty = useMemo(() => {
     if (notebook.cells.length !== baselineSources.length) {
       return true;
@@ -1299,9 +1297,6 @@ export function App(): ReactElement {
             )}
             {notebook.name}
           </Badge>
-          <Badge variant="outline" className="font-mono">
-            {nodeCount} {nodeCount === 1 ? "node" : "nodes"}
-          </Badge>
           <EngineStatus client={clientRef.current} />
           <div className="ml-auto flex items-center gap-2">
             {JUPYTER_URL !== "" && (
@@ -1399,15 +1394,6 @@ export function App(): ReactElement {
             <Button variant="default" size="sm" onClick={handleRun} disabled={isRunning}>
               <Play className="mr-1.5 size-3.5" />
               {isRunning ? "Running…" : "Run pipeline"}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled
-              title="Stop arrives with #9 KernelBridge — pipelines currently run synchronously and can't be cancelled mid-flight"
-            >
-              <Square className="mr-1.5 size-3.5" />
-              Stop
             </Button>
             <Button
               variant="ghost"
@@ -1568,7 +1554,7 @@ export function App(): ReactElement {
                     streamingCellIndex={streamingCellIndex}
                   />
                 </ScrollArea>
-                <CellPaneFooter cells={notebook.cells} isDirty={isDirty} isRunning={isRunning} />
+                <CellPaneFooter cells={notebook.cells} isDirty={isDirty} />
               </section>
             )}
 
@@ -1914,10 +1900,9 @@ function InspectorPanel({ title, count, empty, children }: InspectorPanelProps):
 interface CellPaneFooterProps {
   cells: NotebookCell[];
   isDirty: boolean;
-  isRunning: boolean;
 }
 
-function CellPaneFooter({ cells, isDirty, isRunning }: CellPaneFooterProps): ReactElement {
+function CellPaneFooter({ cells, isDirty }: CellPaneFooterProps): ReactElement {
   const counts = { code: 0, markdown: 0, raw: 0 };
   for (const cell of cells) {
     if (cell.cellType === "code") {
@@ -1940,27 +1925,6 @@ function CellPaneFooter({ cells, isDirty, isRunning }: CellPaneFooterProps): Rea
         {counts.raw > 0 && <span>{counts.raw} raw</span>}
       </div>
       <div className="flex items-center gap-3 font-mono">
-        <span
-          className={cn(
-            "inline-flex items-center gap-1",
-            isRunning ? "text-sky-600" : "text-emerald-600",
-          )}
-          title={
-            isRunning
-              ? "Engine is executing a pipeline"
-              : "Engine is idle; nodes run via exec() against a shared namespace"
-          }
-        >
-          <span
-            role="img"
-            aria-label={isRunning ? "Executing" : "Idle"}
-            className={cn(
-              "inline-block size-1.5 rounded-full",
-              isRunning ? "animate-pulse bg-sky-500" : "bg-emerald-500",
-            )}
-          />
-          Python 3 · {isRunning ? "executing" : "idle"}
-        </span>
         <span
           className={cn(
             "inline-flex items-center gap-1",

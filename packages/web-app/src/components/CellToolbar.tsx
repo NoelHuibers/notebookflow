@@ -1,23 +1,14 @@
 /**
- * CellToolbar — Jupyter-style toolbar above the cell list.
+ * CellToolbar — editing toolbar above the cell list.
  *
- * Add / Cut / Copy / Paste operate on the focused cell. Run cell + Stop +
- * Restart kernel are placeholders gated on per-cell kernel support which
- * doesn't exist yet; they render disabled with an explanatory tooltip.
+ * Add / Cut / Copy / Paste / Delete operate on the focused cell, plus a
+ * cell-type selector. There is deliberately no per-cell Run/Stop/Restart:
+ * the pipeline runs from the top bar, so per-cell kernel controls would
+ * only mislead.
  */
 
 import type { NotebookCell } from "@notebookflow/graph-canvas/sync";
-import {
-  ChevronDown,
-  Clipboard,
-  Copy,
-  Plus,
-  RotateCcw,
-  Scissors,
-  Square,
-  Trash2,
-  Triangle,
-} from "lucide-react";
+import { ChevronDown, Clipboard, Copy, Plus, Scissors, Trash2 } from "lucide-react";
 import type { ChangeEvent, ReactElement } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -141,27 +132,6 @@ export function CellToolbar(props: CellToolbarProps): ReactElement {
         title="Delete the focused cell"
         disabled={!focused}
         onClick={onDeleteCell}
-      />
-
-      <Separator />
-
-      <ToolbarIconButton
-        icon={<Triangle className="size-3.5 rotate-90 fill-current" />}
-        label="Run"
-        title="Per-cell run is not wired yet — use Run Pipeline in the top bar"
-        disabled
-      />
-      <ToolbarIconButton
-        icon={<Square className="size-3.5" />}
-        label="Stop"
-        title="Per-cell stop is not wired yet — pipelines run synchronously today"
-        disabled
-      />
-      <ToolbarIconButton
-        icon={<RotateCcw className="size-3.5" />}
-        label="Restart kernel"
-        title="Kernel control lands with the JupyterLab kernel bridge"
-        disabled
       />
 
       <Separator />
