@@ -500,8 +500,6 @@ describe("SyncEngine — multi-line marker normalisation (#51)", () => {
 
     await engine.renameNode("nb/x.ipynb::0", "Generator", 200);
     // The continuation comments are gone; the marker is one canonical line.
-    expect(adapter.patches.at(-1)?.newSource).toBe(
-      "# @node: Generator  [input]  out=out\nout = 1",
-    );
+    expect(adapter.patches.at(-1)?.newSource).toBe("# @node: Generator  [input]  out=out\nout = 1");
   });
 });
