@@ -1,5 +1,6 @@
-import { X } from "lucide-react";
+import { Settings as SettingsIcon, X } from "lucide-react";
 import type { ReactElement } from "react";
+import { useEffect } from "react";
 
 import { Button } from "@/components/ui/button";
 import type { UserSettings } from "@/lib/settings";
@@ -11,11 +12,27 @@ interface SettingsDialogProps {
 }
 
 export function SettingsDialog({ settings, onChange, onClose }: SettingsDialogProps): ReactElement {
+  // Esc closes the modal, matching the other overlays.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
   return (
-    <div className="border-b bg-card/95 backdrop-blur px-4 py-3 shadow-sm">
-      <div className="mx-auto flex max-w-3xl flex-col gap-3 text-xs">
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-background/70 p-6 pt-[10vh] backdrop-blur">
+      <div className="flex max-h-[80vh] w-full max-w-2xl flex-col gap-3 overflow-y-auto rounded-md border bg-card p-4 text-xs shadow-xl">
         <div className="flex items-center justify-between">
-          <span className="font-semibold tracking-tight">Settings</span>
+          <span className="flex items-center gap-2 text-sm font-semibold">
+            <SettingsIcon className="size-4 text-primary" />
+            Settings
+          </span>
           <Button
             variant="ghost"
             size="sm"

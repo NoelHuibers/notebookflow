@@ -39,7 +39,6 @@ import {
   ExternalLink,
   Keyboard,
   MoreHorizontal,
-  PanelLeftOpen,
   Play,
   Plus,
   RotateCcw,
@@ -55,7 +54,7 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-
+import { ActivityRail } from "@/components/ActivityRail";
 import { AskPalette } from "@/components/AskPalette";
 import { CellList } from "@/components/CellList";
 import { CellPaneFooter } from "@/components/CellPaneFooter";
@@ -92,7 +91,6 @@ import { canSaveInPlace, pickSaveFileHandle, writeFileHandle } from "@/lib/fileS
 import { openInJupyterLab } from "@/lib/jupyter";
 import type { IpynbDoc } from "@/lib/notebook";
 import {
-  downloadNotebook,
   extractSourceFilename,
   parseNotebook,
   serializeNotebook,
@@ -104,6 +102,7 @@ import { buildPipelineDef, stripMarkerLine } from "@/lib/pipeline";
 import type { UserSettings } from "@/lib/settings";
 import { applyTheme, readUserSettings, SETTINGS_STORAGE_KEY } from "@/lib/settings";
 import { clamp, cn, isTypingTarget } from "@/lib/utils";
+import { downloadWorkspaceZip } from "@/lib/workspaceZip";
 import type { DragState, FileSnapshot, LoadedNotebook, OpenFileMeta } from "@/types/workspace";
 
 const EMPTY_GRAPH: GraphModel = { nodes: {}, groups: {}, wires: {} };
@@ -144,7 +143,9 @@ export function App(): ReactElement {
     { id: initialFileIdRef.current, name: notebook.name },
   ]);
   const [activeFileId, setActiveFileId] = useState<string>(() => initialFileIdRef.current);
-  const [isFilesCollapsed, setIsFilesCollapsed] = useState(() => readPanelLayout().filesCollapsed);
+  // The left workspace (file list + code cells) is one collapsible region,
+  // toggled from the activity rail — a single control for the whole left side.
+  const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(() => readPanelLayout().workspaceOpen);
   const snapshotsRef = useRef<Map<string, FileSnapshot>>(new Map());
   const [graph, setGraph] = useState<GraphModel>(EMPTY_GRAPH);
   const [selected, setSelected] = useState<NodeModel | null>(null);
@@ -184,7 +185,6 @@ export function App(): ReactElement {
   // button), not a docked pane — it slides over the canvas and closes
   // after use, reclaiming the width for the graph.
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
-  const [isCellsCollapsed, setIsCellsCollapsed] = useState(() => readPanelLayout().cellsCollapsed);
   const [settings, setSettings] = useState<UserSettings>(() => readUserSettings());
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [explanation, setExplanation] = useState<PipelineExplanation | null>(null);
@@ -367,15 +367,14 @@ export function App(): ReactElement {
       window.localStorage.setItem(
         PANEL_STORAGE_KEY,
         JSON.stringify({
-          cellsCollapsed: isCellsCollapsed,
+          workspaceOpen: isWorkspaceOpen,
           inspectorCollapsed: isInspectorCollapsed,
-          filesCollapsed: isFilesCollapsed,
         }),
       );
     } catch {
       // Quota / disabled storage -- silently keep working in-memory.
     }
-  }, [isCellsCollapsed, isInspectorCollapsed, isFilesCollapsed]);
+  }, [isWorkspaceOpen, isInspectorCollapsed]);
 
   // Persist Settings dialog state (engine URL override + theme) and apply the
   // theme to the <html> element. "system" tracks prefers-color-scheme.
@@ -1124,10 +1123,26 @@ export function App(): ReactElement {
       });
   }, [isRunning, pipelineDef, graph]);
 
-  const handleDownload = useCallback((): void => {
-    downloadNotebook(notebook.cells, notebook.doc, notebook.name, outputsByCell);
+  // Export every open file's .ipynb as one zip — a single "Download" is
+  // ambiguous once the workspace spans multiple files. The active file carries
+  // its live cells + run outputs; inactive files come from their snapshots.
+  const handleDownloadAll = useCallback(async (): Promise<void> => {
+    const files = openFiles.map((file) => {
+      if (file.id === activeFileId) {
+        return {
+          name: notebook.name,
+          json: serializeNotebook(notebook.cells, notebook.doc, outputsByCell),
+        };
+      }
+      const snap = snapshotsRef.current.get(file.id);
+      return {
+        name: file.name,
+        json: serializeNotebook(snap?.cells ?? [], snap?.doc ?? notebook.doc, {}),
+      };
+    });
+    await downloadWorkspaceZip(files);
     setBaselineSources(notebook.cells.map((cell) => cell.source));
-  }, [notebook, outputsByCell]);
+  }, [openFiles, activeFileId, notebook, outputsByCell]);
 
   const handleSave = useCallback(async (): Promise<void> => {
     setSaveStatus("saving");
@@ -1331,12 +1346,13 @@ export function App(): ReactElement {
 
   const topPaneStyle = useMemo(
     () =>
-      isCellsCollapsed
-        ? { gridTemplateColumns: `${DIVIDER_SIZE_PX}px minmax(${MIN_CANVAS_BODY_WIDTH_PX}px, 1fr)` }
-        : {
+      isWorkspaceOpen
+        ? {
             gridTemplateColumns: `minmax(${MIN_NOTEBOOK_WIDTH_PX}px, ${notebookRatio}%) ${DIVIDER_SIZE_PX}px minmax(${MIN_CANVAS_BODY_WIDTH_PX}px, calc(${100 - notebookRatio}% - ${DIVIDER_SIZE_PX}px))`,
-          },
-    [isCellsCollapsed, notebookRatio],
+          }
+        : // Workspace collapsed: the canvas takes the whole row.
+          { gridTemplateColumns: `minmax(${MIN_CANVAS_BODY_WIDTH_PX}px, 1fr)` },
+    [isWorkspaceOpen, notebookRatio],
   );
 
   return (
@@ -1346,48 +1362,6 @@ export function App(): ReactElement {
           <span className="font-semibold tracking-tight">NotebookFlow</span>
           <EngineStatus client={clientRef.current} />
           <div className="ml-auto flex items-center gap-2">
-            <div className="relative">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="px-2"
-                onClick={() => {
-                  setIsOverflowOpen((open) => !open);
-                }}
-                title="More actions"
-                aria-label="More actions"
-              >
-                <MoreHorizontal className="size-3.5" />
-              </Button>
-              {isOverflowOpen && (
-                <div className="absolute right-0 top-full z-30 mt-1 w-48 rounded-md border bg-popover text-popover-foreground shadow-md">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleReingest();
-                      setIsOverflowOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/70"
-                  >
-                    <RotateCcw className="size-3.5" />
-                    Re-ingest
-                  </button>
-                  {JUPYTER_URL !== "" && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        openInJupyterLab(JUPYTER_URL, notebook.name);
-                        setIsOverflowOpen(false);
-                      }}
-                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/70"
-                    >
-                      <ExternalLink className="size-3.5" />
-                      Edit in JupyterLab
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
             {canSaveInPlace && (
               <Button
                 variant="outline"
@@ -1406,10 +1380,6 @@ export function App(): ReactElement {
                 {saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "Saved" : "Save"}
               </Button>
             )}
-            <Button variant="outline" size="sm" onClick={handleDownload}>
-              <Download className="mr-1.5 size-3.5" />
-              Download
-            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -1491,6 +1461,59 @@ export function App(): ReactElement {
             >
               <SettingsIcon className="size-4" />
             </Button>
+            <div className="relative">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="px-2"
+                onClick={() => {
+                  setIsOverflowOpen((open) => !open);
+                }}
+                title="More actions"
+                aria-label="More actions"
+              >
+                <MoreHorizontal className="size-3.5" />
+              </Button>
+              {isOverflowOpen && (
+                <div className="absolute right-0 top-full z-30 mt-1 w-52 rounded-md border bg-popover text-popover-foreground shadow-md">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleDownloadAll();
+                      setIsOverflowOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/70"
+                  >
+                    <Download className="size-3.5" />
+                    Download all (.zip)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleReingest();
+                      setIsOverflowOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/70"
+                  >
+                    <RotateCcw className="size-3.5" />
+                    Re-ingest
+                  </button>
+                  {JUPYTER_URL !== "" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        openInJupyterLab(JUPYTER_URL, notebook.name);
+                        setIsOverflowOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/70"
+                    >
+                      <ExternalLink className="size-3.5" />
+                      Edit in JupyterLab
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
@@ -1578,89 +1601,82 @@ export function App(): ReactElement {
         )}
 
         <div className="flex min-h-0 flex-1 overflow-hidden">
-          <FilesRail
-            files={openFiles}
-            activeFileId={activeFileId}
-            activeDirty={isDirty}
-            collapsed={isFilesCollapsed}
-            onSelect={switchToFile}
-            onClose={closeFile}
-            onOpen={triggerOpenFile}
-            onToggleCollapse={() => {
-              setIsFilesCollapsed((c) => !c);
+          <ActivityRail
+            workspaceOpen={isWorkspaceOpen}
+            onToggleWorkspace={() => {
+              setIsWorkspaceOpen((open) => !open);
             }}
           />
+          {isWorkspaceOpen && (
+            <FilesRail
+              files={openFiles}
+              activeFileId={activeFileId}
+              activeDirty={isDirty}
+              onSelect={switchToFile}
+              onClose={closeFile}
+              onOpen={triggerOpenFile}
+            />
+          )}
           <div
             ref={contentRef}
             className="grid min-h-0 flex-1 overflow-hidden"
             style={contentStyle}
           >
             <div ref={topPaneRef} className="grid min-h-0 overflow-hidden" style={topPaneStyle}>
-              {!isCellsCollapsed && (
-                <section className="flex min-h-0 min-w-0 flex-col">
-                  <CellToolbar
-                    focusedCellIndex={focusedCellIndex}
-                    focusedCell={
-                      focusedCellIndex === null ? null : (notebook.cells[focusedCellIndex] ?? null)
-                    }
-                    hasClipboard={cellClipboard !== null}
-                    onAddCell={handleAddCell}
-                    onDeleteCell={handleDeleteFocusedCell}
-                    onCutCell={handleCutFocusedCell}
-                    onCopyCell={handleCopyFocusedCell}
-                    onPasteCell={handlePasteCell}
-                    onChangeCellType={handleChangeFocusedCellType}
-                    isAddMenuOpen={isAddCellMenuOpen}
-                    onAddCellMenuOpenChange={setIsAddCellMenuOpen}
-                    onCollapse={() => {
-                      setIsCellsCollapsed(true);
-                    }}
-                  />
-                  <ScrollArea className="min-h-0 flex-1">
-                    <CellList
-                      cells={notebook.cells}
-                      onCellsChange={handleCellsChange}
-                      outputsByCell={outputsByCell}
-                      scrollToCellIndex={selected?.cellIndices[0] ?? null}
+              {isWorkspaceOpen && (
+                <>
+                  <section className="flex min-h-0 min-w-0 flex-col">
+                    <CellToolbar
                       focusedCellIndex={focusedCellIndex}
-                      onFocusCell={setFocusedCellIndex}
-                      streamingCellIndex={streamingCellIndex}
+                      focusedCell={
+                        focusedCellIndex === null
+                          ? null
+                          : (notebook.cells[focusedCellIndex] ?? null)
+                      }
+                      hasClipboard={cellClipboard !== null}
+                      onAddCell={handleAddCell}
+                      onDeleteCell={handleDeleteFocusedCell}
+                      onCutCell={handleCutFocusedCell}
+                      onCopyCell={handleCopyFocusedCell}
+                      onPasteCell={handlePasteCell}
+                      onChangeCellType={handleChangeFocusedCellType}
+                      isAddMenuOpen={isAddCellMenuOpen}
+                      onAddCellMenuOpenChange={setIsAddCellMenuOpen}
+                      onCollapse={() => {
+                        setIsWorkspaceOpen(false);
+                      }}
                     />
-                  </ScrollArea>
-                  <CellPaneFooter cells={notebook.cells} isDirty={isDirty} />
-                </section>
-              )}
-
-              {isCellsCollapsed ? (
-                <div className="flex w-full items-start justify-center border-r bg-muted/30 py-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-1.5"
-                    title="Expand cell pane"
-                    onClick={() => {
-                      setIsCellsCollapsed(false);
-                    }}
-                  >
-                    <PanelLeftOpen className="size-3.5" />
-                  </Button>
-                </div>
-              ) : (
-                <PaneDivider
-                  orientation="vertical"
-                  label="Resize notebook and canvas panes"
-                  onPointerDown={handleVerticalDividerPointerDown}
-                  onKeyDown={handleVerticalDividerKeyDown}
-                />
+                    <ScrollArea className="min-h-0 flex-1">
+                      <CellList
+                        cells={notebook.cells}
+                        onCellsChange={handleCellsChange}
+                        outputsByCell={outputsByCell}
+                        scrollToCellIndex={selected?.cellIndices[0] ?? null}
+                        focusedCellIndex={focusedCellIndex}
+                        onFocusCell={setFocusedCellIndex}
+                        streamingCellIndex={streamingCellIndex}
+                      />
+                    </ScrollArea>
+                    <CellPaneFooter cells={notebook.cells} isDirty={isDirty} />
+                  </section>
+                  <PaneDivider
+                    orientation="vertical"
+                    label="Resize notebook and canvas panes"
+                    onPointerDown={handleVerticalDividerPointerDown}
+                    onKeyDown={handleVerticalDividerKeyDown}
+                  />
+                </>
               )}
 
               <section className="flex min-h-0 min-w-0 flex-col">
-                <div className="flex items-center justify-between border-b px-4 py-2 text-xs text-muted-foreground">
-                  <span>Canvas</span>
+                <div
+                  ref={canvasPaneRef}
+                  className="relative min-h-0 flex-1 overflow-hidden bg-background"
+                >
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
-                    className="h-7 px-2 text-[11px]"
+                    className="absolute left-3 top-3 z-10 h-7 px-2 text-[11px] shadow-sm"
                     onClick={() => {
                       setIsPaletteOpen(true);
                     }}
@@ -1669,11 +1685,6 @@ export function App(): ReactElement {
                     <Plus className="mr-1 size-3.5" />
                     Add node
                   </Button>
-                </div>
-                <div
-                  ref={canvasPaneRef}
-                  className="relative min-h-0 flex-1 overflow-hidden bg-background"
-                >
                   <Canvas
                     graph={graph}
                     onNodeRename={handleRename}
