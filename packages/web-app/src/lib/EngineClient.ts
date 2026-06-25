@@ -142,7 +142,7 @@ export interface Credentials {
 
 export class EngineClient {
   private readonly url: string;
-  private readonly token: string;
+  private token: string;
   // Bring-your-own-key context sent with each LLM request. Set from the
   // web-app Settings; null means "let the engine use its env key / template".
   private credentials: Credentials | null = null;
@@ -159,6 +159,15 @@ export class EngineClient {
   /** Set (or clear) the per-request LLM credentials. */
   setCredentials(credentials: Credentials | null): void {
     this.credentials = credentials;
+  }
+
+  /**
+   * Set the bearer token presented to the engine (HTTP `Authorization` + WS
+   * `?token=`). Pass a BetterAuth JWT once signed in; pass "" to fall back to
+   * the static self-host token. Affects connections opened after the call.
+   */
+  setToken(token: string): void {
+    this.token = token;
   }
 
   /** The credential block to attach to an LLM request, or undefined to omit. */

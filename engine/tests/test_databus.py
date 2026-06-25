@@ -78,7 +78,8 @@ def test_clear_node_drops_entries_and_deletes_spill_files(bus: DataBus) -> None:
 def test_explicit_pipeline_run_id_namespaces_spill_subdir(spill_dir: Path) -> None:
     bus = DataBus(spill_dir=spill_dir, pipeline_run_id="run-abc")
     bus.put("n1", "df", pd.DataFrame({"x": [1]}))
-    assert bus.spill_root == spill_dir / "run-abc"
+    # Self-host maps to the shared "_" tenant namespace.
+    assert bus.spill_root == spill_dir / "_" / "run-abc"
     assert bus.spill_root.is_dir()
     assert all(p.parent == bus.spill_root for p in spill_dir.rglob("*.parquet"))
 
@@ -100,8 +101,8 @@ def test_two_databuses_on_same_spill_dir_are_isolated(spill_dir: Path) -> None:
     assert a.get("shared_node", "df").value["x"].tolist() == [1]
     assert b.get("shared_node", "df").value["x"].tolist() == [99]
 
-    # Their spill subdirs are disjoint.
-    assert {p.name for p in spill_dir.iterdir() if p.is_dir()} == {"run-a", "run-b"}
+    # Their spill subdirs are disjoint (under the shared "_" tenant dir).
+    assert {p.name for p in (spill_dir / "_").iterdir() if p.is_dir()} == {"run-a", "run-b"}
 
 
 def test_clear_run_drops_run_keys_and_spill_subdir(spill_dir: Path) -> None:
@@ -113,7 +114,46 @@ def test_clear_run_drops_run_keys_and_spill_subdir(spill_dir: Path) -> None:
     bus.clear_run()
 
     assert bus.keys() == []
-    assert not (spill_dir / "ephemeral").exists()
+    assert not (spill_dir / "_" / "ephemeral").exists()
+
+
+def test_tenant_namespaces_spill_subdir(spill_dir: Path) -> None:
+    anon = DataBus(spill_dir=spill_dir, pipeline_run_id="r")
+    alice = DataBus(spill_dir=spill_dir, pipeline_run_id="r", tenant="alice")
+    assert anon.tenant == "_"
+    assert alice.tenant != "_"
+    # Raw user id is hashed, never used verbatim as a path segment.
+    assert "alice" not in str(alice.spill_root)
+    assert alice.spill_root == spill_dir / alice.tenant / "r"
+    assert alice.spill_root != anon.spill_root
+
+
+def test_two_tenants_same_run_id_isolated_in_shared_store(spill_dir: Path) -> None:
+    # Same client-supplied run id, different users, one shared in-memory store.
+    a = DataBus(spill_dir=spill_dir, pipeline_run_id="demo", tenant="user-A")
+    b = DataBus(spill_dir=spill_dir, pipeline_run_id="demo", tenant="user-B")
+    b._store = a._store  # simulate a single shared bus hosting both runs
+
+    a.put("node", "out", 1)
+    b.put("node", "out", 2)
+    a.put("node", "df", pd.DataFrame({"x": [1]}))
+    b.put("node", "df", pd.DataFrame({"x": [2]}))
+
+    # Neither tenant can read the other's payload despite the identical run id.
+    assert a.get("node", "out").value == 1
+    assert b.get("node", "out").value == 2
+    assert a.get("node", "df").value["x"].tolist() == [1]
+    assert b.get("node", "df").value["x"].tolist() == [2]
+    assert set(a.keys()) == {("node", "out"), ("node", "df")}
+    assert set(b.keys()) == {("node", "out"), ("node", "df")}
+
+    # Spill subdirs are per-tenant, so same-run-id parquet files don't collide.
+    assert a.spill_root != b.spill_root
+
+    # Clearing one tenant's run leaves the other intact.
+    a.clear_run()
+    assert a.keys() == []
+    assert set(b.keys()) == {("node", "out"), ("node", "df")}
 
 
 def test_auto_generated_run_id_is_unique_per_databus(spill_dir: Path) -> None:

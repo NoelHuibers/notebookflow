@@ -8,18 +8,21 @@ Routing strategy by payload kind:
       for a future iteration (e.g. arbitrary large blobs the executor
       writes to disk directly).
 
-Multi-run isolation:
-    Every DataBus instance carries a ``pipeline_run_id`` (auto-generated
-    UUID when not supplied). Spill files land under ``spill_dir/<run_id>/``
-    and in-memory store keys are namespaced with the run id, so a single
-    shared DataBus can safely host concurrent pipeline runs without
-    collisions. Old single-tenant call sites that just instantiate
+Multi-tenant / multi-run isolation:
+    Every DataBus instance carries a ``tenant`` and a ``pipeline_run_id``
+    (auto-generated UUID when not supplied). Store keys are namespaced
+    ``(tenant, run_id, node_id, port)`` and spill files land under
+    ``spill_dir/<tenant>/<run_id>/``, so concurrent runs from different users
+    never collide — even when the client-supplied run id happens to match.
+    ``tenant=None`` (self-host / unauthenticated) maps to a single shared
+    namespace, so old call sites that just instantiate
     ``DataBus(spill_dir=...)`` keep working unchanged.
 """
 
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import uuid
 from dataclasses import dataclass, field
@@ -40,28 +43,49 @@ class Payload:
     meta: dict[str, Any] = field(default_factory=dict)
 
 
+def _tenant_namespace(tenant: str | None) -> str:
+    """Filesystem-safe, collision-resistant namespace for a tenant. ``None`` /
+    empty (self-host) maps to the shared ``"_"`` namespace; an authenticated
+    user id is hashed so the raw ``sub`` never lands on disk."""
+    if not tenant:
+        return "_"
+    return hashlib.sha256(tenant.encode("utf-8")).hexdigest()[:16]
+
+
 class DataBus:
     """In-memory store for node outputs, spilling DataFrames to Parquet."""
 
-    def __init__(self, spill_dir: Path, pipeline_run_id: str | None = None) -> None:
+    def __init__(
+        self,
+        spill_dir: Path,
+        pipeline_run_id: str | None = None,
+        tenant: str | None = None,
+    ) -> None:
         self._spill_dir = spill_dir
         self._run_id = pipeline_run_id if pipeline_run_id else uuid.uuid4().hex
+        self._tenant = _tenant_namespace(tenant)
         # Internal store keeps the *spilled* form: DataFrames as Path objects.
         # get() materializes back into a Payload whose value is the DataFrame.
-        # Keys are (run_id, node_id, port) so multiple runs can share one bus.
-        self._store: dict[tuple[str, str, str], Payload] = {}
+        # Keys are (tenant, run_id, node_id, port) so concurrent runs from
+        # different users can share one bus without colliding.
+        self._store: dict[tuple[str, str, str, str], Payload] = {}
 
     @property
     def pipeline_run_id(self) -> str:
         return self._run_id
 
     @property
+    def tenant(self) -> str:
+        """This bus's tenant namespace (``"_"`` for self-host)."""
+        return self._tenant
+
+    @property
     def spill_root(self) -> Path:
-        """Subdirectory where this run's parquet spills live."""
-        return self._spill_dir / self._run_id
+        """Subdirectory where this run's parquet spills live (per tenant)."""
+        return self._spill_dir / self._tenant / self._run_id
 
     def put(self, node_id: str, port: str, value: Any) -> None:
-        key = (self._run_id, node_id, port)
+        key = (self._tenant, self._run_id, node_id, port)
         if isinstance(value, pd.DataFrame):
             run_dir = self.spill_root
             run_dir.mkdir(parents=True, exist_ok=True)
@@ -78,9 +102,7 @@ class DataBus:
             try:
                 json.dumps(value)
             except (TypeError, ValueError) as exc:
-                raise TypeError(
-                    f"Value for {node_id!r}.{port!r} is not JSON-serializable"
-                ) from exc
+                raise TypeError(f"Value for {node_id!r}.{port!r} is not JSON-serializable") from exc
             self._store[key] = Payload(kind="json", value=value, meta={})
             return
 
@@ -89,7 +111,7 @@ class DataBus:
         )
 
     def get(self, node_id: str, port: str) -> Payload:
-        key = (self._run_id, node_id, port)
+        key = (self._tenant, self._run_id, node_id, port)
         if key not in self._store:
             raise KeyError(f"No payload stored for {node_id!r}.{port!r}")
         payload = self._store[key]
@@ -107,7 +129,11 @@ class DataBus:
         )
 
     def clear_node(self, node_id: str) -> None:
-        keys_to_drop = [k for k in self._store if k[0] == self._run_id and k[1] == node_id]
+        keys_to_drop = [
+            k
+            for k in self._store
+            if k[0] == self._tenant and k[1] == self._run_id and k[2] == node_id
+        ]
         for key in keys_to_drop:
             payload = self._store[key]
             if (
@@ -119,8 +145,8 @@ class DataBus:
             del self._store[key]
 
     def clear_run(self) -> None:
-        """Drop every key + spilled file owned by this DataBus's run."""
-        for key in [k for k in self._store if k[0] == self._run_id]:
+        """Drop every key + spilled file owned by this tenant's run."""
+        for key in [k for k in self._store if k[0] == self._tenant and k[1] == self._run_id]:
             payload = self._store[key]
             if (
                 payload.kind == "dataframe"
@@ -132,7 +158,14 @@ class DataBus:
         run_dir = self.spill_root
         if run_dir.is_dir() and not any(run_dir.iterdir()):
             run_dir.rmdir()
+        tenant_dir = self._spill_dir / self._tenant
+        if tenant_dir.is_dir() and not any(tenant_dir.iterdir()):
+            tenant_dir.rmdir()
 
     def keys(self) -> list[tuple[str, str]]:
-        """All (node_id, port) keys stored for this run. Useful for tests."""
-        return [(node_id, port) for run_id, node_id, port in self._store if run_id == self._run_id]
+        """All (node_id, port) keys stored for this tenant's run. For tests."""
+        return [
+            (node_id, port)
+            for tenant, run_id, node_id, port in self._store
+            if tenant == self._tenant and run_id == self._run_id
+        ]

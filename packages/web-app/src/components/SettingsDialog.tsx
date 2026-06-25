@@ -9,9 +9,22 @@ interface SettingsDialogProps {
   settings: UserSettings;
   onChange: (next: UserSettings) => void;
   onClose: () => void;
+  // Opt-in server-side key storage (#61). Only shown when signed in.
+  signedIn: boolean;
+  accountKeyState: "none" | "saved" | "saving";
+  onSaveKeyToAccount: () => void;
+  onRemoveKeyFromAccount: () => void;
 }
 
-export function SettingsDialog({ settings, onChange, onClose }: SettingsDialogProps): ReactElement {
+export function SettingsDialog({
+  settings,
+  onChange,
+  onClose,
+  signedIn,
+  accountKeyState,
+  onSaveKeyToAccount,
+  onRemoveKeyFromAccount,
+}: SettingsDialogProps): ReactElement {
   // Esc closes the modal, matching the other overlays.
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -123,10 +136,37 @@ export function SettingsDialog({ settings, onChange, onClose }: SettingsDialogPr
             </label>
           </div>
           <span className="mt-1 block text-[10px] italic text-muted-foreground">
-            Used for Ask / Compose / Explain / node synthesis. Stored only in this browser and sent
-            per request — never saved on the server. Leave the key blank to use the engine's own key
-            or the template fallback.
+            Used for Ask / Compose / Explain / node synthesis. Stored in this browser and sent per
+            request. Leave the key blank to use the engine's own key or the template fallback.
           </span>
+
+          {signedIn && (
+            <div className="mt-2 flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7"
+                disabled={accountKeyState === "saving" || settings.llmApiKey.trim() === ""}
+                onClick={onSaveKeyToAccount}
+                title="Encrypt and store this key in your account so it loads on any device"
+              >
+                {accountKeyState === "saving" ? "Saving…" : "Save key to account"}
+              </Button>
+              {accountKeyState === "saved" && (
+                <>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-muted-foreground hover:text-destructive"
+                    onClick={onRemoveKeyFromAccount}
+                  >
+                    Remove from account
+                  </Button>
+                  <span className="text-[10px] text-muted-foreground">Saved (encrypted)</span>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

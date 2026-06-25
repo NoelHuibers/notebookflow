@@ -16,9 +16,9 @@ Surface:
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import os
-import secrets
 import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -41,6 +41,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from notebookflow.auth import AuthError, AuthPrincipal, auth_configured, authenticate
 from notebookflow.core.dag import DAG, DAGEdge, DAGNode
 from notebookflow.core.databus import DataBus
 from notebookflow.core.executor import ExecutionResult, Executor
@@ -87,29 +88,26 @@ def load_engine_env(search_roots: tuple[Path, ...] | None = None) -> list[Path]:
 _LOADED_ENV_FILES = load_engine_env()
 
 
-def _expected_token() -> str:
-    """Look up the shared secret each request. Reading per-request lets tests
-    monkeypatch the env var without restarting the app."""
-    return os.environ.get("NOTEBOOKFLOW_AUTH_TOKEN", "")
+def require_auth(request: Request) -> AuthPrincipal:
+    """FastAPI dependency: authenticate the request, returning the principal.
 
-
-def require_auth(request: Request) -> None:
-    """FastAPI dependency: require a matching `Authorization: Bearer ...` header.
-
-    No-op when the token env var is unset or empty, so local development and
-    self-hosted single-user deploys don't need any config. When the variable
-    is set, every protected route rejects missing or mismatched tokens with
-    401. Tokens compared via secrets.compare_digest to dodge timing attacks.
+    No-op when no auth is configured (`NOTEBOOKFLOW_AUTH_TOKEN` and
+    `NOTEBOOKFLOW_JWKS_URL` both unset), so local development and self-hosted
+    single-user deploys need no config. When auth is on, a missing or
+    malformed `Authorization: Bearer ...` header is 401; the token itself is
+    validated by `authenticate` (static secret or BetterAuth JWT via JWKS).
+    Routes that need the user id can depend on the returned principal.
     """
-    expected = _expected_token()
-    if expected == "":
-        return
+    if not auth_configured():
+        return AuthPrincipal(user_id=None)
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="missing bearer token")
     presented = header.removeprefix("Bearer ").strip()
-    if not secrets.compare_digest(presented, expected):
-        raise HTTPException(status_code=401, detail="invalid bearer token")
+    try:
+        return authenticate(presented)
+    except AuthError as exc:
+        raise HTTPException(status_code=401, detail=exc.detail) from exc
 
 
 class _APIModel(BaseModel):
@@ -377,12 +375,11 @@ def _resolve_creds(credentials: CredentialsModel | None) -> CredentialContext | 
     return resolve_credentials(credentials.provider, credentials.model, credentials.api_key)
 
 
-def _data_dir(app_ref: FastAPI) -> Path:
-    """The directory holding uploaded data files (e.g. CSVs).
-
-    One directory per engine process today (a single-tenant local store); the
-    hosted product swaps this for a per-tenant location. Configurable via
-    NOTEBOOKFLOW_DATA_DIR, else a temp dir created once.
+def _base_data_dir(app_ref: FastAPI) -> Path:
+    """Root uploads directory. Per-tenant stores are subdirectories of this;
+    self-host / unauthenticated use reads and writes it directly. Configurable
+    via NOTEBOOKFLOW_DATA_DIR (a persistent volume in the hosted product, so
+    uploads survive restarts), else a temp dir created once.
     """
     existing = getattr(app_ref.state, "data_dir", None)
     if isinstance(existing, Path):
@@ -392,6 +389,53 @@ def _data_dir(app_ref: FastAPI) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     app_ref.state.data_dir = path
     return path
+
+
+def _tenant_key(user_id: str) -> str:
+    """Filesystem-safe, collision-resistant directory name for a user. Hashed
+    so the raw `sub` claim never lands on disk and arbitrary ids stay safe."""
+    return hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:32]
+
+
+def _data_dir(app_ref: FastAPI, user_id: str | None = None) -> Path:
+    """The uploads directory a request reads/writes. Isolated per user when
+    authenticated (multi-tenant); the shared base for self-host / open use.
+
+    Files never cross tenants: each user's store is a distinct subdirectory, so
+    same-named uploads from different users can't collide or leak.
+    """
+    base = _base_data_dir(app_ref)
+    if not user_id:
+        return base
+    tenant = base / _tenant_key(user_id)
+    tenant.mkdir(parents=True, exist_ok=True)
+    return tenant
+
+
+def _data_quota() -> tuple[int, int]:
+    """(max files, max total bytes) allowed per store; 0 disables a limit."""
+    max_files = int(os.environ.get("NOTEBOOKFLOW_MAX_DATA_FILES", "50"))
+    max_bytes = int(os.environ.get("NOTEBOOKFLOW_MAX_DATA_BYTES", str(200 * 1024 * 1024)))
+    return max_files, max_bytes
+
+
+def _enforce_data_quota(data_dir: Path, incoming_name: str, incoming_size: int) -> None:
+    """Reject an upload that would push the store past its file-count or total-
+    size limit. Overwriting an existing file replaces it (no double-count)."""
+    max_files, max_bytes = _data_quota()
+    files = [e for e in data_dir.iterdir() if e.is_file()] if data_dir.is_dir() else []
+    existing = next((e for e in files if e.name == incoming_name), None)
+    count = len(files) + (0 if existing is not None else 1)
+    prior_bytes = sum(e.stat().st_size for e in files)
+    total = prior_bytes - (existing.stat().st_size if existing else 0) + incoming_size
+    if max_files > 0 and count > max_files:
+        raise HTTPException(
+            status_code=413, detail=f"data file limit reached ({max_files} files per user)"
+        )
+    if max_bytes > 0 and total > max_bytes:
+        raise HTTPException(
+            status_code=413, detail=f"data storage limit reached ({max_bytes} bytes per user)"
+        )
 
 
 def _safe_data_name(name: str) -> str:
@@ -510,14 +554,16 @@ def _result_to_model(result: ExecutionResult) -> ExecutionResultModel:
     )
 
 
-async def _run_pipeline(pipeline_id: str, pipeline: PipelineDef) -> list[ExecutionResult]:
+async def _run_pipeline(
+    pipeline_id: str, pipeline: PipelineDef, user_id: str | None = None
+) -> list[ExecutionResult]:
     try:
         dag = _build_dag(pipeline)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     with tempfile.TemporaryDirectory(prefix="nbf-spill-") as spill_dir:
-        bus = DataBus(spill_dir=Path(spill_dir), pipeline_run_id=pipeline_id)
-        executor = Executor(dag=dag, bus=bus, data_dir=_data_dir(app))
+        bus = DataBus(spill_dir=Path(spill_dir), pipeline_run_id=pipeline_id, tenant=user_id)
+        executor = Executor(dag=dag, bus=bus, data_dir=_data_dir(app, user_id))
         try:
             return await executor.run_pipeline()
         except ValueError as exc:
@@ -585,10 +631,13 @@ class DataFileModel(_APIModel):
     size: int
 
 
-@app.get("/files", response_model=list[DataFileModel], dependencies=[Depends(require_auth)])
-async def list_data_files() -> list[DataFileModel]:
-    """Uploaded data files (CSVs etc.) a pipeline can read by name."""
-    data_dir = _data_dir(app)
+@app.get("/files", response_model=list[DataFileModel])
+async def list_data_files(
+    principal: Annotated[AuthPrincipal, Depends(require_auth)],
+) -> list[DataFileModel]:
+    """Uploaded data files (CSVs etc.) a pipeline can read by name. Scoped to
+    the signed-in user; self-host sees the shared store."""
+    data_dir = _data_dir(app, principal.user_id)
     return [
         DataFileModel(name=entry.name, size=entry.stat().st_size)
         for entry in sorted(data_dir.iterdir())
@@ -596,19 +645,27 @@ async def list_data_files() -> list[DataFileModel]:
     ]
 
 
-@app.post("/files", response_model=DataFileModel, dependencies=[Depends(require_auth)])
-async def upload_data_file(file: Annotated[UploadFile, File()]) -> DataFileModel:
-    """Store an uploaded data file so cells can `read_csv("name")` it on run."""
+@app.post("/files", response_model=DataFileModel)
+async def upload_data_file(
+    file: Annotated[UploadFile, File()],
+    principal: Annotated[AuthPrincipal, Depends(require_auth)],
+) -> DataFileModel:
+    """Store an uploaded data file so cells can `read_csv("name")` it on run.
+    Written to the owning user's store and bounded by the per-user quota."""
     name = _safe_data_name(file.filename or "")
     contents = await file.read()
-    target = _data_dir(app) / name
-    target.write_bytes(contents)
+    data_dir = _data_dir(app, principal.user_id)
+    _enforce_data_quota(data_dir, name, len(contents))
+    (data_dir / name).write_bytes(contents)
     return DataFileModel(name=name, size=len(contents))
 
 
-@app.delete("/files/{name}", dependencies=[Depends(require_auth)])
-async def delete_data_file(name: str) -> dict[str, str]:
-    target = _data_dir(app) / _safe_data_name(name)
+@app.delete("/files/{name}")
+async def delete_data_file(
+    name: str,
+    principal: Annotated[AuthPrincipal, Depends(require_auth)],
+) -> dict[str, str]:
+    target = _data_dir(app, principal.user_id) / _safe_data_name(name)
     if target.is_file():
         target.unlink()
     return {"status": "ok"}
@@ -617,13 +674,14 @@ async def delete_data_file(name: str) -> dict[str, str]:
 @app.post(
     "/pipelines/{pipeline_id}/run",
     response_model=RunResponse,
-    dependencies=[Depends(require_auth)],
 )
-async def run_pipeline(pipeline_id: str, pipeline: PipelineDef) -> RunResponse:
-    results = await _run_pipeline(pipeline_id, pipeline)
-    return RunResponse(
-        pipeline_id=pipeline_id, results=[_result_to_model(r) for r in results]
-    )
+async def run_pipeline(
+    pipeline_id: str,
+    pipeline: PipelineDef,
+    principal: Annotated[AuthPrincipal, Depends(require_auth)],
+) -> RunResponse:
+    results = await _run_pipeline(pipeline_id, pipeline, principal.user_id)
+    return RunResponse(pipeline_id=pipeline_id, results=[_result_to_model(r) for r in results])
 
 
 @app.post(
@@ -826,16 +884,19 @@ async def ws(websocket: WebSocket) -> None:
     Bad input echoes back as ``{"type": "error", "message": "..."}`` and the
     connection stays open so the client can recover.
 
-    Auth: when NOTEBOOKFLOW_AUTH_TOKEN is set, the client must present the
-    same token as a ``?token=...`` query parameter (browsers can't attach
-    Authorization headers to WebSocket connections, so a URL parameter is
-    the lowest-friction option). The handshake is rejected with code 1008
-    (Policy Violation) when the token is missing or mismatched.
+    Auth: when auth is configured (`NOTEBOOKFLOW_AUTH_TOKEN` or
+    `NOTEBOOKFLOW_JWKS_URL`), the client must present its token — the static
+    secret or a BetterAuth JWT — as a ``?token=...`` query parameter (browsers
+    can't attach Authorization headers to WebSocket connections, so a URL
+    parameter is the lowest-friction option). The handshake is rejected with
+    code 1008 (Policy Violation) when the token is missing or invalid.
     """
-    expected = _expected_token()
-    if expected != "":
+    user_id: str | None = None
+    if auth_configured():
         presented = websocket.query_params.get("token", "")
-        if not secrets.compare_digest(presented, expected):
+        try:
+            user_id = authenticate(presented).user_id
+        except AuthError:
             await websocket.close(code=1008, reason="unauthorized")
             return
     await websocket.accept()
@@ -869,28 +930,29 @@ async def ws(websocket: WebSocket) -> None:
                 await websocket.send_json({"type": "error", "message": str(exc)})
                 continue
 
-            await _stream_run(websocket, pipeline_id, pipeline)
+            await _stream_run(websocket, pipeline_id, pipeline, user_id)
     except WebSocketDisconnect:
         return
 
 
 async def _stream_run(
-    websocket: WebSocket, pipeline_id: str, pipeline: PipelineDef
+    websocket: WebSocket,
+    pipeline_id: str,
+    pipeline: PipelineDef,
+    user_id: str | None = None,
 ) -> None:
     await websocket.send_json({"type": "executionStarted", "pipelineId": pipeline_id})
 
     try:
         dag = _build_dag(pipeline)
     except ValueError as exc:
-        await websocket.send_json(
-            {"type": "error", "pipelineId": pipeline_id, "message": str(exc)}
-        )
+        await websocket.send_json({"type": "error", "pipelineId": pipeline_id, "message": str(exc)})
         return
 
     results: list[ExecutionResult] = []
     with tempfile.TemporaryDirectory(prefix="nbf-spill-") as spill_dir:
-        bus = DataBus(spill_dir=Path(spill_dir), pipeline_run_id=pipeline_id)
-        executor = Executor(dag=dag, bus=bus, data_dir=_data_dir(app))
+        bus = DataBus(spill_dir=Path(spill_dir), pipeline_run_id=pipeline_id, tenant=user_id)
+        executor = Executor(dag=dag, bus=bus, data_dir=_data_dir(app, user_id))
 
         async def on_node_started(node: DAGNode) -> None:
             # iter_pipeline awaits this before running each node, so the

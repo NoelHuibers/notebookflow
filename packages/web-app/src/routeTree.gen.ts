@@ -9,12 +9,18 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LegalImpressumRouteImport } from './routes/legal/impressum'
 import { Route as LegalDatenschutzRouteImport } from './routes/legal/datenschutz'
 import { Route as LegalAgbRouteImport } from './routes/legal/agb'
 
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppRoute = AppRouteImport.update({
   id: '/app',
   path: '/app',
@@ -44,6 +50,7 @@ const LegalAgbRoute = LegalAgbRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRoute
+  '/login': typeof LoginRoute
   '/legal/agb': typeof LegalAgbRoute
   '/legal/datenschutz': typeof LegalDatenschutzRoute
   '/legal/impressum': typeof LegalImpressumRoute
@@ -51,6 +58,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/app': typeof AppRoute
+  '/login': typeof LoginRoute
   '/legal/agb': typeof LegalAgbRoute
   '/legal/datenschutz': typeof LegalDatenschutzRoute
   '/legal/impressum': typeof LegalImpressumRoute
@@ -59,6 +67,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/app': typeof AppRoute
+  '/login': typeof LoginRoute
   '/legal/agb': typeof LegalAgbRoute
   '/legal/datenschutz': typeof LegalDatenschutzRoute
   '/legal/impressum': typeof LegalImpressumRoute
@@ -68,15 +77,23 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/app'
+    | '/login'
     | '/legal/agb'
     | '/legal/datenschutz'
     | '/legal/impressum'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/app' | '/legal/agb' | '/legal/datenschutz' | '/legal/impressum'
+  to:
+    | '/'
+    | '/app'
+    | '/login'
+    | '/legal/agb'
+    | '/legal/datenschutz'
+    | '/legal/impressum'
   id:
     | '__root__'
     | '/'
     | '/app'
+    | '/login'
     | '/legal/agb'
     | '/legal/datenschutz'
     | '/legal/impressum'
@@ -85,6 +102,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRoute: typeof AppRoute
+  LoginRoute: typeof LoginRoute
   LegalAgbRoute: typeof LegalAgbRoute
   LegalDatenschutzRoute: typeof LegalDatenschutzRoute
   LegalImpressumRoute: typeof LegalImpressumRoute
@@ -92,6 +110,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/app': {
       id: '/app'
       path: '/app'
@@ -133,6 +158,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRoute: AppRoute,
+  LoginRoute: LoginRoute,
   LegalAgbRoute: LegalAgbRoute,
   LegalDatenschutzRoute: LegalDatenschutzRoute,
   LegalImpressumRoute: LegalImpressumRoute,

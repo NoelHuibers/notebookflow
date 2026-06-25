@@ -237,7 +237,7 @@ def test_synthesize_node_renders_template_manifest(client: TestClient) -> None:
     assert r.status_code == 200
     body = r.json()
     assert body["backend"] == "template"
-    assert "table = pd.read_csv(\"sales.csv\")" in body["source"]
+    assert 'table = pd.read_csv("sales.csv")' in body["source"]
     assert body["warnings"] == []
 
 
@@ -548,6 +548,236 @@ def test_empty_token_env_var_disables_auth(
     # No Authorization header -- should still succeed.
     r = client.get("/nodes")
     assert r.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# BetterAuth JWT auth (NOTEBOOKFLOW_JWKS_URL)
+# ---------------------------------------------------------------------------
+
+
+def _mint_jwt(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    sub: str = "user-123",
+    exp_delta: int = 3600,
+    verify_pub: Any = None,
+) -> str:
+    """Mint an EdDSA JWT (BetterAuth's default) and point the engine's JWKS
+    lookup at the matching in-memory public key, so verification runs the real
+    code path without a network round-trip.
+
+    `verify_pub` overrides the public key the verifier sees — pass a foreign key
+    to simulate a bad signature.
+    """
+    import time
+    from types import SimpleNamespace
+
+    import jwt as pyjwt
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from notebookflow import auth as auth_mod
+
+    signing_key = Ed25519PrivateKey.generate()
+    public_key = verify_pub if verify_pub is not None else signing_key.public_key()
+
+    now = int(time.time())
+    token = pyjwt.encode(
+        {"sub": sub, "iat": now, "exp": now + exp_delta},
+        signing_key,
+        algorithm="EdDSA",
+    )
+
+    monkeypatch.setattr(
+        auth_mod,
+        "_get_jwks_client",
+        lambda _url: SimpleNamespace(
+            get_signing_key_from_jwt=lambda _t: SimpleNamespace(key=public_key)
+        ),
+    )
+    monkeypatch.setenv("NOTEBOOKFLOW_JWKS_URL", "https://issuer.test/api/auth/jwks")
+    return token
+
+
+def test_authenticate_accepts_valid_jwt_and_extracts_sub(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from notebookflow import auth
+
+    token = _mint_jwt(monkeypatch, sub="user-abc")
+    principal = auth.authenticate(token)
+    assert principal.user_id == "user-abc"
+
+
+def test_authenticate_rejects_expired_jwt(monkeypatch: pytest.MonkeyPatch) -> None:
+    from notebookflow import auth
+
+    token = _mint_jwt(monkeypatch, exp_delta=-10)
+    with pytest.raises(auth.AuthError):
+        auth.authenticate(token)
+
+
+def test_authenticate_rejects_jwt_with_wrong_signature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from notebookflow import auth
+
+    foreign_pub = Ed25519PrivateKey.generate().public_key()
+    token = _mint_jwt(monkeypatch, verify_pub=foreign_pub)
+    with pytest.raises(auth.AuthError):
+        auth.authenticate(token)
+
+
+def test_nodes_accepts_valid_jwt(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    token = _mint_jwt(monkeypatch)
+    r = client.get("/nodes", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200
+
+
+def test_nodes_rejects_invalid_jwt(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _mint_jwt(monkeypatch)  # configures JWKS; the presented token below is junk
+    r = client.get("/nodes", headers={"Authorization": "Bearer not-a-real-jwt"})
+    assert r.status_code == 401
+
+
+def test_jwks_configured_rejects_missing_token(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_JWKS_URL", "https://issuer.test/api/auth/jwks")
+    r = client.get("/nodes")
+    assert r.status_code == 401
+
+
+def test_static_token_and_jwt_both_authenticate(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    token = _mint_jwt(monkeypatch)  # sets JWKS
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "self-host-secret")
+    assert (
+        client.get("/nodes", headers={"Authorization": "Bearer self-host-secret"}).status_code
+        == 200
+    )
+    assert client.get("/nodes", headers={"Authorization": f"Bearer {token}"}).status_code == 200
+
+
+def test_ws_accepts_valid_jwt_query_param(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    token = _mint_jwt(monkeypatch)
+    with client.websocket_connect(f"/ws?token={token}") as ws:
+        ws.send_json({"type": "run", "pipelineId": "auth", "pipeline": _linear_pipeline()})
+        assert ws.receive_json()["type"] == "executionStarted"
+
+
+# ---------------------------------------------------------------------------
+# Per-tenant data files (#70)
+# ---------------------------------------------------------------------------
+
+
+def _jwt_factory(monkeypatch: pytest.MonkeyPatch):
+    """Mint multiple JWTs (different `sub`s) all verifiable against one
+    in-memory key, so several users can be authenticated within a single test."""
+    import time
+    from types import SimpleNamespace
+
+    import jwt as pyjwt
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from notebookflow import auth as auth_mod
+
+    signing_key = Ed25519PrivateKey.generate()
+    public_key = signing_key.public_key()
+    monkeypatch.setattr(
+        auth_mod,
+        "_get_jwks_client",
+        lambda _url: SimpleNamespace(
+            get_signing_key_from_jwt=lambda _t: SimpleNamespace(key=public_key)
+        ),
+    )
+    monkeypatch.setenv("NOTEBOOKFLOW_JWKS_URL", "https://issuer.test/api/auth/jwks")
+
+    def mint(sub: str) -> str:
+        now = int(time.time())
+        return pyjwt.encode(
+            {"sub": sub, "iat": now, "exp": now + 3600}, signing_key, algorithm="EdDSA"
+        )
+
+    return mint
+
+
+def _bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_data_files_isolated_per_user(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    mint = _jwt_factory(monkeypatch)
+    a = _bearer(mint("user-A"))
+    b = _bearer(mint("user-B"))
+    client.post("/files", files={"file": ("orders.csv", b"AAAA", "text/csv")}, headers=a)
+    client.post("/files", files={"file": ("orders.csv", b"BB", "text/csv")}, headers=b)
+
+    list_a = client.get("/files", headers=a).json()
+    list_b = client.get("/files", headers=b).json()
+    assert [f["name"] for f in list_a] == ["orders.csv"]
+    assert [f["name"] for f in list_b] == ["orders.csv"]
+    # Same name, different bytes -> separate stores, no collision.
+    assert list_a[0]["size"] == 4
+    assert list_b[0]["size"] == 2
+
+    # Deleting A's file leaves B's intact.
+    assert client.delete("/files/orders.csv", headers=a).status_code == 200
+    assert client.get("/files", headers=a).json() == []
+    assert len(client.get("/files", headers=b).json()) == 1
+    client.delete("/files/orders.csv", headers=b)
+
+
+def test_run_resolves_owning_users_data_file(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mint = _jwt_factory(monkeypatch)
+    owner = _bearer(mint("owner"))
+    other = _bearer(mint("other"))
+    client.post(
+        "/files", files={"file": ("nums.csv", b"value\n1\n2\n3\n", "text/csv")}, headers=owner
+    )
+    pipeline = {
+        "nodes": [
+            {
+                "id": "a",
+                "name": "Load",
+                "tag": "input",
+                "inputs": [],
+                "outputs": ["count"],
+                "source": "import pandas as pd\ncount = len(pd.read_csv('nums.csv'))\n",
+            }
+        ],
+        "edges": [],
+    }
+    owner_run = client.post("/pipelines/files/run", json=pipeline, headers=owner)
+    assert owner_run.json()["results"][0]["status"] == "ok"
+    # A different user's run can't see the owner's upload.
+    other_run = client.post("/pipelines/files/run", json=pipeline, headers=other)
+    assert other_run.json()["results"][0]["status"] == "error"
+    client.delete("/files/nums.csv", headers=owner)
+
+
+def test_data_file_quota_enforced(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    mint = _jwt_factory(monkeypatch)
+    monkeypatch.setenv("NOTEBOOKFLOW_MAX_DATA_FILES", "1")
+    h = _bearer(mint("limited"))
+    assert (
+        client.post("/files", files={"file": ("a.csv", b"x", "text/csv")}, headers=h).status_code
+        == 200
+    )
+    over = client.post("/files", files={"file": ("b.csv", b"y", "text/csv")}, headers=h)
+    assert over.status_code == 413
+    # Overwriting an existing file doesn't count against the limit.
+    assert (
+        client.post("/files", files={"file": ("a.csv", b"xx", "text/csv")}, headers=h).status_code
+        == 200
+    )
+    client.delete("/files/a.csv", headers=h)
 
 
 # ---------------------------------------------------------------------------
