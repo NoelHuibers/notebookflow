@@ -11,10 +11,14 @@ const graphCanvasSrc = path.resolve(here, "../graph-canvas/src");
 const webAppSrc = path.resolve(here, "src");
 
 export default defineConfig({
-  // tanstackStart() provides SSR + routing over Vite; viteReact() handles JSX/Fast
-  // Refresh. Tailwind, the graph-canvas source alias, the @/ alias, and Vite env
-  // (import.meta.env.VITE_*) all carry over from the SPA unchanged.
-  plugins: [tailwindcss(), tanstackStart(), react()],
+  // SPA mode: TanStack Start emits a static client app + an index.html shell, so
+  // it deploys to Vercel as a static site (no SSR server to wrangle) — the same
+  // model as the old Vite SPA, but with the router + route shell. The editor is
+  // client-only and landing/legal are trivial, so we don't need SSR yet; the
+  // server for BetterAuth (#59) re-enables SSR + sorts the Vercel server deploy.
+  // Tailwind, the graph-canvas source alias, the @/ alias, and Vite env all
+  // carry over unchanged.
+  plugins: [tailwindcss(), tanstackStart({ spa: { enabled: true } }), react()],
   resolve: {
     alias: [
       { find: "@notebookflow/graph-canvas/sync", replacement: `${graphCanvasSrc}/sync/index.ts` },
