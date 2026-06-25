@@ -1,0 +1,19 @@
+{
+  // Strict type-check for the server / Vercel-function files using the SAME
+  // module resolution Vercel compiles them with (NodeNext). This catches the
+  // class of bug that took prod down once — extensionless relative imports that
+  // pass under `bundler` but fail at runtime in the function (ERR_MODULE_NOT_FOUND).
+  // Wired into `pnpm typecheck`, so CI fails before such a regression ships.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    "rootDir": ".",
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "skipLibCheck": true
+  },
+  "include": ["api/**/*.ts", "src/server/**/*.ts", "src/lib/auth.ts", "src/lib/db/**/*.ts"]
+}
