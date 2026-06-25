@@ -74,6 +74,7 @@ import { TriggersDialog } from "@/components/TriggersDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useSession } from "@/lib/auth-client";
 import { bootstrapBaselineSources, bootstrapFromFixture } from "@/lib/bootstrap";
 import { applyCellPatch } from "@/lib/cellPatch";
 import type {
@@ -219,9 +220,33 @@ export function App(): ReactElement {
       : new EngineClient(settings.engineUrlOverride),
   );
 
+  // BetterAuth session (#59). When signed in, mint a short-lived JWT for the
+  // engine; signed out, fall back to the engine's static self-host token.
+  const session = useSession();
+  const [engineJwt, setEngineJwt] = useState("");
+  useEffect(() => {
+    if (!session.data) {
+      setEngineJwt("");
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/auth/token", { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body: { token?: string } | null) => {
+        if (!cancelled) setEngineJwt(body?.token ?? "");
+      })
+      .catch(() => {
+        if (!cancelled) setEngineJwt("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session.data]);
+
   // Rebuild the EngineClient when the engine URL changes, and (re)apply the
-  // bring-your-own-key credentials whenever the LLM settings change. Both go
-  // through one effect so a fresh client never loses its credentials.
+  // bring-your-own-key credentials whenever the LLM settings change, plus the
+  // session JWT. All go through one effect so a fresh client never loses its
+  // credentials or auth token.
   useEffect(() => {
     const client =
       settings.engineUrlOverride === ""
@@ -236,8 +261,15 @@ export function App(): ReactElement {
             apiKey: settings.llmApiKey,
           },
     );
+    if (engineJwt !== "") client.setToken(engineJwt);
     clientRef.current = client;
-  }, [settings.engineUrlOverride, settings.llmProvider, settings.llmModel, settings.llmApiKey]);
+  }, [
+    settings.engineUrlOverride,
+    settings.llmProvider,
+    settings.llmModel,
+    settings.llmApiKey,
+    engineJwt,
+  ]);
 
   // Global shortcuts. Modifier combos fire anywhere; bare keys (m, ?) are
   // suppressed while typing in an input / textarea / CodeMirror so they don't

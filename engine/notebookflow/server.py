@@ -18,7 +18,6 @@ from __future__ import annotations
 import ast
 import json
 import os
-import secrets
 import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -41,6 +40,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from notebookflow.auth import AuthError, AuthPrincipal, auth_configured, authenticate
 from notebookflow.core.dag import DAG, DAGEdge, DAGNode
 from notebookflow.core.databus import DataBus
 from notebookflow.core.executor import ExecutionResult, Executor
@@ -87,29 +87,26 @@ def load_engine_env(search_roots: tuple[Path, ...] | None = None) -> list[Path]:
 _LOADED_ENV_FILES = load_engine_env()
 
 
-def _expected_token() -> str:
-    """Look up the shared secret each request. Reading per-request lets tests
-    monkeypatch the env var without restarting the app."""
-    return os.environ.get("NOTEBOOKFLOW_AUTH_TOKEN", "")
+def require_auth(request: Request) -> AuthPrincipal:
+    """FastAPI dependency: authenticate the request, returning the principal.
 
-
-def require_auth(request: Request) -> None:
-    """FastAPI dependency: require a matching `Authorization: Bearer ...` header.
-
-    No-op when the token env var is unset or empty, so local development and
-    self-hosted single-user deploys don't need any config. When the variable
-    is set, every protected route rejects missing or mismatched tokens with
-    401. Tokens compared via secrets.compare_digest to dodge timing attacks.
+    No-op when no auth is configured (`NOTEBOOKFLOW_AUTH_TOKEN` and
+    `NOTEBOOKFLOW_JWKS_URL` both unset), so local development and self-hosted
+    single-user deploys need no config. When auth is on, a missing or
+    malformed `Authorization: Bearer ...` header is 401; the token itself is
+    validated by `authenticate` (static secret or BetterAuth JWT via JWKS).
+    Routes that need the user id can depend on the returned principal.
     """
-    expected = _expected_token()
-    if expected == "":
-        return
+    if not auth_configured():
+        return AuthPrincipal(user_id=None)
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="missing bearer token")
     presented = header.removeprefix("Bearer ").strip()
-    if not secrets.compare_digest(presented, expected):
-        raise HTTPException(status_code=401, detail="invalid bearer token")
+    try:
+        return authenticate(presented)
+    except AuthError as exc:
+        raise HTTPException(status_code=401, detail=exc.detail) from exc
 
 
 class _APIModel(BaseModel):
@@ -621,9 +618,7 @@ async def delete_data_file(name: str) -> dict[str, str]:
 )
 async def run_pipeline(pipeline_id: str, pipeline: PipelineDef) -> RunResponse:
     results = await _run_pipeline(pipeline_id, pipeline)
-    return RunResponse(
-        pipeline_id=pipeline_id, results=[_result_to_model(r) for r in results]
-    )
+    return RunResponse(pipeline_id=pipeline_id, results=[_result_to_model(r) for r in results])
 
 
 @app.post(
@@ -826,16 +821,18 @@ async def ws(websocket: WebSocket) -> None:
     Bad input echoes back as ``{"type": "error", "message": "..."}`` and the
     connection stays open so the client can recover.
 
-    Auth: when NOTEBOOKFLOW_AUTH_TOKEN is set, the client must present the
-    same token as a ``?token=...`` query parameter (browsers can't attach
-    Authorization headers to WebSocket connections, so a URL parameter is
-    the lowest-friction option). The handshake is rejected with code 1008
-    (Policy Violation) when the token is missing or mismatched.
+    Auth: when auth is configured (`NOTEBOOKFLOW_AUTH_TOKEN` or
+    `NOTEBOOKFLOW_JWKS_URL`), the client must present its token — the static
+    secret or a BetterAuth JWT — as a ``?token=...`` query parameter (browsers
+    can't attach Authorization headers to WebSocket connections, so a URL
+    parameter is the lowest-friction option). The handshake is rejected with
+    code 1008 (Policy Violation) when the token is missing or invalid.
     """
-    expected = _expected_token()
-    if expected != "":
+    if auth_configured():
         presented = websocket.query_params.get("token", "")
-        if not secrets.compare_digest(presented, expected):
+        try:
+            authenticate(presented)
+        except AuthError:
             await websocket.close(code=1008, reason="unauthorized")
             return
     await websocket.accept()
@@ -874,17 +871,13 @@ async def ws(websocket: WebSocket) -> None:
         return
 
 
-async def _stream_run(
-    websocket: WebSocket, pipeline_id: str, pipeline: PipelineDef
-) -> None:
+async def _stream_run(websocket: WebSocket, pipeline_id: str, pipeline: PipelineDef) -> None:
     await websocket.send_json({"type": "executionStarted", "pipelineId": pipeline_id})
 
     try:
         dag = _build_dag(pipeline)
     except ValueError as exc:
-        await websocket.send_json(
-            {"type": "error", "pipelineId": pipeline_id, "message": str(exc)}
-        )
+        await websocket.send_json({"type": "error", "pipelineId": pipeline_id, "message": str(exc)})
         return
 
     results: list[ExecutionResult] = []

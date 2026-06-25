@@ -25,20 +25,34 @@ function Home() {
         n8n-style workflow orchestration for computational notebooks — visually wire notebooks and
         cell groups into pipelines, with AI assistance and bidirectional sync.
       </p>
-      <Link
-        to="/app"
-        style={{
-          marginTop: "0.5rem",
-          borderRadius: "0.5rem",
-          background: "#0d9488",
-          color: "white",
-          padding: "0.6rem 1.25rem",
-          fontWeight: 600,
-          textDecoration: "none",
-        }}
-      >
-        Launch app
-      </Link>
+      <div style={{ marginTop: "0.5rem", display: "flex", gap: "0.75rem" }}>
+        <Link
+          to="/app"
+          style={{
+            borderRadius: "0.5rem",
+            background: "#0d9488",
+            color: "white",
+            padding: "0.6rem 1.25rem",
+            fontWeight: 600,
+            textDecoration: "none",
+          }}
+        >
+          Launch app
+        </Link>
+        <Link
+          to="/login"
+          style={{
+            borderRadius: "0.5rem",
+            border: "1px solid #d4d4d8",
+            color: "#18181b",
+            padding: "0.6rem 1.25rem",
+            fontWeight: 600,
+            textDecoration: "none",
+          }}
+        >
+          Sign in
+        </Link>
+      </div>
     </main>
   );
 }

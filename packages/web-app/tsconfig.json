@@ -3,7 +3,12 @@
   "compilerOptions": {
     "outDir": "./dist",
     "rootDir": "./src",
-    "composite": true,
+    // App, not a library: Vite builds it and graph-canvas is consumed as source
+    // via the Vite alias, so no declaration emit is needed. Turning it off also
+    // avoids TS2883 on better-auth's deeply-inferred (zod-referencing) types.
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
