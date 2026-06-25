@@ -671,6 +671,116 @@ def test_ws_accepts_valid_jwt_query_param(
 
 
 # ---------------------------------------------------------------------------
+# Per-tenant data files (#70)
+# ---------------------------------------------------------------------------
+
+
+def _jwt_factory(monkeypatch: pytest.MonkeyPatch):
+    """Mint multiple JWTs (different `sub`s) all verifiable against one
+    in-memory key, so several users can be authenticated within a single test."""
+    import time
+    from types import SimpleNamespace
+
+    import jwt as pyjwt
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from notebookflow import auth as auth_mod
+
+    signing_key = Ed25519PrivateKey.generate()
+    public_key = signing_key.public_key()
+    monkeypatch.setattr(
+        auth_mod,
+        "_get_jwks_client",
+        lambda _url: SimpleNamespace(
+            get_signing_key_from_jwt=lambda _t: SimpleNamespace(key=public_key)
+        ),
+    )
+    monkeypatch.setenv("NOTEBOOKFLOW_JWKS_URL", "https://issuer.test/api/auth/jwks")
+
+    def mint(sub: str) -> str:
+        now = int(time.time())
+        return pyjwt.encode(
+            {"sub": sub, "iat": now, "exp": now + 3600}, signing_key, algorithm="EdDSA"
+        )
+
+    return mint
+
+
+def _bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_data_files_isolated_per_user(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    mint = _jwt_factory(monkeypatch)
+    a = _bearer(mint("user-A"))
+    b = _bearer(mint("user-B"))
+    client.post("/files", files={"file": ("orders.csv", b"AAAA", "text/csv")}, headers=a)
+    client.post("/files", files={"file": ("orders.csv", b"BB", "text/csv")}, headers=b)
+
+    list_a = client.get("/files", headers=a).json()
+    list_b = client.get("/files", headers=b).json()
+    assert [f["name"] for f in list_a] == ["orders.csv"]
+    assert [f["name"] for f in list_b] == ["orders.csv"]
+    # Same name, different bytes -> separate stores, no collision.
+    assert list_a[0]["size"] == 4
+    assert list_b[0]["size"] == 2
+
+    # Deleting A's file leaves B's intact.
+    assert client.delete("/files/orders.csv", headers=a).status_code == 200
+    assert client.get("/files", headers=a).json() == []
+    assert len(client.get("/files", headers=b).json()) == 1
+    client.delete("/files/orders.csv", headers=b)
+
+
+def test_run_resolves_owning_users_data_file(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mint = _jwt_factory(monkeypatch)
+    owner = _bearer(mint("owner"))
+    other = _bearer(mint("other"))
+    client.post(
+        "/files", files={"file": ("nums.csv", b"value\n1\n2\n3\n", "text/csv")}, headers=owner
+    )
+    pipeline = {
+        "nodes": [
+            {
+                "id": "a",
+                "name": "Load",
+                "tag": "input",
+                "inputs": [],
+                "outputs": ["count"],
+                "source": "import pandas as pd\ncount = len(pd.read_csv('nums.csv'))\n",
+            }
+        ],
+        "edges": [],
+    }
+    owner_run = client.post("/pipelines/files/run", json=pipeline, headers=owner)
+    assert owner_run.json()["results"][0]["status"] == "ok"
+    # A different user's run can't see the owner's upload.
+    other_run = client.post("/pipelines/files/run", json=pipeline, headers=other)
+    assert other_run.json()["results"][0]["status"] == "error"
+    client.delete("/files/nums.csv", headers=owner)
+
+
+def test_data_file_quota_enforced(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    mint = _jwt_factory(monkeypatch)
+    monkeypatch.setenv("NOTEBOOKFLOW_MAX_DATA_FILES", "1")
+    h = _bearer(mint("limited"))
+    assert (
+        client.post("/files", files={"file": ("a.csv", b"x", "text/csv")}, headers=h).status_code
+        == 200
+    )
+    over = client.post("/files", files={"file": ("b.csv", b"y", "text/csv")}, headers=h)
+    assert over.status_code == 413
+    # Overwriting an existing file doesn't count against the limit.
+    assert (
+        client.post("/files", files={"file": ("a.csv", b"xx", "text/csv")}, headers=h).status_code
+        == 200
+    )
+    client.delete("/files/a.csv", headers=h)
+
+
+# ---------------------------------------------------------------------------
 # /pipelines/explain
 # ---------------------------------------------------------------------------
 
