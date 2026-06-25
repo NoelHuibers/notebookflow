@@ -8,7 +8,7 @@
  * of the app keeps working when the DB is unset.
  */
 
-import { type Config, createClient } from "@libsql/client";
+import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 
 import * as schema from "./schema.js";
@@ -22,6 +22,8 @@ if (!url) {
   );
 }
 
-const config: Config = authToken ? { url, authToken } : { url };
+// Type inferred (not annotated with @libsql/client's `Config`, whose type isn't
+// exported under the function's NodeNext resolution).
+const config = authToken ? { url, authToken } : { url };
 
 export const db = drizzle(createClient(config), { schema });

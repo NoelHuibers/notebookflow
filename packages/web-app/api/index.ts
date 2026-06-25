@@ -9,6 +9,7 @@
 // (traced by Vercel, resolved at runtime) only when an /api request arrives.
 // src/server/http-bridge.ts + src/server/api.ts remain for the Vite dev path.
 
+/// <reference path="./dist-server.d.ts" />
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 type FetchHandler = { fetch: (request: Request) => Promise<Response> };
@@ -67,7 +68,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       return;
     }
 
-    // @ts-expect-error built at deploy time; no types for the dist bundle
+    // Typed via api/dist-server.d.ts (referenced above).
     const mod = await import("../dist/server/server.js");
     await sendWebResponse(res, await (mod.default as FetchHandler).fetch(request));
   } catch (err) {

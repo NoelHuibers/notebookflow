@@ -122,6 +122,16 @@
   },
   "overrides": [
     {
+      "includes": ["**/lib/db/drizzle-adapter.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noTsIgnore": "off"
+          }
+        }
+      }
+    },
+    {
       "includes": ["**/components/ui/**/*.{ts,tsx}"],
       "linter": {
         "rules": {
