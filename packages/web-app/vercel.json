@@ -4,5 +4,5 @@
   "installCommand": "cd ../.. && pnpm install --frozen-lockfile",
   "buildCommand": "pnpm build",
   "outputDirectory": "dist/client",
-  "rewrites": [{ "source": "/(.*)", "destination": "/_shell.html" }]
+  "rewrites": [{ "source": "/(.*)", "destination": "/api" }]
 }
