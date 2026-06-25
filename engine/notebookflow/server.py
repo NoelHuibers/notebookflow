@@ -562,7 +562,7 @@ async def _run_pipeline(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     with tempfile.TemporaryDirectory(prefix="nbf-spill-") as spill_dir:
-        bus = DataBus(spill_dir=Path(spill_dir), pipeline_run_id=pipeline_id)
+        bus = DataBus(spill_dir=Path(spill_dir), pipeline_run_id=pipeline_id, tenant=user_id)
         executor = Executor(dag=dag, bus=bus, data_dir=_data_dir(app, user_id))
         try:
             return await executor.run_pipeline()
@@ -951,7 +951,7 @@ async def _stream_run(
 
     results: list[ExecutionResult] = []
     with tempfile.TemporaryDirectory(prefix="nbf-spill-") as spill_dir:
-        bus = DataBus(spill_dir=Path(spill_dir), pipeline_run_id=pipeline_id)
+        bus = DataBus(spill_dir=Path(spill_dir), pipeline_run_id=pipeline_id, tenant=user_id)
         executor = Executor(dag=dag, bus=bus, data_dir=_data_dir(app, user_id))
 
         async def on_node_started(node: DAGNode) -> None:
