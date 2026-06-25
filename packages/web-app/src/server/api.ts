@@ -11,17 +11,17 @@ export async function handleApi(request: Request): Promise<Response | null> {
   const { pathname } = new URL(request.url);
 
   if (pathname.startsWith("/api/auth/")) {
-    const { auth } = await import("../lib/auth");
+    const { auth } = await import("../lib/auth.js");
     return auth.handler(request);
   }
 
   if (pathname === "/api/notebooks" || pathname.startsWith("/api/notebooks/")) {
-    const { handleNotebooksRequest } = await import("./notebooks");
+    const { handleNotebooksRequest } = await import("./notebooks.js");
     return handleNotebooksRequest(request);
   }
 
   if (pathname === "/api/provider-key") {
-    const { handleProviderKeyRequest } = await import("./providerKey");
+    const { handleProviderKeyRequest } = await import("./providerKey.js");
     return handleProviderKeyRequest(request);
   }
 
