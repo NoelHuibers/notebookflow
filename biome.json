@@ -18,6 +18,7 @@
       "!**/pnpm-lock.yaml",
       "!**/*.css",
       "!**/*.html",
+      "!**/routeTree.gen.ts",
       "!engine",
       "!node-library-spec/notebookflow-node-hello"
     ]
