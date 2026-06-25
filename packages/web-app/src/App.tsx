@@ -34,6 +34,7 @@ import { SyncEngine } from "@notebookflow/graph-canvas/sync";
 import {
   ChevronDown,
   ChevronRight,
+  Cloud,
   Command,
   Download,
   ExternalLink,
@@ -60,6 +61,7 @@ import { CellList } from "@/components/CellList";
 import { CellPaneFooter } from "@/components/CellPaneFooter";
 import type { CellKind } from "@/components/CellToolbar";
 import { CellToolbar } from "@/components/CellToolbar";
+import { CloudNotebooksDialog } from "@/components/CloudNotebooksDialog";
 import { ComposeDialog } from "@/components/ComposeDialog";
 import { EngineStatus } from "@/components/EngineStatus";
 import { ExplanationPanel } from "@/components/ExplanationPanel";
@@ -98,13 +100,23 @@ import {
   serializeNotebook,
   toIpynbCell,
 } from "@/lib/notebook";
+import {
+  createNotebook,
+  deleteNotebook,
+  getNotebook,
+  listNotebooks,
+  type NotebookSummary,
+  parseWorkspace,
+  serializeWorkspace,
+  updateNotebook,
+} from "@/lib/notebooksApi";
 import { sortPalette } from "@/lib/palette";
 import { PANEL_STORAGE_KEY, readPanelLayout } from "@/lib/panels";
 import { buildPipelineDef, stripMarkerLine } from "@/lib/pipeline";
 import type { UserSettings } from "@/lib/settings";
 import { applyTheme, readUserSettings, SETTINGS_STORAGE_KEY } from "@/lib/settings";
 import { clamp, cn, isTypingTarget } from "@/lib/utils";
-import { downloadWorkspaceZip } from "@/lib/workspaceZip";
+import { downloadWorkspaceZip, type WorkspaceFile } from "@/lib/workspaceZip";
 import type { DragState, FileSnapshot, LoadedNotebook, OpenFileMeta } from "@/types/workspace";
 
 const EMPTY_GRAPH: GraphModel = { nodes: {}, groups: {}, wires: {} };
@@ -209,6 +221,12 @@ export function App(): ReactElement {
     () => readPanelLayout().inspectorCollapsed,
   );
   const [isTriggersOpen, setIsTriggersOpen] = useState(false);
+  // Cloud notebooks (#60): the signed-in user's saved workspaces in Turso.
+  const [isCloudOpen, setIsCloudOpen] = useState(false);
+  const [cloudList, setCloudList] = useState<NotebookSummary[]>([]);
+  const [cloudId, setCloudId] = useState<string | null>(null);
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [cloudError, setCloudError] = useState<string | null>(null);
   const [triggers, setTriggers] = useState<TriggerSpec[]>([]);
   const [triggersError, setTriggersError] = useState<string | null>(null);
   const [isLoadingTriggers, setIsLoadingTriggers] = useState(false);
@@ -1239,8 +1257,9 @@ export function App(): ReactElement {
   // Export every open file's .ipynb as one zip — a single "Download" is
   // ambiguous once the workspace spans multiple files. The active file carries
   // its live cells + run outputs; inactive files come from their snapshots.
-  const handleDownloadAll = useCallback(async (): Promise<void> => {
-    const files = openFiles.map((file) => {
+  // Serialize every open file's .ipynb — shared by zip export and cloud save.
+  const collectWorkspaceFiles = useCallback((): WorkspaceFile[] => {
+    return openFiles.map((file) => {
       if (file.id === activeFileId) {
         return {
           name: notebook.name,
@@ -1253,9 +1272,98 @@ export function App(): ReactElement {
         json: serializeNotebook(snap?.cells ?? [], snap?.doc ?? notebook.doc, {}),
       };
     });
-    await downloadWorkspaceZip(files);
-    setBaselineSources(notebook.cells.map((cell) => cell.source));
   }, [openFiles, activeFileId, notebook, outputsByCell]);
+
+  const handleDownloadAll = useCallback(async (): Promise<void> => {
+    await downloadWorkspaceZip(collectWorkspaceFiles());
+    setBaselineSources(notebook.cells.map((cell) => cell.source));
+  }, [collectWorkspaceFiles, notebook.cells]);
+
+  // --- Cloud notebooks (#60): save/open/delete the user's workspaces in Turso.
+  const refreshCloudList = useCallback(async (): Promise<void> => {
+    try {
+      setCloudList(await listNotebooks());
+    } catch {
+      // signed out / offline — leave the list as-is.
+    }
+  }, []);
+
+  const handleSaveToCloud = useCallback(async (): Promise<void> => {
+    setCloudBusy(true);
+    setCloudError(null);
+    try {
+      const content = serializeWorkspace(collectWorkspaceFiles());
+      if (cloudId !== null) {
+        await updateNotebook(cloudId, { name: notebook.name, content });
+      } else {
+        setCloudId((await createNotebook(notebook.name, content)).id);
+      }
+      await refreshCloudList();
+    } catch (err) {
+      setCloudError(err instanceof Error ? err.message : "save failed");
+    } finally {
+      setCloudBusy(false);
+    }
+  }, [collectWorkspaceFiles, cloudId, notebook.name, refreshCloudList]);
+
+  const handleOpenFromCloud = useCallback(
+    async (id: string): Promise<void> => {
+      setCloudBusy(true);
+      setCloudError(null);
+      try {
+        const record = await getNotebook(id);
+        const parsed = parseWorkspace(record.content).map((f) => ({
+          id: makeFileId(),
+          name: f.name,
+          ...parseNotebook(f.json),
+        }));
+        const first = parsed[0];
+        if (first === undefined) {
+          setCloudError("notebook is empty");
+          return;
+        }
+        snapshotsRef.current.clear();
+        for (const p of parsed.slice(1)) {
+          snapshotsRef.current.set(p.id, {
+            cells: p.cells,
+            doc: p.doc,
+            baseline: p.cells.map((c) => c.source),
+            fileHandle: null,
+          });
+        }
+        setOpenFiles(parsed.map((p) => ({ id: p.id, name: p.name })));
+        setActiveFileId(first.id);
+        setNotebook({ name: first.name, cells: first.cells, doc: first.doc });
+        setBaselineSources(first.cells.map((c) => c.source));
+        fileHandleRef.current = null;
+        resetTransient();
+        setCloudId(id);
+        setIsCloudOpen(false);
+      } catch (err) {
+        setCloudError(err instanceof Error ? err.message : "open failed");
+      } finally {
+        setCloudBusy(false);
+      }
+    },
+    [resetTransient],
+  );
+
+  const handleDeleteFromCloud = useCallback(
+    async (id: string): Promise<void> => {
+      setCloudBusy(true);
+      setCloudError(null);
+      try {
+        await deleteNotebook(id);
+        if (cloudId === id) setCloudId(null);
+        await refreshCloudList();
+      } catch (err) {
+        setCloudError(err instanceof Error ? err.message : "delete failed");
+      } finally {
+        setCloudBusy(false);
+      }
+    },
+    [cloudId, refreshCloudList],
+  );
 
   const handleSave = useCallback(async (): Promise<void> => {
     setSaveStatus("saving");
@@ -1494,6 +1602,20 @@ export function App(): ReactElement {
                 {saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "Saved" : "Save"}
               </Button>
             )}
+            {session.data && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setIsCloudOpen(true);
+                  void refreshCloudList();
+                }}
+                title="Save to / open from your account"
+              >
+                <Cloud className="mr-1.5 size-3.5" />
+                Cloud
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -1645,6 +1767,28 @@ export function App(): ReactElement {
           <ShortcutsDialog
             onClose={() => {
               setIsShortcutsOpen(false);
+            }}
+          />
+        )}
+
+        {isCloudOpen && (
+          <CloudNotebooksDialog
+            notebooks={cloudList}
+            currentName={notebook.name}
+            cloudId={cloudId}
+            busy={cloudBusy}
+            error={cloudError}
+            onSave={() => {
+              void handleSaveToCloud();
+            }}
+            onOpen={(id) => {
+              void handleOpenFromCloud(id);
+            }}
+            onDelete={(id) => {
+              void handleDeleteFromCloud(id);
+            }}
+            onClose={() => {
+              setIsCloudOpen(false);
             }}
           />
         )}

@@ -11,6 +11,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 
+import { handleApi } from "../src/server/api";
 import { sendWebResponse, toWebRequest } from "../src/server/http-bridge";
 
 type FetchHandler = { fetch: (request: Request) => Promise<Response> };
@@ -18,11 +19,10 @@ type FetchHandler = { fetch: (request: Request) => Promise<Response> };
 export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   try {
     const request = await toWebRequest(req);
-    const { pathname } = new URL(request.url);
 
-    if (pathname.startsWith("/api/auth/")) {
-      const { auth } = await import("../src/lib/auth");
-      await sendWebResponse(res, await auth.handler(request));
+    const apiResponse = await handleApi(request);
+    if (apiResponse) {
+      await sendWebResponse(res, apiResponse);
       return;
     }
 

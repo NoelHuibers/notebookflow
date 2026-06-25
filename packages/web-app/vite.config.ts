@@ -12,26 +12,31 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const graphCanvasSrc = path.resolve(here, "../graph-canvas/src");
 const webAppSrc = path.resolve(here, "src");
 
-// In production the Vercel function (api/index.ts) routes /api/auth/* to
-// BetterAuth. `vite dev` has no such function, so mount the same handler as dev
-// middleware for parity — lazily loaded (server-only) so the auth DB is touched
-// only when an /api/auth/* request arrives. enforce:"pre" runs it before
+// In production the Vercel function (api/index.ts) serves /api/* via handleApi.
+// `vite dev` has no such function, so mount the same dispatcher as dev
+// middleware for parity — lazily loaded (server-only) so the auth/notebooks DB
+// is touched only when an /api/* request arrives. enforce:"pre" runs it before
 // TanStack Start's SSR catch-all.
-function betterAuthDevPlugin(): Plugin {
+function serverApiDevPlugin(): Plugin {
   return {
-    name: "notebookflow:better-auth-dev",
+    name: "notebookflow:server-api-dev",
     enforce: "pre",
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        if (!req.url?.startsWith("/api/auth/")) {
+        if (!req.url?.startsWith("/api/")) {
           next();
           return;
         }
         (async () => {
-          const mod = (await server.ssrLoadModule("/src/lib/auth.ts")) as {
-            auth: { handler: (request: Request) => Promise<Response> };
+          const mod = (await server.ssrLoadModule("/src/server/api.ts")) as {
+            handleApi: (request: Request) => Promise<Response | null>;
           };
-          await sendWebResponse(res, await mod.auth.handler(await toWebRequest(req)));
+          const response = await mod.handleApi(await toWebRequest(req));
+          if (response) {
+            await sendWebResponse(res, response);
+            return;
+          }
+          next();
         })().catch(next);
       });
     },
@@ -53,7 +58,7 @@ export default defineConfig(({ mode }) => {
     // so we bridge that handler to a Vercel serverless function in api/ (see
     // api/index.ts + vercel.json). Tailwind, the graph-canvas source alias, the @/
     // alias, and Vite env all carry over unchanged.
-    plugins: [betterAuthDevPlugin(), tailwindcss(), tanstackStart(), react()],
+    plugins: [serverApiDevPlugin(), tailwindcss(), tanstackStart(), react()],
     resolve: {
       alias: [
         { find: "@notebookflow/graph-canvas/sync", replacement: `${graphCanvasSrc}/sync/index.ts` },

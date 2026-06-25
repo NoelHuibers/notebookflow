@@ -99,6 +99,28 @@ export const jwks = sqliteTable("jwks", {
   expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
 });
 
+// NotebookFlow per-user persistence (#60). `content` is the serialized
+// workspace JSON ({ files: { name, json }[] }) — the same shape as the zip
+// export. Scoped to the owning user; cascade-deleted with the account.
+export const notebook = sqliteTable(
+  "notebook",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    content: text("content").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (table) => [index("notebook_userId_idx").on(table.userId)],
+);
+
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),
