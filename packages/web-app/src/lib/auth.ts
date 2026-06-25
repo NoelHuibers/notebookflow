@@ -13,8 +13,8 @@
  */
 
 import { betterAuth } from "better-auth";
-import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { jwt } from "better-auth/plugins/jwt";
+import { drizzleAdapter } from "./db/drizzle-adapter.js";
 
 import { db } from "./db/index.js";
 import * as schema from "./db/schema.js";
