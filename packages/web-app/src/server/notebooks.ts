@@ -9,9 +9,9 @@
 
 import { and, desc, eq } from "drizzle-orm";
 
-import { auth } from "../lib/auth";
-import { db } from "../lib/db";
-import { notebook } from "../lib/db/schema";
+import { auth } from "../lib/auth.js";
+import { db } from "../lib/db/index.js";
+import { notebook } from "../lib/db/schema.js";
 
 export interface NotebookSummary {
   id: string;

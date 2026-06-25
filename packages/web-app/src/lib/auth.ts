@@ -16,8 +16,8 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { jwt } from "better-auth/plugins/jwt";
 
-import { db } from "./db";
-import * as schema from "./db/schema";
+import { db } from "./db/index.js";
+import * as schema from "./db/schema.js";
 
 // Destructured (not process.env.X) to satisfy both biome's literal-key rule and
 // tsc's noPropertyAccessFromIndexSignature.

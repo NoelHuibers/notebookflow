@@ -11,7 +11,7 @@
 import { type Config, createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 
-import * as schema from "./schema";
+import * as schema from "./schema.js";
 
 // Destructured (not process.env.X) to satisfy both biome's literal-key rule and
 // tsc's noPropertyAccessFromIndexSignature.
