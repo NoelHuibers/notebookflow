@@ -121,6 +121,24 @@ export const notebook = sqliteTable(
   (table) => [index("notebook_userId_idx").on(table.userId)],
 );
 
+// Opt-in server-side BYOK provider key (#61). One per user; the key is stored
+// AES-256-GCM-encrypted at rest (never plaintext), decrypted only in-memory to
+// hand back to the owner's Settings / outbound LLM calls.
+export const providerKey = sqliteTable("provider_key", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  encryptedKey: text("encrypted_key").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+    .notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+    .notNull(),
+});
+
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),

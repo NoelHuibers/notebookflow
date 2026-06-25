@@ -113,6 +113,7 @@ import {
 import { sortPalette } from "@/lib/palette";
 import { PANEL_STORAGE_KEY, readPanelLayout } from "@/lib/panels";
 import { buildPipelineDef, stripMarkerLine } from "@/lib/pipeline";
+import { deleteProviderKey, getProviderKey, saveProviderKey } from "@/lib/providerKeyApi";
 import type { UserSettings } from "@/lib/settings";
 import { applyTheme, readUserSettings, SETTINGS_STORAGE_KEY } from "@/lib/settings";
 import { clamp, cn, isTypingTarget } from "@/lib/utils";
@@ -227,6 +228,8 @@ export function App(): ReactElement {
   const [cloudId, setCloudId] = useState<string | null>(null);
   const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudError, setCloudError] = useState<string | null>(null);
+  // Server-side encrypted provider key (#61): "saved" once one exists in the account.
+  const [accountKeyState, setAccountKeyState] = useState<"none" | "saved" | "saving">("none");
   const [triggers, setTriggers] = useState<TriggerSpec[]>([]);
   const [triggersError, setTriggersError] = useState<string | null>(null);
   const [isLoadingTriggers, setIsLoadingTriggers] = useState(false);
@@ -1365,6 +1368,60 @@ export function App(): ReactElement {
     [cloudId, refreshCloudList],
   );
 
+  // Load the account's encrypted provider key on sign-in (#61). On a fresh
+  // device (no local key) it populates Settings; otherwise it just marks
+  // "saved" so a locally-entered key isn't clobbered.
+  useEffect(() => {
+    if (!session.data) {
+      setAccountKeyState("none");
+      return;
+    }
+    let cancelled = false;
+    getProviderKey()
+      .then((key) => {
+        if (cancelled || key === null) return;
+        setAccountKeyState("saved");
+        setSettings((prev) =>
+          prev.llmApiKey.trim() === ""
+            ? {
+                ...prev,
+                llmProvider: key.provider || prev.llmProvider,
+                llmModel: key.model,
+                llmApiKey: key.apiKey,
+              }
+            : prev,
+        );
+      })
+      .catch(() => {
+        /* signed out / offline */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session.data]);
+
+  const handleSaveKeyToAccount = useCallback(async (): Promise<void> => {
+    setAccountKeyState("saving");
+    try {
+      await saveProviderKey({
+        provider: settings.llmProvider,
+        model: settings.llmModel,
+        apiKey: settings.llmApiKey,
+      });
+      setAccountKeyState("saved");
+    } catch {
+      setAccountKeyState("none");
+    }
+  }, [settings.llmProvider, settings.llmModel, settings.llmApiKey]);
+
+  const handleRemoveKeyFromAccount = useCallback(async (): Promise<void> => {
+    try {
+      await deleteProviderKey();
+    } finally {
+      setAccountKeyState("none");
+    }
+  }, []);
+
   const handleSave = useCallback(async (): Promise<void> => {
     setSaveStatus("saving");
     try {
@@ -1759,6 +1816,14 @@ export function App(): ReactElement {
             onChange={setSettings}
             onClose={() => {
               setIsSettingsOpen(false);
+            }}
+            signedIn={session.data !== null && session.data !== undefined}
+            accountKeyState={accountKeyState}
+            onSaveKeyToAccount={() => {
+              void handleSaveKeyToAccount();
+            }}
+            onRemoveKeyFromAccount={() => {
+              void handleRemoveKeyFromAccount();
             }}
           />
         )}

@@ -20,5 +20,10 @@ export async function handleApi(request: Request): Promise<Response | null> {
     return handleNotebooksRequest(request);
   }
 
+  if (pathname === "/api/provider-key") {
+    const { handleProviderKeyRequest } = await import("./providerKey");
+    return handleProviderKeyRequest(request);
+  }
+
   return null;
 }
