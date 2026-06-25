@@ -1773,7 +1773,7 @@ export function App(): ReactElement {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="absolute left-3 top-3 z-10 h-7 px-2 text-[11px] shadow-sm"
+                    className="absolute right-3 top-3 z-10 h-7 px-2 text-[11px] shadow-sm"
                     onClick={() => {
                       setIsPaletteOpen(true);
                     }}

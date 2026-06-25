@@ -342,7 +342,7 @@ function CanvasInner(props: CanvasProps): ReactElement {
             className="!rounded-md !border !bg-card"
           />
         )}
-        <Panel position="top-right">
+        <Panel position="top-left">
           <CanvasBreadcrumbs graph={graph} />
         </Panel>
         {runSummary !== undefined && runSummary !== null && (
