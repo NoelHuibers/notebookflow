@@ -12,6 +12,7 @@ import type { ReactElement } from "react";
 import { lazy, Suspense } from "react";
 
 import type { NbOutput } from "@/lib/EngineClient";
+import { useI18n } from "@/lib/i18n";
 
 import { CellOutputs } from "./CellOutputs";
 
@@ -32,11 +33,18 @@ export function CellEditor({
   isStreaming = false,
   onChange,
 }: CellEditorProps): ReactElement {
+  const { t } = useI18n();
+  const typeLabelKey =
+    cell.cellType === "markdown"
+      ? "cells.typeMarkdown"
+      : cell.cellType === "raw"
+        ? "cells.typeRaw"
+        : "cells.typeCode";
   return (
     <div className="overflow-hidden rounded-md border bg-card">
       <div className="flex items-center justify-between border-b px-3 py-1.5 text-[11px] text-muted-foreground">
-        <span className="font-mono">cell {index}</span>
-        <span className="uppercase tracking-wider">{cell.cellType}</span>
+        <span className="font-mono">{t("cells.cellLabel", { index })}</span>
+        <span className="uppercase tracking-wider">{t(typeLabelKey)}</span>
       </div>
       <Suspense fallback={<EditorFallback source={cell.source} />}>
         <CodeMirrorEditor

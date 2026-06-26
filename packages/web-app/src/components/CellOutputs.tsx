@@ -18,6 +18,7 @@ import type { ReactElement } from "react";
 import { useMemo } from "react";
 
 import type { NbOutput } from "@/lib/EngineClient";
+import { useI18n } from "@/lib/i18n";
 
 export interface CellOutputsProps {
   outputs: NbOutput[];
@@ -77,11 +78,12 @@ export function CellOutputs({
 }
 
 function StreamingCursor(): ReactElement {
+  const { t } = useI18n();
   return (
     <span
       role="img"
-      aria-label="Streaming"
-      title="Node is executing — output streaming"
+      aria-label={t("cells.streaming")}
+      title={t("cells.streamingTitle")}
       className="ml-px inline-block h-[1em] w-[0.5em] translate-y-[0.15em] animate-pulse rounded-sm bg-current align-middle"
     />
   );
@@ -118,6 +120,7 @@ function OutputBlock({ output, trailingCursor = false }: OutputBlockProps): Reac
 }
 
 function RichOutput({ data }: { data: Record<string, string> }): ReactElement {
+  const { t } = useI18n();
   const html = data["text/html"];
   const sanitized = useMemo(() => {
     if (html === undefined) {
@@ -136,7 +139,7 @@ function RichOutput({ data }: { data: Record<string, string> }): ReactElement {
     return (
       <img
         src={`data:image/png;base64,${png}`}
-        alt="Cell output figure"
+        alt={t("cells.outputFigureAlt")}
         className="max-w-full rounded border bg-white"
       />
     );

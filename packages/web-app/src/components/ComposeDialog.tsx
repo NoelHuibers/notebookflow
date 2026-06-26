@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { PipelineProposal } from "@/lib/EngineClient";
+import { useI18n } from "@/lib/i18n";
 
 interface ComposeDialogProps {
   prompt: string;
@@ -27,20 +28,21 @@ export function ComposeDialog({
   onApply,
   onClose,
 }: ComposeDialogProps): ReactElement {
+  const { t } = useI18n();
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-background/70 p-6 backdrop-blur">
       <div className="flex max-h-[80vh] w-full max-w-2xl flex-col gap-3 overflow-hidden rounded-md border bg-card p-4 shadow-lg">
         <div className="flex items-center justify-between">
           <span className="flex items-center gap-2 text-sm font-semibold">
             <Wand2 className="size-4 text-primary" />
-            Compose a pipeline
+            {t("compose.title")}
           </span>
           <Button
             variant="ghost"
             size="sm"
             className="h-7 px-1.5"
             onClick={onClose}
-            aria-label="Dismiss"
+            aria-label={t("compose.dismiss")}
           >
             <X className="size-3.5" />
           </Button>
@@ -51,8 +53,8 @@ export function ComposeDialog({
           onChange={(event) => {
             onPromptChange(event.target.value);
           }}
-          placeholder="e.g. Load customers.csv, filter for EU rows, plot revenue by region"
-          aria-label="Pipeline description"
+          placeholder={t("compose.promptPlaceholder")}
+          aria-label={t("compose.promptLabel")}
           className="resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
         />
         {errorMessage !== null && (
@@ -62,11 +64,11 @@ export function ComposeDialog({
         )}
         <div className="flex items-center gap-2">
           <Button variant="default" size="sm" onClick={onSubmit} disabled={isComposing}>
-            {isComposing ? "Drafting…" : "Draft pipeline"}
+            {isComposing ? t("compose.drafting") : t("compose.draft")}
           </Button>
           {result !== null && result.cellSources.length > 0 && (
             <Button variant="outline" size="sm" onClick={onApply}>
-              Replace notebook with draft
+              {t("compose.replaceWithDraft")}
             </Button>
           )}
           {result !== null && (

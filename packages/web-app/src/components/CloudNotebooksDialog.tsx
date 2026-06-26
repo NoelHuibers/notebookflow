@@ -2,6 +2,7 @@ import { Cloud, Trash2, X } from "lucide-react";
 import type { ReactElement } from "react";
 
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/lib/i18n";
 import type { NotebookSummary } from "@/lib/notebooksApi";
 
 interface CloudNotebooksDialogProps {
@@ -27,20 +28,21 @@ export function CloudNotebooksDialog({
   onDelete,
   onClose,
 }: CloudNotebooksDialogProps): ReactElement {
+  const { t } = useI18n();
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-background/70 p-6 pt-[12vh] backdrop-blur">
       <div className="w-full max-w-md rounded-md border bg-card p-4 shadow-xl">
         <div className="mb-3 flex items-center justify-between">
           <span className="flex items-center gap-2 text-sm font-semibold">
             <Cloud className="size-4 text-primary" />
-            My notebooks
+            {t("cloud.title")}
           </span>
           <Button
             variant="ghost"
             size="sm"
             className="h-7 px-1.5"
             onClick={onClose}
-            aria-label="Dismiss"
+            aria-label={t("cloud.dismiss")}
           >
             <X className="size-3.5" />
           </Button>
@@ -54,18 +56,16 @@ export function CloudNotebooksDialog({
           onClick={onSave}
         >
           {busy
-            ? "Saving…"
+            ? t("cloud.saving")
             : cloudId
-              ? `Update “${currentName}”`
-              : `Save “${currentName}” to cloud`}
+              ? t("cloud.update", { name: currentName })
+              : t("cloud.saveToCloud", { name: currentName })}
         </Button>
 
         {error !== null && <p className="mb-2 text-[12px] text-destructive">{error}</p>}
 
         {notebooks.length === 0 ? (
-          <p className="py-4 text-center text-[12px] text-muted-foreground">
-            No saved notebooks yet.
-          </p>
+          <p className="py-4 text-center text-[12px] text-muted-foreground">{t("cloud.empty")}</p>
         ) : (
           <ul className="flex max-h-[40vh] flex-col gap-1 overflow-auto">
             {notebooks.map((nb) => (
@@ -92,7 +92,7 @@ export function CloudNotebooksDialog({
                   className="h-7 px-1.5 text-muted-foreground hover:text-destructive"
                   disabled={busy}
                   onClick={() => onDelete(nb.id)}
-                  aria-label={`Delete ${nb.name}`}
+                  aria-label={t("cloud.delete", { name: nb.name })}
                 >
                   <Trash2 className="size-3.5" />
                 </Button>

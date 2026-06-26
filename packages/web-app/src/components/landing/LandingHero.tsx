@@ -25,6 +25,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { Trans } from "react-i18next";
+import { useI18n } from "@/lib/i18n";
 import { GraphScene } from "./GraphScene";
 import { DESIGN_H, DESIGN_W, IDLE_DOT, RUN_OK, RUN_ORDER, RUN_TEAL } from "./graph-data";
 import { useReducedMotion } from "./useReducedMotion";
@@ -321,43 +323,10 @@ function StageScaler({
   );
 }
 
-interface Caption {
-  kicker: string;
-  body: ReactNode;
-}
-
-const CAPTIONS: Caption[] = [
-  {
-    kicker: "A notebook is a graph",
-    body: (
-      <>
-        Mark cell groups with <code className="nf-code">{"# @node:"}</code> and NotebookFlow derives
-        the DAG. Your
-        <code className="nf-code">.ipynb</code> stays the source of truth.
-      </>
-    ),
-  },
-  {
-    kicker: "Notebooks link to notebooks",
-    body: (
-      <>
-        Wire outputs across files with cross-notebook refs —{" "}
-        <code className="nf-code">data:Node.port</code>. Reuse whole pipelines like functions.
-      </>
-    ),
-  },
-  {
-    kicker: "Run it",
-    body: (
-      <>
-        Execute in dependency order. Stream results, charts, and AI output straight back into your
-        cells.
-      </>
-    ),
-  },
-];
+const CAPTION_KEYS = ["cap1", "cap2", "cap3"] as const;
 
 function Captions(): ReactElement {
+  const { t } = useI18n();
   return (
     <div className="absolute inset-x-0 bottom-0 z-10">
       <div className="relative mx-auto max-w-6xl px-5 pb-12 sm:pb-16">
@@ -365,46 +334,50 @@ function Captions(): ReactElement {
         <div className="nf-cap" data-cap="0">
           <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card/80 px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur">
             <span className="size-1.5 rounded-full bg-primary" />
-            Private beta
+            {t("landing.badge")}
           </span>
           <h1 className="mt-4 max-w-2xl text-balance text-4xl font-bold leading-[1.05] tracking-tight sm:text-6xl">
-            n8n for your <span className="text-primary">notebooks</span>.
+            <Trans
+              i18nKey="landing.heroTitle"
+              components={{ accent: <span className="text-primary" /> }}
+            />
           </h1>
           <p className="mt-4 max-w-xl text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
-            Turn notebooks and cell groups into visual pipelines — with AI assistance,
-            bring-your-own-key models, and bidirectional sync across the web, VS Code, and
-            JupyterLab.
+            {t("landing.heroSubtitle")}
           </p>
           <div className="mt-6 flex flex-wrap items-center gap-3">
             <Link
               to="/app"
               className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-opacity hover:opacity-90"
             >
-              Launch app
+              {t("common.launchApp")}
               <ArrowRight className="size-4" />
             </Link>
             <Link
               to="/login"
               className="rounded-lg border border-border bg-card/80 px-5 py-2.5 text-sm font-semibold backdrop-blur transition-colors hover:bg-accent"
             >
-              Sign in
+              {t("common.signIn")}
             </Link>
           </div>
         </div>
 
         {/* Captions 1–3 — stacked in the same spot, crossfaded by the timeline */}
-        {CAPTIONS.map((c, i) => (
+        {CAPTION_KEYS.map((key, i) => (
           <div
-            key={c.kicker}
+            key={key}
             className="nf-cap absolute inset-x-5 bottom-12 sm:bottom-16"
             data-cap={i + 1}
             style={{ opacity: 0 }}
           >
             <h2 className="text-2xl font-bold tracking-tight text-primary sm:text-3xl">
-              {c.kicker}
+              {t(`landing.${key}Kicker`)}
             </h2>
             <p className="mt-3 max-w-xl text-pretty text-base leading-relaxed text-foreground/90 sm:text-lg">
-              {c.body}
+              <Trans
+                i18nKey={`landing.${key}Body`}
+                components={{ code: <code className="nf-code" /> }}
+              />
             </p>
           </div>
         ))}
@@ -416,10 +389,11 @@ function Captions(): ReactElement {
 const cueStyle: CSSProperties = { writingMode: "vertical-rl" };
 
 function ScrollCue(): ReactElement {
+  const { t } = useI18n();
   return (
     <div className="nf-scrollcue pointer-events-none absolute bottom-6 right-6 z-10 flex flex-col items-center gap-2 text-muted-foreground">
       <span className="text-[10px] font-medium uppercase tracking-[0.2em]" style={cueStyle}>
-        Scroll
+        {t("landing.scroll")}
       </span>
       <span className="h-10 w-px animate-pulse bg-gradient-to-b from-primary to-transparent" />
     </div>

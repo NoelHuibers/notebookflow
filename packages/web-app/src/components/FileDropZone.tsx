@@ -11,12 +11,15 @@ import { Upload } from "lucide-react";
 import type { ReactElement, ReactNode } from "react";
 import { useCallback, useRef, useState } from "react";
 
+import { useI18n } from "@/lib/i18n";
+
 export interface FileDropZoneProps {
   onFile: (text: string, name: string) => void;
   children: ReactNode;
 }
 
 export function FileDropZone({ onFile, children }: FileDropZoneProps): ReactElement {
+  const { t } = useI18n();
   const [isDragging, setIsDragging] = useState(false);
   const dragDepthRef = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -110,14 +113,14 @@ export function FileDropZone({ onFile, children }: FileDropZoneProps): ReactElem
         className="absolute right-4 bottom-4 inline-flex items-center gap-2 rounded-md border bg-card px-3 py-2 text-xs shadow-md hover:bg-accent"
       >
         <Upload className="size-3.5" />
-        Open notebook
+        {t("files.openNotebookButton")}
       </button>
       {isDragging && (
         <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
           <div className="rounded-lg border-2 border-dashed border-primary px-8 py-6 text-center">
             <Upload className="mx-auto mb-2 size-8 text-primary" />
-            <p className="text-sm font-medium">Drop your .ipynb</p>
-            <p className="text-xs text-muted-foreground">Parses cells and renders the canvas</p>
+            <p className="text-sm font-medium">{t("files.dropTitle")}</p>
+            <p className="text-xs text-muted-foreground">{t("files.dropSubtitle")}</p>
           </div>
         </div>
       )}

@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { AskAnswer } from "@/lib/EngineClient";
+import { useI18n } from "@/lib/i18n";
 
 interface AskPaletteProps {
   prompt: string;
@@ -26,6 +27,7 @@ export function AskPalette({
   onSubmit,
   onClose,
 }: AskPaletteProps): ReactElement {
+  const { t } = useI18n();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   useEffect(() => {
     textareaRef.current?.focus();
@@ -46,14 +48,14 @@ export function AskPalette({
         <div className="flex items-center justify-between">
           <span className="flex items-center gap-2 text-sm font-semibold">
             <Command className="size-4 text-primary" />
-            Ask AI
+            {t("ask.title")}
           </span>
           <Button
             variant="ghost"
             size="sm"
             className="h-7 px-1.5"
             onClick={onClose}
-            aria-label="Dismiss"
+            aria-label={t("ask.dismiss")}
           >
             <X className="size-3.5" />
           </Button>
@@ -66,8 +68,8 @@ export function AskPalette({
             onPromptChange(event.target.value);
           }}
           onKeyDown={handleKeyDown}
-          placeholder="Ask anything — describe what you want to do, request an explanation, or ask a pandas question"
-          aria-label="Ask AI prompt"
+          placeholder={t("ask.promptPlaceholder")}
+          aria-label={t("ask.promptLabel")}
           className="resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
         />
         {errorMessage !== null && (
@@ -77,16 +79,14 @@ export function AskPalette({
         )}
         <div className="flex items-center gap-2">
           <Button variant="default" size="sm" onClick={onSubmit} disabled={isAsking}>
-            {isAsking ? "Thinking…" : "Ask"}
+            {isAsking ? t("ask.thinking") : t("ask.ask")}
           </Button>
           {result !== null && (
             <Badge variant="outline" className="font-mono text-[10px]">
               {result.backend}
             </Badge>
           )}
-          <span className="ml-auto text-[10px] text-muted-foreground">
-            ⌘/Ctrl+Enter to send · Esc to close
-          </span>
+          <span className="ml-auto text-[10px] text-muted-foreground">{t("ask.shortcutHint")}</span>
         </div>
         {result !== null && (
           <ScrollArea className="min-h-[120px] flex-1 rounded border bg-muted/30 p-3">

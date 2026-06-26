@@ -93,6 +93,7 @@ import type {
 import { EngineClient } from "@/lib/EngineClient";
 import { buildGenerationStatus, renderEvent } from "@/lib/events";
 import { canSaveInPlace, pickSaveFileHandle, writeFileHandle } from "@/lib/fileSystemAccess";
+import { useI18n } from "@/lib/i18n";
 import { openInJupyterLab } from "@/lib/jupyter";
 import type { IpynbDoc } from "@/lib/notebook";
 import {
@@ -151,6 +152,7 @@ function makeFileId(): string {
 }
 
 export function App(): ReactElement {
+  const { t } = useI18n();
   const [notebook, setNotebook] = useState<LoadedNotebook>(() => bootstrapFromFixture());
   // Multi-file workspace. The active file's live content is `notebook`; other
   // open files freeze into snapshotsRef until switched back to.
@@ -515,11 +517,11 @@ export function App(): ReactElement {
         resetTransient();
         setError(null);
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : "unknown error";
-        setError(`Failed to load ${name}: ${message}`);
+        const message = err instanceof Error ? err.message : t("app.errors.unknown");
+        setError(t("app.errors.loadFailed", { name, message }));
       }
     },
-    [openFiles, snapshotActive, switchToFile, resetTransient],
+    [openFiles, snapshotActive, switchToFile, resetTransient, t],
   );
 
   const closeFile = useCallback(
@@ -580,21 +582,21 @@ export function App(): ReactElement {
         .uploadDataFile(file)
         .then(() => refreshDataFiles())
         .catch((err: unknown) => {
-          setError(err instanceof Error ? err.message : "Upload failed");
+          setError(err instanceof Error ? err.message : t("app.errors.uploadFailed"));
         });
     };
     input.click();
-  }, [refreshDataFiles]);
+  }, [refreshDataFiles, t]);
   const handleDeleteData = useCallback(
     (name: string): void => {
       void clientRef.current
         .deleteDataFile(name)
         .then(() => refreshDataFiles())
         .catch((err: unknown) => {
-          setError(err instanceof Error ? err.message : "Delete failed");
+          setError(err instanceof Error ? err.message : t("app.errors.deleteFailed"));
         });
     },
-    [refreshDataFiles],
+    [refreshDataFiles, t],
   );
   // Load (and reload) the data-file list when the engine target changes
   // (the client is rebuilt then, so we refetch from the new engine).
@@ -766,11 +768,11 @@ export function App(): ReactElement {
           );
         })
         .catch((err: unknown) => {
-          const message = err instanceof Error ? err.message : "unknown error";
-          setError(`Could not add ${manifest.name}: ${message}`);
+          const message = err instanceof Error ? err.message : t("app.errors.unknown");
+          setError(t("app.errors.addNodeNamed", { name: manifest.name, message }));
         });
     },
-    [notebook.name],
+    [notebook.name, t],
   );
 
   // One-click: turn an uploaded data file into an input node that reads it.
@@ -799,10 +801,10 @@ export function App(): ReactElement {
           Date.now(),
         )
         .catch((err: unknown) => {
-          setError(err instanceof Error ? err.message : "Could not add node");
+          setError(err instanceof Error ? err.message : t("app.errors.addNode"));
         });
     },
-    [notebook.name],
+    [notebook.name, t],
   );
 
   // Drag-from-palette drop handler: look the manifest up by id, then funnel
@@ -853,13 +855,13 @@ export function App(): ReactElement {
         if (cancelled) {
           return;
         }
-        const message = err instanceof Error ? err.message : "unknown error";
-        setPaletteError(`Could not load node registry: ${message}`);
+        const message = err instanceof Error ? err.message : t("app.errors.unknown");
+        setPaletteError(t("app.errors.loadRegistry", { message }));
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
   // Map each node to the variable names defined across its cell(s).
   const variablesByNode = useMemo<Record<string, string[]>>(() => {
@@ -941,16 +943,16 @@ export function App(): ReactElement {
       const result = await clientRef.current.explainPipeline(pipelineDef);
       setExplanation(result);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "unknown error";
-      setError(`Could not explain pipeline: ${message}`);
+      const message = err instanceof Error ? err.message : t("app.errors.unknown");
+      setError(t("app.errors.explainPipeline", { message }));
     } finally {
       setIsExplaining(false);
     }
-  }, [isExplaining, pipelineDef]);
+  }, [isExplaining, pipelineDef, t]);
 
   const handleCompose = useCallback(async (): Promise<void> => {
     if (composePrompt.trim() === "") {
-      setComposeError("Type a sentence describing the pipeline you want.");
+      setComposeError(t("app.errors.composeEmpty"));
       return;
     }
     setIsComposing(true);
@@ -959,12 +961,12 @@ export function App(): ReactElement {
       const result = await clientRef.current.proposePipeline(composePrompt.trim());
       setComposeResult(result);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "unknown error";
-      setComposeError(`Could not compose pipeline: ${message}`);
+      const message = err instanceof Error ? err.message : t("app.errors.unknown");
+      setComposeError(t("app.errors.composePipeline", { message }));
     } finally {
       setIsComposing(false);
     }
-  }, [composePrompt]);
+  }, [composePrompt, t]);
 
   const refreshTriggers = useCallback(async (): Promise<void> => {
     setIsLoadingTriggers(true);
@@ -973,12 +975,12 @@ export function App(): ReactElement {
       const list = await clientRef.current.listTriggers();
       setTriggers(list);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "unknown error";
-      setTriggersError(`Could not load triggers: ${message}`);
+      const message = err instanceof Error ? err.message : t("app.errors.unknown");
+      setTriggersError(t("app.errors.loadTriggers", { message }));
     } finally {
       setIsLoadingTriggers(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!isTriggersOpen) {
@@ -989,7 +991,7 @@ export function App(): ReactElement {
 
   const handleAsk = useCallback(async (): Promise<void> => {
     if (askPrompt.trim() === "") {
-      setAskError("Ask a question or describe what you'd like to do.");
+      setAskError(t("app.errors.askEmpty"));
       return;
     }
     setIsAsking(true);
@@ -1002,12 +1004,12 @@ export function App(): ReactElement {
       const result = await clientRef.current.askLLM(askPrompt.trim(), pipeline);
       setAskResult(result);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "unknown error";
-      setAskError(`Could not reach the engine: ${message}`);
+      const message = err instanceof Error ? err.message : t("app.errors.unknown");
+      setAskError(t("app.errors.reachEngine", { message }));
     } finally {
       setIsAsking(false);
     }
-  }, [askPrompt, pipelineDef]);
+  }, [askPrompt, pipelineDef, t]);
 
   const handleApplyProposal = useCallback((): void => {
     if (composeResult === null || composeResult.cellSources.length === 0) {
@@ -1167,13 +1169,13 @@ export function App(): ReactElement {
         setConfigStatus(buildGenerationStatus(readNotebookflowMetadata(metadata)));
       })
       .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : "unknown error";
-        setConfigError(`Could not update ${selected.name}: ${message}`);
+        const message = err instanceof Error ? err.message : t("app.errors.unknown");
+        setConfigError(t("app.errors.updateNode", { name: selected.name, message }));
       })
       .finally(() => {
         setIsConfigSubmitting(false);
       });
-  }, [configDraft, notebook.cells, selected, selectedManifest]);
+  }, [configDraft, notebook.cells, selected, selectedManifest, t]);
 
   const handleRun = useCallback((): void => {
     if (isRunning) {
@@ -1249,14 +1251,14 @@ export function App(): ReactElement {
         },
       })
       .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : "unknown error";
-        setError(`Pipeline run failed: ${message}`);
+        const message = err instanceof Error ? err.message : t("app.errors.unknown");
+        setError(t("app.errors.runFailed", { message }));
       })
       .finally(() => {
         setIsRunning(false);
         setStreamingCellIndex(null);
       });
-  }, [isRunning, pipelineDef, graph]);
+  }, [isRunning, pipelineDef, graph, t]);
 
   // Export every open file's .ipynb as one zip — a single "Download" is
   // ambiguous once the workspace spans multiple files. The active file carries
@@ -1304,11 +1306,11 @@ export function App(): ReactElement {
       }
       await refreshCloudList();
     } catch (err) {
-      setCloudError(err instanceof Error ? err.message : "save failed");
+      setCloudError(err instanceof Error ? err.message : t("app.errors.cloudSaveFailed"));
     } finally {
       setCloudBusy(false);
     }
-  }, [collectWorkspaceFiles, cloudId, notebook.name, refreshCloudList]);
+  }, [collectWorkspaceFiles, cloudId, notebook.name, refreshCloudList, t]);
 
   const handleOpenFromCloud = useCallback(
     async (id: string): Promise<void> => {
@@ -1323,7 +1325,7 @@ export function App(): ReactElement {
         }));
         const first = parsed[0];
         if (first === undefined) {
-          setCloudError("notebook is empty");
+          setCloudError(t("app.errors.cloudEmpty"));
           return;
         }
         snapshotsRef.current.clear();
@@ -1344,12 +1346,12 @@ export function App(): ReactElement {
         setCloudId(id);
         setIsCloudOpen(false);
       } catch (err) {
-        setCloudError(err instanceof Error ? err.message : "open failed");
+        setCloudError(err instanceof Error ? err.message : t("app.errors.cloudOpenFailed"));
       } finally {
         setCloudBusy(false);
       }
     },
-    [resetTransient],
+    [resetTransient, t],
   );
 
   const handleDeleteFromCloud = useCallback(
@@ -1361,12 +1363,12 @@ export function App(): ReactElement {
         if (cloudId === id) setCloudId(null);
         await refreshCloudList();
       } catch (err) {
-        setCloudError(err instanceof Error ? err.message : "delete failed");
+        setCloudError(err instanceof Error ? err.message : t("app.errors.cloudDeleteFailed"));
       } finally {
         setCloudBusy(false);
       }
     },
-    [cloudId, refreshCloudList],
+    [cloudId, refreshCloudList, t],
   );
 
   // Load the account's encrypted provider key on sign-in (#61). On a fresh
@@ -1435,7 +1437,7 @@ export function App(): ReactElement {
           suggestedName,
           types: [
             {
-              description: "Jupyter notebook",
+              description: t("app.save.pickerDescription"),
               accept: { "application/x-ipynb+json": [".ipynb"] },
             },
           ],
@@ -1460,10 +1462,10 @@ export function App(): ReactElement {
       if (err instanceof Error && err.name === "AbortError") {
         return;
       }
-      const message = err instanceof Error ? err.message : "unknown error";
-      setError(`Save failed: ${message}`);
+      const message = err instanceof Error ? err.message : t("app.errors.unknown");
+      setError(t("app.errors.saveFailed", { message }));
     }
-  }, [notebook, outputsByCell]);
+  }, [notebook, outputsByCell, t]);
 
   const handleReingest = useCallback((): void => {
     const engine = engineRef.current;
@@ -1652,12 +1654,16 @@ export function App(): ReactElement {
                 disabled={saveStatus === "saving"}
                 title={
                   fileHandleRef.current === null
-                    ? "Pick a file once; subsequent saves overwrite it"
-                    : "Save changes back to disk"
+                    ? t("app.toolbar.saveTitleFirst")
+                    : t("app.toolbar.saveTitleAgain")
                 }
               >
                 <Save className="mr-1.5 size-3.5" />
-                {saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "Saved" : "Save"}
+                {saveStatus === "saving"
+                  ? t("app.toolbar.saving")
+                  : saveStatus === "saved"
+                    ? t("app.toolbar.saved")
+                    : t("app.toolbar.save")}
               </Button>
             )}
             {session.data && (
@@ -1668,10 +1674,10 @@ export function App(): ReactElement {
                   setIsCloudOpen(true);
                   void refreshCloudList();
                 }}
-                title="Save to / open from your account"
+                title={t("app.toolbar.cloudTitle")}
               >
                 <Cloud className="mr-1.5 size-3.5" />
-                Cloud
+                {t("app.toolbar.cloud")}
               </Button>
             )}
             <Button
@@ -1680,10 +1686,10 @@ export function App(): ReactElement {
               onClick={() => {
                 setIsTriggersOpen(true);
               }}
-              title="Manage triggers (manual / cron / file-watch / webhook)"
+              title={t("app.toolbar.triggersTitle")}
             >
               <Zap className="mr-1.5 size-3.5" />
-              Triggers
+              {t("app.toolbar.triggers")}
               {triggers.length > 0 && (
                 <Badge variant="outline" className="ml-2 px-1 font-mono text-[10px]">
                   {triggers.length}
@@ -1697,10 +1703,10 @@ export function App(): ReactElement {
                 void handleExplain();
               }}
               disabled={isExplaining}
-              title="Ask Claude (or the template fallback) to describe what this pipeline does"
+              title={t("app.toolbar.explainTitle")}
             >
               <Sparkles className="mr-1.5 size-3.5" />
-              {isExplaining ? "Explaining…" : "Explain"}
+              {isExplaining ? t("app.toolbar.explaining") : t("app.toolbar.explain")}
             </Button>
             <Button
               variant="ghost"
@@ -1708,10 +1714,10 @@ export function App(): ReactElement {
               onClick={() => {
                 setIsComposeOpen(true);
               }}
-              title="Describe a pipeline in plain English; Claude (or the template fallback) drafts the cells"
+              title={t("app.toolbar.composeTitle")}
             >
               <Wand2 className="mr-1.5 size-3.5" />
-              Compose
+              {t("app.toolbar.compose")}
             </Button>
             <Button
               variant="ghost"
@@ -1719,24 +1725,24 @@ export function App(): ReactElement {
               onClick={() => {
                 setIsAskOpen(true);
               }}
-              title="Ask AI anything about your pipeline (Cmd/Ctrl+K)"
+              title={t("app.toolbar.askAiTitle")}
             >
               <Command className="mr-1.5 size-3.5" />
-              Ask AI
+              {t("app.toolbar.askAi")}
               <Badge variant="outline" className="ml-2 px-1 font-mono text-[10px]">
                 ⌘K
               </Badge>
             </Button>
             <Button variant="default" size="sm" onClick={handleRun} disabled={isRunning}>
               <Play className="mr-1.5 size-3.5" />
-              {isRunning ? "Running…" : "Run pipeline"}
+              {isRunning ? t("app.toolbar.running") : t("app.toolbar.runPipeline")}
             </Button>
             <Button
               variant="ghost"
               size="sm"
               className="px-2"
-              title="Keyboard shortcuts (?)"
-              aria-label="Keyboard shortcuts"
+              title={t("app.toolbar.shortcutsTitle")}
+              aria-label={t("app.toolbar.shortcuts")}
               onClick={() => {
                 setIsShortcutsOpen((open) => !open);
               }}
@@ -1747,8 +1753,8 @@ export function App(): ReactElement {
               variant="ghost"
               size="sm"
               className="px-2"
-              title="Settings"
-              aria-label="Settings"
+              title={t("app.toolbar.settings")}
+              aria-label={t("app.toolbar.settings")}
               onClick={() => {
                 setIsSettingsOpen((open) => !open);
               }}
@@ -1763,8 +1769,8 @@ export function App(): ReactElement {
                 onClick={() => {
                   setIsOverflowOpen((open) => !open);
                 }}
-                title="More actions"
-                aria-label="More actions"
+                title={t("app.toolbar.moreActions")}
+                aria-label={t("app.toolbar.moreActions")}
               >
                 <MoreHorizontal className="size-3.5" />
               </Button>
@@ -1779,7 +1785,7 @@ export function App(): ReactElement {
                     className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/70"
                   >
                     <Download className="size-3.5" />
-                    Download all (.zip)
+                    {t("app.toolbar.downloadAllZip")}
                   </button>
                   <button
                     type="button"
@@ -1790,7 +1796,7 @@ export function App(): ReactElement {
                     className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/70"
                   >
                     <RotateCcw className="size-3.5" />
-                    Re-ingest
+                    {t("app.toolbar.reingest")}
                   </button>
                   {JUPYTER_URL !== "" && (
                     <button
@@ -1802,7 +1808,7 @@ export function App(): ReactElement {
                       className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/70"
                     >
                       <ExternalLink className="size-3.5" />
-                      Edit in JupyterLab
+                      {t("app.toolbar.editInJupyter")}
                     </button>
                   )}
                 </div>
@@ -1955,8 +1961,8 @@ export function App(): ReactElement {
                     variant="ghost"
                     size="sm"
                     className="h-7 w-7 px-0"
-                    title="Show code"
-                    aria-label="Show code"
+                    title={t("app.panels.showCode")}
+                    aria-label={t("app.panels.showCode")}
                     onClick={() => {
                       setIsCellsCollapsed(false);
                     }}
@@ -2002,7 +2008,7 @@ export function App(): ReactElement {
                   </section>
                   <PaneDivider
                     orientation="vertical"
-                    label="Resize notebook and canvas panes"
+                    label={t("app.panels.resizeNotebookCanvas")}
                     onPointerDown={handleVerticalDividerPointerDown}
                     onKeyDown={handleVerticalDividerKeyDown}
                   />
@@ -2021,10 +2027,10 @@ export function App(): ReactElement {
                     onClick={() => {
                       setIsPaletteOpen(true);
                     }}
-                    title="Add a node — opens the palette (Alt+A)"
+                    title={t("app.panels.addNodeTitle")}
                   >
                     <Plus className="mr-1 size-3.5" />
-                    Add node
+                    {t("app.panels.addNode")}
                   </Button>
                   <Canvas
                     graph={graph}
@@ -2072,7 +2078,7 @@ export function App(): ReactElement {
             {!isInspectorCollapsed && (
               <PaneDivider
                 orientation="horizontal"
-                label="Resize editor and inspector panes"
+                label={t("app.panels.resizeEditorInspector")}
                 onPointerDown={handleHorizontalDividerPointerDown}
                 onKeyDown={handleHorizontalDividerKeyDown}
               />
@@ -2085,19 +2091,25 @@ export function App(): ReactElement {
                   setIsInspectorCollapsed((open) => !open);
                 }}
                 className="flex items-center gap-2 border-t px-4 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-muted/50"
-                aria-label={isInspectorCollapsed ? "Expand inspector" : "Collapse inspector"}
+                aria-label={
+                  isInspectorCollapsed
+                    ? t("app.panels.expandInspector")
+                    : t("app.panels.collapseInspector")
+                }
               >
                 {isInspectorCollapsed ? (
                   <ChevronRight className="size-3" />
                 ) : (
                   <ChevronDown className="size-3" />
                 )}
-                <span className="uppercase tracking-wider">Inspector</span>
+                <span className="uppercase tracking-wider">{t("app.panels.inspector")}</span>
                 {selected !== null && (
                   <span className="font-mono text-[10px]">· {selected.name}</span>
                 )}
                 {events.length > 0 && (
-                  <span className="font-mono text-[10px]">· {events.length} events</span>
+                  <span className="font-mono text-[10px]">
+                    · {t("app.panels.events", { count: events.length })}
+                  </span>
                 )}
               </button>
               {!isInspectorCollapsed && (
@@ -2108,9 +2120,9 @@ export function App(): ReactElement {
                   )}
                 >
                   <InspectorPanel
-                    title="Selected"
+                    title={t("app.panels.selected")}
                     count={selected === null ? 0 : 1}
-                    empty="Click a node."
+                    empty={t("app.panels.selectedEmpty")}
                   >
                     {selected !== null &&
                     selectedManifest !== null &&
@@ -2137,9 +2149,9 @@ export function App(): ReactElement {
                   </InspectorPanel>
 
                   <InspectorPanel
-                    title="Execution events"
+                    title={t("app.panels.executionEvents")}
                     count={events.length}
-                    empty="Click Run to dispatch this pipeline."
+                    empty={t("app.panels.executionEventsEmpty")}
                   >
                     <ul className="flex flex-col gap-1">
                       {events.map((event, idx) => (
@@ -2155,9 +2167,9 @@ export function App(): ReactElement {
 
                   {DEV_MODE && (
                     <InspectorPanel
-                      title="Cell patches"
+                      title={t("app.panels.cellPatches")}
                       count={patches.length}
-                      empty="Rename a node in the canvas to see one."
+                      empty={t("app.panels.cellPatchesEmpty")}
                     >
                       {patches.map((patch, idx) => (
                         <div
@@ -2169,11 +2181,11 @@ export function App(): ReactElement {
                               {patch.operation}
                             </Badge>
                             <Badge variant="secondary" className="font-mono">
-                              cell {patch.cellIndex}
+                              {t("app.panels.cellLabel", { index: patch.cellIndex })}
                             </Badge>
                           </div>
                           <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[11px]">
-                            {patch.newSource ?? "(deleted)"}
+                            {patch.newSource ?? t("app.panels.deleted")}
                           </pre>
                         </div>
                       ))}
