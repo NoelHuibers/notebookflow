@@ -52,14 +52,14 @@ export function SettingsDialog({
         <div className="flex items-center justify-between">
           <span className="flex items-center gap-2 text-sm font-semibold">
             <SettingsIcon className="size-4 text-primary" />
-            Settings
+            {t("settings.title")}
           </span>
           <Button
             variant="ghost"
             size="sm"
             className="h-7 px-1.5"
             onClick={onClose}
-            aria-label="Close settings"
+            aria-label={t("settings.close")}
           >
             <X className="size-3.5" />
           </Button>
@@ -70,45 +70,42 @@ export function SettingsDialog({
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  Account
+                  {t("settings.account")}
                 </div>
                 <div className="truncate text-[13px] font-medium">{email}</div>
               </div>
               <Button variant="outline" size="sm" className="h-7 shrink-0" onClick={onSignOut}>
                 <LogOut className="size-3.5" />
-                Sign out
+                {t("common.signOut")}
               </Button>
             </div>
           ) : (
             <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">
-                Not signed in — your work stays in this browser only.
-              </span>
+              <span className="text-muted-foreground">{t("settings.notSignedIn")}</span>
               <a href="/login" className="shrink-0 font-medium text-primary hover:underline">
-                Sign in
+                {t("common.signIn")}
               </a>
             </div>
           )}
         </div>
 
         <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground">Engine URL override</span>
+          <span className="text-muted-foreground">{t("settings.engineUrlOverride")}</span>
           <input
             type="text"
             value={settings.engineUrlOverride}
             onChange={(event) => {
               onChange({ ...settings, engineUrlOverride: event.target.value });
             }}
-            placeholder="ws://localhost:8765/ws  (leave blank to use VITE_NOTEBOOKFLOW_ENGINE_URL)"
+            placeholder={t("settings.engineUrlPlaceholder")}
             className="rounded-md border bg-background px-2 py-1 font-mono text-[11px] outline-none focus:ring-1 focus:ring-ring"
           />
           <span className="text-[10px] italic text-muted-foreground">
-            Connects to a different engine on the next pipeline run. Leave blank to use the env-var
-            default.
+            {t("settings.engineUrlHelp")}
           </span>
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground">Theme</span>
+          <span className="text-muted-foreground">{t("settings.theme")}</span>
           <select
             value={settings.theme}
             onChange={(event) => {
@@ -119,9 +116,9 @@ export function SettingsDialog({
             }}
             className="rounded-md border bg-background px-2 py-1 text-[11px]"
           >
-            <option value="system">Match system</option>
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
+            <option value="system">{t("settings.themeSystem")}</option>
+            <option value="light">{t("settings.themeLight")}</option>
+            <option value="dark">{t("settings.themeDark")}</option>
           </select>
         </label>
         <div className="flex items-center justify-between gap-3">
@@ -130,10 +127,10 @@ export function SettingsDialog({
         </div>
 
         <div className="mt-1 border-t pt-3">
-          <span className="font-semibold tracking-tight">AI provider (bring your own key)</span>
+          <span className="font-semibold tracking-tight">{t("settings.providerSection")}</span>
           <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
             <label className="flex flex-col gap-1">
-              <span className="text-muted-foreground">Provider</span>
+              <span className="text-muted-foreground">{t("settings.provider")}</span>
               <select
                 value={settings.llmProvider}
                 onChange={(event) => {
@@ -149,34 +146,33 @@ export function SettingsDialog({
               </select>
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-muted-foreground">Model</span>
+              <span className="text-muted-foreground">{t("settings.model")}</span>
               <input
                 type="text"
                 value={settings.llmModel}
                 onChange={(event) => {
                   onChange({ ...settings, llmModel: event.target.value });
                 }}
-                placeholder="(provider default)"
+                placeholder={t("settings.modelPlaceholder")}
                 className="rounded-md border bg-background px-2 py-1 font-mono text-[11px] outline-none focus:ring-1 focus:ring-ring"
               />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-muted-foreground">API key</span>
+              <span className="text-muted-foreground">{t("settings.apiKey")}</span>
               <input
                 type="password"
                 value={settings.llmApiKey}
                 onChange={(event) => {
                   onChange({ ...settings, llmApiKey: event.target.value });
                 }}
-                placeholder="sk-…"
+                placeholder={t("settings.apiKeyPlaceholder")}
                 autoComplete="off"
                 className="rounded-md border bg-background px-2 py-1 font-mono text-[11px] outline-none focus:ring-1 focus:ring-ring"
               />
             </label>
           </div>
           <span className="mt-1 block text-[10px] italic text-muted-foreground">
-            Used for Ask / Compose / Explain / node synthesis. Stored in this browser and sent per
-            request. Leave the key blank to use the engine's own key or the template fallback.
+            {t("settings.providerHelp")}
           </span>
 
           {signedIn && (
@@ -187,9 +183,9 @@ export function SettingsDialog({
                 className="h-7"
                 disabled={accountKeyState === "saving" || settings.llmApiKey.trim() === ""}
                 onClick={onSaveKeyToAccount}
-                title="Encrypt and store this key in your account so it loads on any device"
+                title={t("settings.saveKeyTitle")}
               >
-                {accountKeyState === "saving" ? "Saving…" : "Save key to account"}
+                {accountKeyState === "saving" ? t("settings.saving") : t("settings.saveKey")}
               </Button>
               {accountKeyState === "saved" && (
                 <>
@@ -199,9 +195,11 @@ export function SettingsDialog({
                     className="h-7 text-muted-foreground hover:text-destructive"
                     onClick={onRemoveKeyFromAccount}
                   >
-                    Remove from account
+                    {t("settings.removeKey")}
                   </Button>
-                  <span className="text-[10px] text-muted-foreground">Saved (encrypted)</span>
+                  <span className="text-[10px] text-muted-foreground">
+                    {t("settings.savedEncrypted")}
+                  </span>
                 </>
               )}
             </div>

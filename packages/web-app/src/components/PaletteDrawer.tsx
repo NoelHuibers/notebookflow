@@ -6,6 +6,7 @@ import type { ReactElement } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useI18n } from "@/lib/i18n";
 import { groupPalette, TAG_ORDER } from "@/lib/palette";
 import { cn } from "@/lib/utils";
 
@@ -38,11 +39,12 @@ export function PaletteDrawer({
   onPick,
   onClose,
 }: PaletteDrawerProps): ReactElement {
+  const { t } = useI18n();
   return (
     <aside className="absolute right-0 top-0 z-20 flex h-full w-72 flex-col border-l bg-card shadow-xl">
       <div className="flex items-center justify-between border-b px-3 py-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
         <span className="flex items-center gap-2">
-          Palette
+          {t("palette.title")}
           <Badge variant="outline" className="font-mono text-[10px]">
             {filteredNodes.length === nodes.length
               ? nodes.length
@@ -54,7 +56,7 @@ export function PaletteDrawer({
           size="sm"
           className="h-6 px-1.5"
           onClick={onClose}
-          aria-label="Close palette"
+          aria-label={t("palette.close")}
         >
           <X className="size-3.5" />
         </Button>
@@ -67,8 +69,8 @@ export function PaletteDrawer({
             onChange={(event) => {
               onSearchChange(event.target.value);
             }}
-            placeholder="Search nodes…"
-            aria-label="Search nodes"
+            placeholder={t("palette.searchPlaceholder")}
+            aria-label={t("palette.searchLabel")}
             className="rounded border bg-background px-2 py-1 text-[11px] outline-none focus:ring-1 focus:ring-ring"
           />
           <div className="flex flex-wrap gap-1">
@@ -82,7 +84,7 @@ export function PaletteDrawer({
                   : "bg-background text-muted-foreground hover:bg-muted/70",
               )}
             >
-              all
+              {t("palette.all")}
             </button>
             {TAG_ORDER.map((tag) => (
               <button
@@ -109,11 +111,9 @@ export function PaletteDrawer({
           {error !== null ? (
             <p className="text-[11px] italic text-muted-foreground">{error}</p>
           ) : nodes.length === 0 ? (
-            <p className="text-[11px] italic text-muted-foreground">Loading node registry…</p>
+            <p className="text-[11px] italic text-muted-foreground">{t("palette.loading")}</p>
           ) : filteredNodes.length === 0 ? (
-            <p className="text-[11px] italic text-muted-foreground">
-              No nodes match the current search or filter.
-            </p>
+            <p className="text-[11px] italic text-muted-foreground">{t("palette.noMatches")}</p>
           ) : (
             groupPalette(filteredNodes).map(([tag, groupNodes]) => (
               <section key={tag} className="flex flex-col gap-2">
@@ -133,7 +133,7 @@ export function PaletteDrawer({
                       onClick={() => {
                         onPick(manifest);
                       }}
-                      title={`Click to append at the end, or drag onto the canvas to place at the drop point — ${manifest.name}`}
+                      title={t("palette.nodeTooltip", { name: manifest.name })}
                       className="cursor-grab rounded-md border bg-background px-3 py-2 text-left transition-colors hover:bg-muted/70 active:cursor-grabbing"
                     >
                       <div className="flex items-center justify-between gap-2">

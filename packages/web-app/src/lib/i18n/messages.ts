@@ -1,10 +1,23 @@
-// DE + EN message catalogs. Structured by namespace so marketing, app, and legal
-// surfaces can share keys. `en` is the source of truth for the shape; `de` is typed
-// as `Messages`, so the compiler enforces that it stays complete and in sync.
+// DE + EN message catalogs, assembled from per-namespace modules in ./messages/.
+// Each module exports `en` and `de: typeof en`, so the compiler enforces key parity
+// within a namespace; `de: Messages` below enforces the whole shape matches `en`.
 //
-// Scope today: the public chrome (login, legal, 404) is fully translated. The editor
-// (App.tsx + dialogs, ~150+ strings) is intentionally deferred — add namespaces here
-// and swap literals for `t(...)` incrementally without touching the foundation.
+// `common`, `login`, `legal`, and `notFound` are small and stable, so they stay
+// inline here; every larger surface (app, landing, dialogs, cells, files, …) lives
+// in its own module under ./messages/ so it can grow independently.
+
+import * as app from "./messages/app";
+import * as ask from "./messages/ask";
+import * as cells from "./messages/cells";
+import * as cloud from "./messages/cloud";
+import * as compose from "./messages/compose";
+import * as explanation from "./messages/explanation";
+import * as files from "./messages/files";
+import * as landing from "./messages/landing";
+import * as palette from "./messages/palette";
+import * as settings from "./messages/settings";
+import * as shortcuts from "./messages/shortcuts";
+import * as triggers from "./messages/triggers";
 
 export const en = {
   common: {
@@ -37,9 +50,18 @@ export const en = {
     title: "Page not found",
     body: "That page doesn't exist or has moved.",
   },
-  settings: {
-    language: "Language",
-  },
+  app: app.en,
+  landing: landing.en,
+  settings: settings.en,
+  shortcuts: shortcuts.en,
+  compose: compose.en,
+  cloud: cloud.en,
+  ask: ask.en,
+  palette: palette.en,
+  explanation: explanation.en,
+  triggers: triggers.en,
+  cells: cells.en,
+  files: files.en,
 };
 
 export type Messages = typeof en;
@@ -75,7 +97,16 @@ export const de: Messages = {
     title: "Seite nicht gefunden",
     body: "Diese Seite existiert nicht oder wurde verschoben.",
   },
-  settings: {
-    language: "Sprache",
-  },
+  app: app.de,
+  landing: landing.de,
+  settings: settings.de,
+  shortcuts: shortcuts.de,
+  compose: compose.de,
+  cloud: cloud.de,
+  ask: ask.de,
+  palette: palette.de,
+  explanation: explanation.de,
+  triggers: triggers.de,
+  cells: cells.de,
+  files: files.de,
 };

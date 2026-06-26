@@ -9,6 +9,7 @@
 import type { ReactElement } from "react";
 import { useCallback, useEffect, useState } from "react";
 import type { EngineClient } from "../lib/EngineClient";
+import { useI18n } from "../lib/i18n";
 import { cn } from "../lib/utils";
 
 export type EngineState = "checking" | "ready" | "down";
@@ -24,6 +25,7 @@ const DOT_COLOR: Record<EngineState, string> = {
 };
 
 export function EngineStatus({ client }: EngineStatusProps): ReactElement {
+  const { t } = useI18n();
   const [state, setState] = useState<EngineState>("checking");
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
 
@@ -44,8 +46,8 @@ export function EngineStatus({ client }: EngineStatusProps): ReactElement {
     state === "ready" && latencyMs !== null
       ? `${String(latencyMs)}ms`
       : state === "down"
-        ? "unreachable"
-        : "…";
+        ? t("app.engine.unreachable")
+        : t("app.engine.pending");
 
   return (
     <button
@@ -53,11 +55,11 @@ export function EngineStatus({ client }: EngineStatusProps): ReactElement {
       onClick={() => {
         void probe();
       }}
-      title={`Engine: ${client.baseUrl}\nClick to re-check`}
+      title={t("app.engine.title", { url: client.baseUrl })}
       className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/60"
     >
       <span className={cn("inline-block size-1.5 rounded-full", DOT_COLOR[state])} />
-      engine
+      {t("app.engine.label")}
       <span className="font-mono">{trailing}</span>
     </button>
   );

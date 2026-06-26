@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { EngineClient, TriggerFiring, TriggerKind, TriggerSpec } from "@/lib/EngineClient";
+import { useI18n } from "@/lib/i18n";
 import { truncate } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -15,17 +16,22 @@ import { truncate } from "@/lib/utils";
 // pipelineId from the form to avoid implying otherwise.
 // ---------------------------------------------------------------------------
 
-const TRIGGER_KIND_LABEL: Record<TriggerKind, string> = {
-  manual: "Manual",
-  cron: "Cron",
-  file_watch: "File watch",
-  webhook: "Webhook",
+// kind → translation key (the label copy itself lives in the `triggers` catalog).
+const TRIGGER_KIND_LABEL_KEY: Record<TriggerKind, string> = {
+  manual: "triggers.kindManual",
+  cron: "triggers.kindCron",
+  file_watch: "triggers.kindFileWatch",
+  webhook: "triggers.kindWebhook",
 };
 
-const CRON_PRESETS: { label: string; expression: string }[] = [
-  { label: "Every 5 min", expression: "*/5 * * * *" },
-  { label: "Hourly", expression: "0 * * * *" },
-  { label: "Daily 9am", expression: "0 9 * * *" },
+const TRIGGER_KINDS: TriggerKind[] = ["manual", "cron", "file_watch", "webhook"];
+
+// Cron expressions are data, not copy, so they stay literal; only the preset label
+// is translated via `labelKey`.
+const CRON_PRESETS: { labelKey: string; expression: string }[] = [
+  { labelKey: "triggers.presetEvery5Min", expression: "*/5 * * * *" },
+  { labelKey: "triggers.presetHourly", expression: "0 * * * *" },
+  { labelKey: "triggers.presetDaily9am", expression: "0 9 * * *" },
 ];
 
 const CRON_REGEX = /^(\S+\s+){4}\S+$/;
@@ -47,6 +53,7 @@ export function TriggersDialog({
   onRefresh,
   onClose,
 }: TriggersDialogProps): ReactElement {
+  const { t } = useI18n();
   const [isCreating, setIsCreating] = useState(false);
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-background/70 p-6 pt-[10vh] backdrop-blur">
@@ -54,7 +61,7 @@ export function TriggersDialog({
         <div className="flex items-center justify-between">
           <span className="flex items-center gap-2 text-sm font-semibold">
             <Zap className="size-4 text-primary" />
-            Triggers
+            {t("triggers.title")}
             <Badge variant="outline" className="font-mono text-[10px]">
               {triggers.length}
             </Badge>
@@ -69,7 +76,7 @@ export function TriggersDialog({
                 }}
               >
                 <Plus className="mr-1.5 size-3.5" />
-                New trigger
+                {t("triggers.newTrigger")}
               </Button>
             )}
             <Button
@@ -77,7 +84,7 @@ export function TriggersDialog({
               size="sm"
               className="h-7 px-1.5"
               onClick={onClose}
-              aria-label="Dismiss"
+              aria-label={t("triggers.dismiss")}
             >
               <X className="size-3.5" />
             </Button>
@@ -103,9 +110,7 @@ export function TriggersDialog({
           <ScrollArea className="min-h-[200px] flex-1 rounded border bg-muted/30 p-2">
             {triggers.length === 0 ? (
               <p className="px-2 py-4 text-center text-[11px] text-muted-foreground">
-                {isLoading
-                  ? "Loading triggers…"
-                  : "No triggers yet. Click 'New trigger' to register one."}
+                {isLoading ? t("triggers.loading") : t("triggers.empty")}
               </p>
             ) : (
               <ul className="flex flex-col gap-2">
@@ -133,6 +138,7 @@ interface TriggerCreateFormProps {
 }
 
 function TriggerCreateForm({ client, onCancel, onCreated }: TriggerCreateFormProps): ReactElement {
+  const { t } = useI18n();
   const [kind, setKind] = useState<TriggerKind>("manual");
   const [id, setId] = useState(() => `trigger-${Date.now().toString(36)}`);
   const [expression, setExpression] = useState("");
@@ -144,13 +150,13 @@ function TriggerCreateForm({ client, onCancel, onCreated }: TriggerCreateFormPro
 
   async function handleSubmit(): Promise<void> {
     if (id.trim() === "") {
-      setError("Trigger id can't be empty.");
+      setError(t("triggers.errorIdEmpty"));
       return;
     }
     let config: Record<string, unknown> = {};
     if (kind === "cron") {
       if (expression.trim() === "") {
-        setError("Cron expression required.");
+        setError(t("triggers.errorCronRequired"));
         return;
       }
       config = { expression: expression.trim() };
@@ -160,7 +166,7 @@ function TriggerCreateForm({ client, onCancel, onCreated }: TriggerCreateFormPro
         .map((line) => line.trim())
         .filter((line) => line !== "");
       if (paths.length === 0) {
-        setError("Add at least one path to watch.");
+        setError(t("triggers.errorPathRequired"));
         return;
       }
       config = { paths };
@@ -176,7 +182,7 @@ function TriggerCreateForm({ client, onCancel, onCreated }: TriggerCreateFormPro
       });
       onCreated();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "unknown error";
+      const message = err instanceof Error ? err.message : t("triggers.errorUnknown");
       setError(message);
     } finally {
       setIsSubmitting(false);
@@ -186,7 +192,7 @@ function TriggerCreateForm({ client, onCancel, onCreated }: TriggerCreateFormPro
   return (
     <div className="flex flex-col gap-3 rounded border bg-muted/30 p-3">
       <div className="flex flex-wrap items-center gap-1">
-        {(Object.keys(TRIGGER_KIND_LABEL) as TriggerKind[]).map((k) => (
+        {TRIGGER_KINDS.map((k) => (
           <Button
             key={k}
             variant={kind === k ? "default" : "outline"}
@@ -197,25 +203,25 @@ function TriggerCreateForm({ client, onCancel, onCreated }: TriggerCreateFormPro
               setError(null);
             }}
           >
-            {TRIGGER_KIND_LABEL[k]}
+            {t(TRIGGER_KIND_LABEL_KEY[k])}
           </Button>
         ))}
       </div>
       <label className="flex flex-col gap-1 text-[11px]">
-        <span className="text-muted-foreground">Trigger id</span>
+        <span className="text-muted-foreground">{t("triggers.triggerId")}</span>
         <input
           value={id}
           onChange={(event) => {
             setId(event.target.value);
           }}
           className="rounded border bg-background px-2 py-1 font-mono text-[11px] outline-none focus:ring-1 focus:ring-ring"
-          aria-label="Trigger id"
+          aria-label={t("triggers.triggerId")}
         />
       </label>
       {kind === "cron" && (
         <div className="flex flex-col gap-1.5 text-[11px]">
           <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Cron expression (5 fields)</span>
+            <span className="text-muted-foreground">{t("triggers.cronExpressionLabel")}</span>
             <input
               value={expression}
               onChange={(event) => {
@@ -223,13 +229,11 @@ function TriggerCreateForm({ client, onCancel, onCreated }: TriggerCreateFormPro
               }}
               placeholder="*/5 * * * *"
               className="rounded border bg-background px-2 py-1 font-mono text-[11px] outline-none focus:ring-1 focus:ring-ring"
-              aria-label="Cron expression"
+              aria-label={t("triggers.cronExpressionAria")}
             />
           </label>
           {!cronShapeOk && (
-            <span className="text-[10px] text-amber-600">
-              5 whitespace-separated fields expected; engine validates on save.
-            </span>
+            <span className="text-[10px] text-amber-600">{t("triggers.cronShapeWarning")}</span>
           )}
           <div className="flex flex-wrap gap-1">
             {CRON_PRESETS.map((preset) => (
@@ -242,7 +246,7 @@ function TriggerCreateForm({ client, onCancel, onCreated }: TriggerCreateFormPro
                   setExpression(preset.expression);
                 }}
               >
-                {preset.label}
+                {t(preset.labelKey)}
               </Button>
             ))}
           </div>
@@ -250,7 +254,7 @@ function TriggerCreateForm({ client, onCancel, onCreated }: TriggerCreateFormPro
       )}
       {kind === "file_watch" && (
         <label className="flex flex-col gap-1 text-[11px]">
-          <span className="text-muted-foreground">Paths (one per line)</span>
+          <span className="text-muted-foreground">{t("triggers.pathsLabel")}</span>
           <textarea
             value={pathsText}
             onChange={(event) => {
@@ -259,21 +263,19 @@ function TriggerCreateForm({ client, onCancel, onCreated }: TriggerCreateFormPro
             rows={3}
             placeholder="./data&#10;./inputs"
             className="resize-none rounded border bg-background px-2 py-1 font-mono text-[11px] outline-none focus:ring-1 focus:ring-ring"
-            aria-label="Paths to watch"
+            aria-label={t("triggers.pathsAria")}
           />
-          <span className="text-[10px] text-muted-foreground">
-            Engine-host paths. Directories are watched recursively.
-          </span>
+          <span className="text-[10px] text-muted-foreground">{t("triggers.pathsHint")}</span>
         </label>
       )}
       {kind === "webhook" && (
-        <p className="text-[11px] text-muted-foreground">
-          A POST URL will be generated after you save. Anyone posting to it fires this trigger.
-        </p>
+        <p className="text-[11px] text-muted-foreground">{t("triggers.webhookDescription")}</p>
       )}
       {kind === "manual" && (
         <p className="text-[11px] text-muted-foreground">
-          Fires only when you click <strong>Fire now</strong> in the list.
+          {t("triggers.manualDescriptionPrefix")}
+          <strong>{t("triggers.manualDescriptionFireNow")}</strong>
+          {t("triggers.manualDescriptionSuffix")}
         </p>
       )}
       {error !== null && (
@@ -290,10 +292,10 @@ function TriggerCreateForm({ client, onCancel, onCreated }: TriggerCreateFormPro
           }}
           disabled={isSubmitting}
         >
-          {isSubmitting ? "Saving…" : "Save trigger"}
+          {isSubmitting ? t("triggers.saving") : t("triggers.saveTrigger")}
         </Button>
         <Button variant="ghost" size="sm" onClick={onCancel} disabled={isSubmitting}>
-          Cancel
+          {t("triggers.cancel")}
         </Button>
       </div>
     </div>
@@ -307,6 +309,7 @@ interface TriggerListItemProps {
 }
 
 function TriggerListItem({ client, trigger, onChanged }: TriggerListItemProps): ReactElement {
+  const { t } = useI18n();
   const [isExpanded, setIsExpanded] = useState(false);
   const [firings, setFirings] = useState<TriggerFiring[]>([]);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -353,8 +356,8 @@ function TriggerListItem({ client, trigger, onChanged }: TriggerListItemProps): 
       const firing = await client.fireTrigger(trigger.id);
       setFirings((prev) => [...prev, firing]);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "unknown error";
-      setActionError(`Fire failed: ${message}`);
+      const message = err instanceof Error ? err.message : t("triggers.errorUnknown");
+      setActionError(t("triggers.fireFailed", { message }));
     } finally {
       setIsFiring(false);
     }
@@ -366,8 +369,8 @@ function TriggerListItem({ client, trigger, onChanged }: TriggerListItemProps): 
       await client.unregisterTrigger(trigger.id);
       onChanged();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "unknown error";
-      setActionError(`Delete failed: ${message}`);
+      const message = err instanceof Error ? err.message : t("triggers.errorUnknown");
+      setActionError(t("triggers.deleteFailed", { message }));
     }
   }
 
@@ -381,7 +384,7 @@ function TriggerListItem({ client, trigger, onChanged }: TriggerListItemProps): 
         setCopied(false);
       }, 1500);
     } catch {
-      setActionError("Copy failed; select the URL manually.");
+      setActionError(t("triggers.copyFailed"));
     }
   }
 
@@ -394,7 +397,7 @@ function TriggerListItem({ client, trigger, onChanged }: TriggerListItemProps): 
             setIsExpanded((prev) => !prev);
           }}
           className="flex flex-1 items-center gap-2 text-left"
-          aria-label={isExpanded ? "Collapse trigger" : "Expand trigger"}
+          aria-label={isExpanded ? t("triggers.collapseTrigger") : t("triggers.expandTrigger")}
         >
           {isExpanded ? (
             <ChevronDown className="size-3 text-muted-foreground" />
@@ -402,11 +405,11 @@ function TriggerListItem({ client, trigger, onChanged }: TriggerListItemProps): 
             <ChevronRight className="size-3 text-muted-foreground" />
           )}
           <Badge variant="outline" className="font-mono text-[10px]">
-            {TRIGGER_KIND_LABEL[trigger.kind]}
+            {t(TRIGGER_KIND_LABEL_KEY[trigger.kind])}
           </Badge>
           <span className="truncate font-mono text-[11px]">{trigger.id}</span>
           <span className="text-[10px] text-muted-foreground">
-            {firings.length > 0 && `${String(firings.length)} firings`}
+            {firings.length > 0 && t("triggers.firingsCount", { count: firings.length })}
           </span>
         </button>
         <Button
@@ -419,7 +422,7 @@ function TriggerListItem({ client, trigger, onChanged }: TriggerListItemProps): 
           disabled={isFiring}
         >
           <Play className="mr-1 size-3" />
-          Fire now
+          {t("triggers.fireNow")}
         </Button>
         <Button
           variant="ghost"
@@ -428,7 +431,7 @@ function TriggerListItem({ client, trigger, onChanged }: TriggerListItemProps): 
           onClick={() => {
             void handleDelete();
           }}
-          aria-label="Delete trigger"
+          aria-label={t("triggers.deleteTrigger")}
         >
           <Trash2 className="size-3" />
         </Button>
@@ -451,17 +454,11 @@ function TriggerListItem({ client, trigger, onChanged }: TriggerListItemProps): 
               }}
             >
               <Copy className="mr-1 size-3" />
-              {copied ? "Copied" : "Copy URL"}
+              {copied ? t("triggers.copied") : t("triggers.copyUrl")}
             </Button>
           </div>
-          <span className="text-muted-foreground">
-            Content-Type: application/json · Body: {"{"}&quot;payload&quot;: {"{...}"}
-            {"}"}
-          </span>
-          <span className="text-muted-foreground">
-            If NOTEBOOKFLOW_AUTH_TOKEN is set on your engine, include Authorization: Bearer
-            &lt;token&gt;.
-          </span>
+          <span className="text-muted-foreground">{t("triggers.webhookBodyHint")}</span>
+          <span className="text-muted-foreground">{t("triggers.webhookAuthHint")}</span>
         </div>
       )}
       {isExpanded && Object.keys(trigger.config).length > 0 && trigger.kind !== "webhook" && (
@@ -472,11 +469,12 @@ function TriggerListItem({ client, trigger, onChanged }: TriggerListItemProps): 
       {isExpanded && (
         <div className="mt-2 flex flex-col gap-1">
           <span className="text-[10px] text-muted-foreground">
-            Firings (last {firings.length}){shouldPoll && " · refreshes every 5s"}
+            {t("triggers.firingsHeading", { count: firings.length })}
+            {shouldPoll && t("triggers.firingsRefreshNote")}
           </span>
           {firings.length === 0 ? (
             <p className="rounded border bg-muted/30 px-2 py-1 text-[10px] text-muted-foreground">
-              No firings yet.
+              {t("triggers.noFirings")}
             </p>
           ) : (
             <ul className="flex flex-col gap-0.5 font-mono text-[10px]">

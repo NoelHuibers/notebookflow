@@ -15,7 +15,7 @@
  *   .nf-status / .nf-bar               (inside NodeCard)
  */
 import type { CSSProperties, ReactElement } from "react";
-
+import { useI18n } from "@/lib/i18n";
 import {
   CONTAINERS,
   DESIGN_H,
@@ -40,6 +40,7 @@ const stage: CSSProperties = {
 };
 
 export function GraphScene(): ReactElement {
+  const { t } = useI18n();
   return (
     <div className="nf-stage" style={stage}>
       {/* Notebook containers (behind everything) */}
@@ -138,7 +139,7 @@ export function GraphScene(): ReactElement {
           color: "var(--foreground)",
         }}
       >
-        <span style={{ color: "#10b981" }}>✓</span> 5 nodes ok
+        <span style={{ color: "#10b981" }}>✓</span> {t("landing.runOk")}
         <span style={{ color: "var(--muted-foreground)", fontWeight: 500 }}>· 1.2s</span>
       </div>
 

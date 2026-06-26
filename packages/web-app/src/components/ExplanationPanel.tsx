@@ -4,6 +4,7 @@ import type { ReactElement } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { PipelineExplanation } from "@/lib/EngineClient";
+import { useI18n } from "@/lib/i18n";
 
 interface ExplanationPanelProps {
   explanation: PipelineExplanation;
@@ -11,13 +12,14 @@ interface ExplanationPanelProps {
 }
 
 export function ExplanationPanel({ explanation, onClose }: ExplanationPanelProps): ReactElement {
+  const { t } = useI18n();
   return (
     <div className="border-b bg-card/95 px-4 py-3 shadow-sm backdrop-blur">
       <div className="mx-auto flex max-w-3xl flex-col gap-2 text-xs">
         <div className="flex items-center justify-between">
           <span className="flex items-center gap-2">
             <Sparkles className="size-3.5 text-primary" />
-            <span className="font-semibold tracking-tight">Pipeline explanation</span>
+            <span className="font-semibold tracking-tight">{t("explanation.title")}</span>
             <Badge variant="outline" className="font-mono text-[10px]">
               {explanation.backend}
             </Badge>
@@ -27,7 +29,7 @@ export function ExplanationPanel({ explanation, onClose }: ExplanationPanelProps
             size="sm"
             className="h-7 px-1.5"
             onClick={onClose}
-            aria-label="Dismiss explanation"
+            aria-label={t("explanation.dismiss")}
           >
             <X className="size-3.5" />
           </Button>

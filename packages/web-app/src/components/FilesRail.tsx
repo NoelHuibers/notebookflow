@@ -4,6 +4,7 @@ import type { ReactElement } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { DataFile } from "@/lib/EngineClient";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { OpenFileMeta } from "@/types/workspace";
 
@@ -49,6 +50,7 @@ export function FilesRail({
   onAddDataNode,
   onToggleCollapse,
 }: FilesRailProps): ReactElement {
+  const { t } = useI18n();
   if (collapsed) {
     return (
       <div className="flex w-8 shrink-0 flex-col items-center border-r bg-muted/30 py-2">
@@ -56,8 +58,8 @@ export function FilesRail({
           variant="ghost"
           size="sm"
           className="h-7 w-7 px-0"
-          title="Show files"
-          aria-label="Show files"
+          title={t("files.showFiles")}
+          aria-label={t("files.showFiles")}
           onClick={onToggleCollapse}
         >
           <Files className="size-3.5" />
@@ -68,14 +70,14 @@ export function FilesRail({
   return (
     <aside className="flex w-44 shrink-0 flex-col border-r bg-muted/30">
       <div className="flex items-center justify-between border-b pl-3 pr-1.5 py-2 text-xs text-muted-foreground">
-        <span className="font-medium">Files</span>
+        <span className="font-medium">{t("files.files")}</span>
         <div className="flex items-center gap-0.5">
           <Button
             variant="ghost"
             size="sm"
             className="h-7 w-7 px-0"
-            title="Open notebook"
-            aria-label="Open notebook"
+            title={t("files.openNotebook")}
+            aria-label={t("files.openNotebook")}
             onClick={onOpen}
           >
             <Plus className="size-3.5" />
@@ -84,8 +86,8 @@ export function FilesRail({
             variant="ghost"
             size="sm"
             className="h-7 w-7 px-0"
-            title="Hide files"
-            aria-label="Hide files"
+            title={t("files.hideFiles")}
+            aria-label={t("files.hideFiles")}
             onClick={onToggleCollapse}
           >
             <PanelLeftClose className="size-3.5" />
@@ -115,7 +117,7 @@ export function FilesRail({
                     {isActive && activeDirty && (
                       <span
                         role="img"
-                        aria-label="Unsaved changes"
+                        aria-label={t("files.unsavedChanges")}
                         className="size-1.5 shrink-0 rounded-full bg-amber-500"
                       />
                     )}
@@ -129,8 +131,8 @@ export function FilesRail({
                         onClose(file.id);
                       }}
                       className="shrink-0 rounded text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"
-                      aria-label={`Close ${file.name}`}
-                      title={`Close ${file.name}`}
+                      aria-label={t("files.closeFile", { name: file.name })}
+                      title={t("files.closeFile", { name: file.name })}
                     >
                       <X className="size-3" />
                     </button>
@@ -144,13 +146,13 @@ export function FilesRail({
 
       <div className="border-t">
         <div className="flex items-center justify-between pl-3 pr-1.5 py-1.5 text-[11px] text-muted-foreground">
-          <span className="font-medium uppercase tracking-wide">Data</span>
+          <span className="font-medium uppercase tracking-wide">{t("files.data")}</span>
           <Button
             variant="ghost"
             size="sm"
             className="h-7 w-7 px-0"
-            title="Upload data file (CSV, etc.)"
-            aria-label="Upload data file"
+            title={t("files.uploadData")}
+            aria-label={t("files.uploadDataAria")}
             onClick={onUploadData}
           >
             <Upload className="size-3.5" />
@@ -158,8 +160,7 @@ export function FilesRail({
         </div>
         {dataFiles.length === 0 ? (
           <p className="px-3 pb-2 text-[10px] italic leading-snug text-muted-foreground">
-            Upload a CSV, then read it by name in a node:{" "}
-            <code className="font-mono">read_csv("name.csv")</code>.
+            {t("files.dataEmptyPrefix")} <code className="font-mono">read_csv("name.csv")</code>.
           </p>
         ) : (
           <ul className="flex max-h-40 flex-col overflow-y-auto p-1">
@@ -181,8 +182,8 @@ export function FilesRail({
                     onAddDataNode(dataFile.name);
                   }}
                   className="shrink-0 rounded text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"
-                  aria-label={`Add a node that loads ${dataFile.name}`}
-                  title="Add a Load CSV node for this file"
+                  aria-label={t("files.addNodeFor", { name: dataFile.name })}
+                  title={t("files.addLoadCsvTitle")}
                 >
                   <Plus className="size-3" />
                 </button>
@@ -192,8 +193,8 @@ export function FilesRail({
                     onDeleteData(dataFile.name);
                   }}
                   className="shrink-0 rounded text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"
-                  aria-label={`Delete ${dataFile.name}`}
-                  title={`Delete ${dataFile.name}`}
+                  aria-label={t("files.deleteFile", { name: dataFile.name })}
+                  title={t("files.deleteFile", { name: dataFile.name })}
                 >
                   <X className="size-3" />
                 </button>

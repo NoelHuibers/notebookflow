@@ -12,14 +12,16 @@ import { ChevronDown, Clipboard, Copy, PanelLeftClose, Plus, Scissors, Trash2 } 
 import type { ChangeEvent, ReactElement } from "react";
 
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 export type CellKind = NotebookCell["cellType"];
 
-const CELL_KIND_LABELS: Record<CellKind, string> = {
-  code: "Code",
-  markdown: "Markdown",
-  raw: "Raw",
+const CELL_KINDS: CellKind[] = ["code", "markdown", "raw"];
+const CELL_KIND_LABEL_KEYS: Record<CellKind, string> = {
+  code: "cells.typeCode",
+  markdown: "cells.typeMarkdown",
+  raw: "cells.typeRaw",
 };
 
 export interface CellToolbarProps {
@@ -53,6 +55,7 @@ export function CellToolbar(props: CellToolbarProps): ReactElement {
     isAddMenuOpen,
     onCollapse,
   } = props;
+  const { t } = useI18n();
   const focused = focusedCellIndex !== null && focusedCell !== null;
 
   const handleTypeChange = (event: ChangeEvent<HTMLSelectElement>): void => {
@@ -72,10 +75,10 @@ export function CellToolbar(props: CellToolbarProps): ReactElement {
           onClick={() => {
             onAddCellMenuOpenChange?.(!isAddMenuOpen);
           }}
-          title="Add a new cell at the end"
+          title={t("cells.addTitle")}
         >
           <Plus className="size-3.5" />
-          Add
+          {t("cells.add")}
           <ChevronDown className="size-3" />
         </Button>
         {isAddMenuOpen && (
@@ -83,7 +86,7 @@ export function CellToolbar(props: CellToolbarProps): ReactElement {
             className="absolute left-0 top-full z-10 mt-1 w-32 rounded-md border bg-popover text-popover-foreground shadow-md"
             // Keep menu open when clicking inside it; closes after a selection.
           >
-            {(Object.keys(CELL_KIND_LABELS) as CellKind[]).map((kind) => (
+            {CELL_KINDS.map((kind) => (
               <button
                 key={kind}
                 type="button"
@@ -93,7 +96,7 @@ export function CellToolbar(props: CellToolbarProps): ReactElement {
                 }}
                 className="block w-full px-2 py-1 text-left text-[11px] hover:bg-muted/70"
               >
-                {CELL_KIND_LABELS[kind]}
+                {t(CELL_KIND_LABEL_KEYS[kind])}
               </button>
             ))}
           </div>
@@ -104,35 +107,35 @@ export function CellToolbar(props: CellToolbarProps): ReactElement {
 
       <ToolbarIconButton
         icon={<Scissors className="size-3.5" />}
-        label="Cut"
-        title="Cut the focused cell"
+        label={t("cells.cut")}
+        title={t("cells.cutTitle")}
         disabled={!focused}
         onClick={onCutCell}
       />
       <ToolbarIconButton
         icon={<Copy className="size-3.5" />}
-        label="Copy"
-        title="Copy the focused cell"
+        label={t("cells.copy")}
+        title={t("cells.copyTitle")}
         disabled={!focused}
         onClick={onCopyCell}
       />
       <ToolbarIconButton
         icon={<Clipboard className="size-3.5" />}
-        label="Paste"
+        label={t("cells.paste")}
         title={
           hasClipboard
             ? focused
-              ? "Paste below the focused cell"
-              : "Paste at the end"
-            : "Nothing in the clipboard"
+              ? t("cells.pasteBelowTitle")
+              : t("cells.pasteEndTitle")
+            : t("cells.pasteEmptyTitle")
         }
         disabled={!hasClipboard}
         onClick={onPasteCell}
       />
       <ToolbarIconButton
         icon={<Trash2 className="size-3.5" />}
-        label="Delete"
-        title="Delete the focused cell"
+        label={t("cells.delete")}
+        title={t("cells.deleteTitle")}
         disabled={!focused}
         onClick={onDeleteCell}
       />
@@ -143,16 +146,16 @@ export function CellToolbar(props: CellToolbarProps): ReactElement {
         value={focusedCell?.cellType ?? "code"}
         onChange={handleTypeChange}
         disabled={!focused}
-        aria-label="Cell type"
-        title={focused ? "Change the cell type" : "Focus a cell to change its type"}
+        aria-label={t("cells.cellType")}
+        title={focused ? t("cells.changeTypeTitle") : t("cells.focusToChangeTypeTitle")}
         className={cn(
           "h-7 rounded-md border bg-background px-2 text-[11px]",
           focused ? "" : "cursor-not-allowed opacity-60",
         )}
       >
-        {(Object.keys(CELL_KIND_LABELS) as CellKind[]).map((kind) => (
+        {CELL_KINDS.map((kind) => (
           <option key={kind} value={kind}>
-            {CELL_KIND_LABELS[kind]}
+            {t(CELL_KIND_LABEL_KEYS[kind])}
           </option>
         ))}
       </select>
@@ -162,8 +165,8 @@ export function CellToolbar(props: CellToolbarProps): ReactElement {
           variant="ghost"
           size="sm"
           className="ml-auto h-7 px-1.5"
-          title="Collapse cell pane"
-          aria-label="Collapse cell pane"
+          title={t("cells.collapsePane")}
+          aria-label={t("cells.collapsePane")}
           onClick={onCollapse}
         >
           <PanelLeftClose className="size-3.5" />

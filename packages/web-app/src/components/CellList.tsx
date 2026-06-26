@@ -11,6 +11,7 @@ import type { ReactElement } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { NbOutput } from "@/lib/EngineClient";
+import { useI18n } from "@/lib/i18n";
 
 import { CellEditor } from "./CellEditor";
 
@@ -47,6 +48,7 @@ export function CellList({
   onFocusCell,
   streamingCellIndex,
 }: CellListProps): ReactElement {
+  const { t } = useI18n();
   const [draft, setDraft] = useState<NotebookCell[]>(cells);
   const incomingRef = useRef(cells);
   const onChangeRef = useRef(onCellsChange);
@@ -115,7 +117,7 @@ export function CellList({
   return (
     <div ref={containerRef} className="flex flex-col gap-3 p-4">
       {draft.length === 0 ? (
-        <p className="text-sm italic text-muted-foreground">No cells yet — drop a notebook.</p>
+        <p className="text-sm italic text-muted-foreground">{t("cells.empty")}</p>
       ) : (
         draft.map((cell, idx) => {
           const isFocused = focusedCellIndex === idx;
