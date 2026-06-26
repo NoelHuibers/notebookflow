@@ -12,10 +12,7 @@
  * only piece gated behind <ClientOnly>. Under prefers-reduced-motion the whole
  * timeline is skipped and the static composed graph stands in.
  */
-import { useGSAP } from "@gsap/react";
 import { ClientOnly, Link } from "@tanstack/react-router";
-import gsap from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { ArrowRight } from "lucide-react";
 import {
   type CSSProperties,
@@ -24,12 +21,18 @@ import {
   type ReactNode,
   Suspense,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
 import { GraphScene } from "./GraphScene";
 import { DESIGN_H, DESIGN_W, IDLE_DOT, RUN_OK, RUN_ORDER, RUN_TEAL } from "./graph-data";
 import { useReducedMotion } from "./useReducedMotion";
+
+// GSAP + ScrollTrigger are loaded via dynamic import() inside a client effect so
+// they never enter the SSR module graph — `gsap/ScrollTrigger` has no Node-ESM
+// named export and crashes the server bundle if statically imported.
+const useIsoLayoutEffect = typeof document !== "undefined" ? useLayoutEffect : useEffect;
 
 // Three.js / R3F is ~285 kB gzip — keep it out of the initial landing payload
 // and load it only on the client, after mount, when motion is allowed.
@@ -68,120 +71,168 @@ export function LandingHero(): ReactElement {
     return () => io.disconnect();
   }, []);
 
-  // Keep pins aligned across viewport/scale changes.
-  useEffect(() => {
+  // Arm the hero's initial state synchronously (pre-paint) so the first frame is
+  // the hero, not the resting final-state graph — avoids a flash before the
+  // (async) GSAP timeline takes over. Skipped under reduced motion.
+  useIsoLayoutEffect(() => {
     if (reduced) return;
-    const onResize = () => ScrollTrigger.refresh();
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    const root = rootRef.current;
+    if (!root) return;
+    const setOpacity = (sel: string, value: string) => {
+      for (const el of root.querySelectorAll<HTMLElement>(sel)) el.style.opacity = value;
+    };
+    setOpacity(".nf-source", "1");
+    setOpacity(".nf-node", "0");
+    setOpacity(".nf-port", "0");
+    setOpacity(".nf-container", "0");
+    setOpacity(".nf-pill", "0");
+    setOpacity(".nf-wire", "0");
+    setOpacity('.nf-cap[data-cap="1"], .nf-cap[data-cap="2"], .nf-cap[data-cap="3"]', "0");
+    for (const el of root.querySelectorAll<HTMLElement>(".nf-bar")) {
+      el.style.transform = "scaleY(0)";
+      el.style.transformOrigin = "bottom";
+    }
   }, [reduced]);
 
-  useGSAP(
-    () => {
-      if (reduced || !pinRef.current) return;
+  // Load GSAP + ScrollTrigger on the client only, then build the pinned,
+  // scrubbed timeline inside a gsap.context scoped to the section (auto-reverted
+  // on cleanup / when reduced motion toggles).
+  useEffect(() => {
+    if (reduced) return;
+    const root = rootRef.current;
+    const pin = pinRef.current;
+    if (!root || !pin) return;
+
+    let ctx: { revert: () => void } | undefined;
+    let onResize: (() => void) | undefined;
+    let cancelled = false;
+
+    (async () => {
+      const [{ gsap }, { ScrollTrigger }] = await Promise.all([
+        import("gsap"),
+        import("gsap/ScrollTrigger"),
+      ]);
+      if (cancelled) return;
       gsap.registerPlugin(ScrollTrigger);
-      const q = gsap.utils.selector(rootRef);
 
-      // ---- Initial "hero" state -------------------------------------------
-      // Source notebook centre stage (markup defaults it hidden); nodes tucked away.
-      gsap.set(q(".nf-source"), { opacity: 1, scale: 1, y: 0 });
-      gsap.set(q('.nf-node:not([data-node="forecast"])'), { opacity: 0, scale: 0.85, y: 24 });
-      gsap.set(q('.nf-node[data-node="forecast"]'), { opacity: 0, scale: 0.85, y: 64 });
-      gsap.set(q(".nf-port"), { opacity: 0 });
-      gsap.set(q(".nf-container"), { opacity: 0, scale: 0.98 });
-      gsap.set(q(".nf-pill"), { opacity: 0, y: 12 });
-      gsap.set(q(".nf-bar"), { scaleY: 0, transformOrigin: "bottom" });
-      gsap.set(q(".nf-status"), { backgroundColor: IDLE_DOT, scale: 1 });
+      ctx = gsap.context(() => {
+        const q = gsap.utils.selector(root);
 
-      // Local wires: draw-on via strokeDashoffset. Cross wire: opacity reveal +
-      // marching-ants flow (set up separately, below).
-      for (const path of q(".nf-wire-local") as unknown as SVGPathElement[]) {
-        const len = path.getTotalLength();
-        gsap.set(path, { strokeDasharray: len, strokeDashoffset: len });
-      }
-      gsap.set(q(".nf-wire-cross"), { opacity: 0 });
+        // ---- Initial "hero" state -----------------------------------------
+        // Source notebook centre stage; nodes tucked away.
+        gsap.set(q(".nf-source"), { opacity: 1, scale: 1, y: 0 });
+        gsap.set(q('.nf-node:not([data-node="forecast"])'), { opacity: 0, scale: 0.85, y: 24 });
+        gsap.set(q('.nf-node[data-node="forecast"]'), { opacity: 0, scale: 0.85, y: 64 });
+        gsap.set(q(".nf-port"), { opacity: 0 });
+        gsap.set(q(".nf-container"), { opacity: 0, scale: 0.98 });
+        gsap.set(q(".nf-pill"), { opacity: 0, y: 12 });
+        gsap.set(q(".nf-bar"), { scaleY: 0, transformOrigin: "bottom" });
+        gsap.set(q(".nf-status"), { backgroundColor: IDLE_DOT, scale: 1 });
 
-      // Captions: 0 visible (SSR hero), the rest hidden.
-      gsap.set(q('.nf-cap[data-cap="1"], .nf-cap[data-cap="2"], .nf-cap[data-cap="3"]'), {
-        opacity: 0,
-        y: 16,
-      });
+        // Local wires: visible but drawn-on via strokeDashoffset. Cross wire:
+        // opacity reveal + marching-ants flow (set up separately, below).
+        gsap.set(q(".nf-wire-local"), { opacity: 1 });
+        for (const path of q(".nf-wire-local") as unknown as SVGPathElement[]) {
+          const len = path.getTotalLength();
+          gsap.set(path, { strokeDasharray: len, strokeDashoffset: len });
+        }
+        gsap.set(q(".nf-wire-cross"), { opacity: 0 });
 
-      // ---- Master timeline (pinned + scrubbed) ----------------------------
-      const tl = gsap.timeline({
-        defaults: { ease: "power2.out" },
-        scrollTrigger: {
-          trigger: pinRef.current,
-          start: "top top",
-          end: "+=3400",
-          scrub: 0.6,
-          pin: pinRef.current,
-          anticipatePin: 1,
-        },
-      });
+        // Captions: 0 visible (SSR hero), the rest hidden.
+        gsap.set(q('.nf-cap[data-cap="1"], .nf-cap[data-cap="2"], .nf-cap[data-cap="3"]'), {
+          opacity: 0,
+          y: 16,
+        });
 
-      // Act 1 → 2: notebook recedes, cells lift into nodes, local wires draw.
-      tl.to(q(".nf-scrollcue"), { opacity: 0, duration: 0.3 }, 0.1);
-      tl.to(q('.nf-cap[data-cap="0"]'), { opacity: 0, y: -16, duration: 0.6 }, 0.4);
-      tl.to(q(".nf-source"), { opacity: 0, scale: 0.6, y: -50, duration: 1 }, 0.4);
-      tl.to(q('.nf-cap[data-cap="1"]'), { opacity: 1, y: 0, duration: 0.6 }, 0.7);
-      tl.to(
-        q('.nf-node:not([data-node="forecast"])'),
-        { opacity: 1, scale: 1, y: 0, stagger: 0.16, duration: 0.9 },
-        0.7,
-      );
-      tl.to(q(".nf-port"), { opacity: 1, duration: 0.5 }, 1.3);
-      tl.to(q(".nf-wire-local"), { strokeDashoffset: 0, stagger: 0.22, duration: 1 }, 1.1);
-      tl.to(q('.nf-container[data-c="a"]'), { opacity: 1, scale: 1, duration: 0.8 }, 1.7);
-
-      // Act 3: link a second notebook in via the cross-notebook wire.
-      tl.to(q('.nf-cap[data-cap="1"]'), { opacity: 0, y: -16, duration: 0.5 }, 2.1);
-      tl.to(q('.nf-cap[data-cap="2"]'), { opacity: 1, y: 0, duration: 0.6 }, 2.3);
-      tl.to(q(".nf-stage"), { scale: 0.95, duration: 1, ease: "power1.inOut" }, 2.1);
-      tl.to(q('.nf-container[data-c="b"]'), { opacity: 1, scale: 1, duration: 0.7 }, 2.4);
-      tl.to(
-        q('.nf-node[data-node="forecast"]'),
-        { opacity: 1, scale: 1, y: 0, duration: 0.7 },
-        2.5,
-      );
-      tl.to(q(".nf-wire-cross"), { opacity: 1, duration: 0.6 }, 2.7);
-
-      // Marching-ants flow on the cross wire (runs continuously once revealed).
-      gsap.to(q(".nf-wire-cross"), {
-        strokeDashoffset: "-=26",
-        duration: 0.8,
-        ease: "none",
-        repeat: -1,
-      });
-
-      // Act 4: run pulse — light the DAG up in topological order.
-      const runStart = 3.0;
-      tl.to(q('.nf-cap[data-cap="2"]'), { opacity: 0, y: -16, duration: 0.5 }, runStart - 0.1);
-      tl.to(q('.nf-cap[data-cap="3"]'), { opacity: 1, y: 0, duration: 0.6 }, runStart + 0.1);
-      RUN_ORDER.forEach((id, i) => {
-        const at = runStart + i * 0.4;
-        const dot = q(`.nf-status[data-node="${id}"]`);
-        tl.to(
-          dot,
-          {
-            backgroundColor: RUN_TEAL,
-            boxShadow: `0 0 0 4px ${TEAL_GLOW}`,
-            scale: 1.5,
-            duration: 0.2,
+        // ---- Master timeline (pinned + scrubbed) --------------------------
+        const tl = gsap.timeline({
+          defaults: { ease: "power2.out" },
+          scrollTrigger: {
+            trigger: pin,
+            start: "top top",
+            end: "+=3400",
+            scrub: 0.6,
+            pin,
+            anticipatePin: 1,
           },
-          at,
-        );
+        });
+
+        // Act 1 → 2: notebook recedes, cells lift into nodes, local wires draw.
+        tl.to(q(".nf-scrollcue"), { opacity: 0, duration: 0.3 }, 0.1);
+        tl.to(q('.nf-cap[data-cap="0"]'), { opacity: 0, y: -16, duration: 0.6 }, 0.4);
+        tl.to(q(".nf-source"), { opacity: 0, scale: 0.6, y: -50, duration: 1 }, 0.4);
+        tl.to(q('.nf-cap[data-cap="1"]'), { opacity: 1, y: 0, duration: 0.6 }, 0.7);
         tl.to(
-          dot,
-          { backgroundColor: RUN_OK, boxShadow: "0 0 0 0 transparent", scale: 1, duration: 0.3 },
-          at + 0.22,
+          q('.nf-node:not([data-node="forecast"])'),
+          { opacity: 1, scale: 1, y: 0, stagger: 0.16, duration: 0.9 },
+          0.7,
         );
-      });
-      tl.to(q(".nf-bar"), { scaleY: 1, stagger: 0.07, duration: 0.4 }, runStart + 0.6);
-      tl.to(q(".nf-pill"), { opacity: 1, y: 0, duration: 0.4 }, runStart + RUN_ORDER.length * 0.4);
-    },
-    { scope: rootRef, dependencies: [reduced] },
-  );
+        tl.to(q(".nf-port"), { opacity: 1, duration: 0.5 }, 1.3);
+        tl.to(q(".nf-wire-local"), { strokeDashoffset: 0, stagger: 0.22, duration: 1 }, 1.1);
+        tl.to(q('.nf-container[data-c="a"]'), { opacity: 1, scale: 1, duration: 0.8 }, 1.7);
+
+        // Act 3: link a second notebook in via the cross-notebook wire.
+        tl.to(q('.nf-cap[data-cap="1"]'), { opacity: 0, y: -16, duration: 0.5 }, 2.1);
+        tl.to(q('.nf-cap[data-cap="2"]'), { opacity: 1, y: 0, duration: 0.6 }, 2.3);
+        tl.to(q(".nf-stage"), { scale: 0.95, duration: 1, ease: "power1.inOut" }, 2.1);
+        tl.to(q('.nf-container[data-c="b"]'), { opacity: 1, scale: 1, duration: 0.7 }, 2.4);
+        tl.to(
+          q('.nf-node[data-node="forecast"]'),
+          { opacity: 1, scale: 1, y: 0, duration: 0.7 },
+          2.5,
+        );
+        tl.to(q(".nf-wire-cross"), { opacity: 1, duration: 0.6 }, 2.7);
+
+        // Marching-ants flow on the cross wire (runs continuously once revealed).
+        gsap.to(q(".nf-wire-cross"), {
+          strokeDashoffset: "-=26",
+          duration: 0.8,
+          ease: "none",
+          repeat: -1,
+        });
+
+        // Act 4: run pulse — light the DAG up in topological order.
+        const runStart = 3.0;
+        tl.to(q('.nf-cap[data-cap="2"]'), { opacity: 0, y: -16, duration: 0.5 }, runStart - 0.1);
+        tl.to(q('.nf-cap[data-cap="3"]'), { opacity: 1, y: 0, duration: 0.6 }, runStart + 0.1);
+        RUN_ORDER.forEach((id, i) => {
+          const at = runStart + i * 0.4;
+          const dot = q(`.nf-status[data-node="${id}"]`);
+          tl.to(
+            dot,
+            {
+              backgroundColor: RUN_TEAL,
+              boxShadow: `0 0 0 4px ${TEAL_GLOW}`,
+              scale: 1.5,
+              duration: 0.2,
+            },
+            at,
+          );
+          tl.to(
+            dot,
+            { backgroundColor: RUN_OK, boxShadow: "0 0 0 0 transparent", scale: 1, duration: 0.3 },
+            at + 0.22,
+          );
+        });
+        tl.to(q(".nf-bar"), { scaleY: 1, stagger: 0.07, duration: 0.4 }, runStart + 0.6);
+        tl.to(
+          q(".nf-pill"),
+          { opacity: 1, y: 0, duration: 0.4 },
+          runStart + RUN_ORDER.length * 0.4,
+        );
+      }, root);
+
+      onResize = () => ScrollTrigger.refresh();
+      window.addEventListener("resize", onResize);
+      ScrollTrigger.refresh();
+    })();
+
+    return () => {
+      cancelled = true;
+      if (onResize) window.removeEventListener("resize", onResize);
+      ctx?.revert();
+    };
+  }, [reduced]);
 
   return (
     <section ref={rootRef} className="relative">
