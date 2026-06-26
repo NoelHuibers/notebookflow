@@ -32,6 +32,8 @@
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
+  /* Landing graph: local (within-notebook) wire colour — matches Wire.tsx. */
+  --nf-wire-local: #1f2937;
 }
 
 .dark {
@@ -60,6 +62,8 @@
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
+  /* Lighter neutral so within-notebook wires read against the dark canvas. */
+  --nf-wire-local: oklch(0.708 0 0);
 }
 
 @theme inline {
@@ -100,6 +104,18 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* Inline code chips in the landing captions. */
+.nf-code {
+  margin-inline: 0.25rem;
+  border-radius: 0.3rem;
+  border: 1px solid var(--border);
+  background: color-mix(in oklch, var(--muted) 70%, var(--card));
+  padding: 0.05rem 0.35rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  color: color-mix(in oklch, var(--primary) 85%, var(--foreground));
 }
 
 /* Pandas DataFrame outputs land here via display(df) -> text/html. Sanitized
