@@ -5,6 +5,7 @@ import type { ReactElement, ReactNode } from "react";
 import { LogoMark } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
 import { authClient, useSession } from "@/lib/auth-client";
+import { LanguageSwitcher, useI18n } from "@/lib/i18n";
 
 export const Route = createFileRoute("/login")({
   component: LoginRoute,
@@ -43,8 +44,10 @@ function GoogleIcon(): ReactElement {
 }
 
 function Shell({ children }: { children: ReactNode }): ReactElement {
+  const { t } = useI18n();
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background px-4 py-10 font-sans text-foreground antialiased">
+    <main className="relative flex min-h-screen flex-col items-center justify-center gap-6 bg-background px-4 py-10 font-sans text-foreground antialiased">
+      <LanguageSwitcher className="absolute right-4 top-4" />
       <Link to="/" className="flex items-center gap-2 transition-opacity hover:opacity-80">
         <LogoMark className="size-7 text-primary" />
         <span className="text-xl font-bold tracking-tight">NotebookFlow</span>
@@ -56,7 +59,7 @@ function Shell({ children }: { children: ReactNode }): ReactElement {
         to="/"
         className="text-xs text-muted-foreground transition-colors hover:text-foreground"
       >
-        ← Back to home
+        {t("common.backHome")}
       </Link>
     </main>
   );
@@ -64,25 +67,29 @@ function Shell({ children }: { children: ReactNode }): ReactElement {
 
 function LoginRoute(): ReactElement {
   return (
-    <ClientOnly
-      fallback={
-        <Shell>
-          <p className="py-4 text-sm text-muted-foreground">Loading…</p>
-        </Shell>
-      }
-    >
+    <ClientOnly fallback={<LoadingShell />}>
       <Login />
     </ClientOnly>
   );
 }
 
+function LoadingShell(): ReactElement {
+  const { t } = useI18n();
+  return (
+    <Shell>
+      <p className="py-4 text-sm text-muted-foreground">{t("login.loading")}</p>
+    </Shell>
+  );
+}
+
 function Login(): ReactElement {
   const session = useSession();
+  const { t } = useI18n();
 
   if (session.isPending) {
     return (
       <Shell>
-        <p className="py-4 text-sm text-muted-foreground">Checking your session…</p>
+        <p className="py-4 text-sm text-muted-foreground">{t("login.checkingSession")}</p>
       </Shell>
     );
   }
@@ -91,15 +98,15 @@ function Login(): ReactElement {
     return (
       <Shell>
         <p className="text-sm text-muted-foreground">
-          Signed in as{" "}
+          {t("login.signedInAs")}{" "}
           <span className="font-medium text-foreground">{session.data.user.email}</span>
         </p>
         <div className="mt-5 flex flex-col gap-2">
           <Button asChild className="w-full">
-            <Link to="/app">Launch app</Link>
+            <Link to="/app">{t("common.launchApp")}</Link>
           </Button>
           <Button variant="outline" className="w-full" onClick={() => void authClient.signOut()}>
-            <LogOut /> Sign out
+            <LogOut /> {t("common.signOut")}
           </Button>
         </div>
       </Shell>
@@ -108,28 +115,26 @@ function Login(): ReactElement {
 
   return (
     <Shell>
-      <h1 className="text-lg font-semibold tracking-tight">Welcome to NotebookFlow</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Sign in to save your work and run pipelines.
-      </p>
+      <h1 className="text-lg font-semibold tracking-tight">{t("login.welcome")}</h1>
+      <p className="mt-1 text-sm text-muted-foreground">{t("login.subtitle")}</p>
       <div className="mt-5 flex flex-col gap-2.5">
         <Button
           variant="outline"
           className="w-full"
           onClick={() => void authClient.signIn.social({ provider: "github", callbackURL: "/app" })}
         >
-          <GithubIcon /> Continue with GitHub
+          <GithubIcon /> {t("login.continueGithub")}
         </Button>
         <Button
           variant="outline"
           className="w-full"
           onClick={() => void authClient.signIn.social({ provider: "google", callbackURL: "/app" })}
         >
-          <GoogleIcon /> Continue with Google
+          <GoogleIcon /> {t("login.continueGoogle")}
         </Button>
       </div>
       <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground">
-        Private beta — access is limited while we're testing.
+        {t("login.betaNote")}
       </p>
     </Shell>
   );
