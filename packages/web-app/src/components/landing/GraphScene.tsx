@@ -21,6 +21,7 @@ import {
   DESIGN_H,
   DESIGN_W,
   EDGES,
+  edgePath,
   type GraphNode,
   NODE_H,
   NODE_W,
@@ -28,7 +29,6 @@ import {
   PORT_CY,
   TAG_COLOR,
   WIRE_CROSS,
-  edgePath,
 } from "./graph-data";
 import { NodeCard } from "./NodeCard";
 import { NotebookCard } from "./NotebookCard";
@@ -99,7 +99,9 @@ export function GraphScene(): ReactElement {
             />
           );
         })}
-        {NODES.map((n) => <Ports key={n.id} node={n} />)}
+        {NODES.map((n) => (
+          <Ports key={n.id} node={n} />
+        ))}
       </svg>
 
       {/* Nodes */}
@@ -145,7 +147,14 @@ export function GraphScene(): ReactElement {
           timeline reveals it (and hides the graph) for the hero, pre-paint. */}
       <div
         className="nf-source"
-        style={{ position: "absolute", left: (DESIGN_W - 480) / 2, top: 120, width: 480, height: 540, opacity: 0 }}
+        style={{
+          position: "absolute",
+          left: (DESIGN_W - 480) / 2,
+          top: 120,
+          width: 480,
+          height: 540,
+          opacity: 0,
+        }}
       >
         <NotebookCard />
       </div>
@@ -159,7 +168,9 @@ function Ports({ node }: { node: GraphNode }): ReactElement {
   return (
     <>
       {node.in?.length ? <PortDot id={node.id} side="in" x={node.x} y={cy} color={color} /> : null}
-      {node.out?.length ? <PortDot id={node.id} side="out" x={node.x + NODE_W} y={cy} color={color} /> : null}
+      {node.out?.length ? (
+        <PortDot id={node.id} side="out" x={node.x + NODE_W} y={cy} color={color} />
+      ) : null}
     </>
   );
 }
@@ -178,6 +189,15 @@ function PortDot({
   color: string;
 }): ReactElement {
   return (
-    <circle className="nf-port" data-node-side={`${id}-${side}`} cx={x} cy={y} r={5} fill="var(--card)" stroke={color} strokeWidth={2} />
+    <circle
+      className="nf-port"
+      data-node-side={`${id}-${side}`}
+      cx={x}
+      cy={y}
+      r={5}
+      fill="var(--card)"
+      stroke={color}
+      strokeWidth={2}
+    />
   );
 }

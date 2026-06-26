@@ -1,9 +1,8 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Boxes, KeyRound, Sparkles, Workflow } from "lucide-react";
 import type { ReactElement } from "react";
-
-import { LandingHero } from "@/components/landing/LandingHero";
 import { Wordmark } from "@/components/Logo";
+import { LandingHero } from "@/components/landing/LandingHero";
 
 export const Route = createFileRoute("/")({
   component: Home,
@@ -34,7 +33,11 @@ const FEATURES = [
 
 const STEPS = [
   { n: "1", title: "Bring your data", body: "Drop a notebook or a CSV, or start from a template." },
-  { n: "2", title: "Wire it up", body: "Compose cells and notebooks into a pipeline on the canvas." },
+  {
+    n: "2",
+    title: "Wire it up",
+    body: "Compose cells and notebooks into a pipeline on the canvas.",
+  },
   { n: "3", title: "Run it", body: "Stream results, charts, and AI output back into your cells." },
 ];
 

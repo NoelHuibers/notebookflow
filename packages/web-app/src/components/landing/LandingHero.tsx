@@ -19,17 +19,16 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { ArrowRight } from "lucide-react";
 import {
   type CSSProperties,
+  lazy,
   type ReactElement,
   type ReactNode,
-  lazy,
   Suspense,
   useEffect,
   useRef,
   useState,
 } from "react";
-
-import { DESIGN_H, DESIGN_W, IDLE_DOT, RUN_OK, RUN_ORDER, RUN_TEAL } from "./graph-data";
 import { GraphScene } from "./GraphScene";
+import { DESIGN_H, DESIGN_W, IDLE_DOT, RUN_OK, RUN_ORDER, RUN_TEAL } from "./graph-data";
 import { useReducedMotion } from "./useReducedMotion";
 
 // Three.js / R3F is ~285 kB gzip — keep it out of the initial landing payload
@@ -103,7 +102,10 @@ export function LandingHero(): ReactElement {
       gsap.set(q(".nf-wire-cross"), { opacity: 0 });
 
       // Captions: 0 visible (SSR hero), the rest hidden.
-      gsap.set(q('.nf-cap[data-cap="1"], .nf-cap[data-cap="2"], .nf-cap[data-cap="3"]'), { opacity: 0, y: 16 });
+      gsap.set(q('.nf-cap[data-cap="1"], .nf-cap[data-cap="2"], .nf-cap[data-cap="3"]'), {
+        opacity: 0,
+        y: 16,
+      });
 
       // ---- Master timeline (pinned + scrubbed) ----------------------------
       const tl = gsap.timeline({
@@ -120,7 +122,7 @@ export function LandingHero(): ReactElement {
 
       // Act 1 → 2: notebook recedes, cells lift into nodes, local wires draw.
       tl.to(q(".nf-scrollcue"), { opacity: 0, duration: 0.3 }, 0.1);
-      tl.to(q(".nf-cap[data-cap=\"0\"]"), { opacity: 0, y: -16, duration: 0.6 }, 0.4);
+      tl.to(q('.nf-cap[data-cap="0"]'), { opacity: 0, y: -16, duration: 0.6 }, 0.4);
       tl.to(q(".nf-source"), { opacity: 0, scale: 0.6, y: -50, duration: 1 }, 0.4);
       tl.to(q('.nf-cap[data-cap="1"]'), { opacity: 1, y: 0, duration: 0.6 }, 0.7);
       tl.to(
@@ -137,7 +139,11 @@ export function LandingHero(): ReactElement {
       tl.to(q('.nf-cap[data-cap="2"]'), { opacity: 1, y: 0, duration: 0.6 }, 2.3);
       tl.to(q(".nf-stage"), { scale: 0.95, duration: 1, ease: "power1.inOut" }, 2.1);
       tl.to(q('.nf-container[data-c="b"]'), { opacity: 1, scale: 1, duration: 0.7 }, 2.4);
-      tl.to(q('.nf-node[data-node="forecast"]'), { opacity: 1, scale: 1, y: 0, duration: 0.7 }, 2.5);
+      tl.to(
+        q('.nf-node[data-node="forecast"]'),
+        { opacity: 1, scale: 1, y: 0, duration: 0.7 },
+        2.5,
+      );
       tl.to(q(".nf-wire-cross"), { opacity: 1, duration: 0.6 }, 2.7);
 
       // Marching-ants flow on the cross wire (runs continuously once revealed).
@@ -155,8 +161,21 @@ export function LandingHero(): ReactElement {
       RUN_ORDER.forEach((id, i) => {
         const at = runStart + i * 0.4;
         const dot = q(`.nf-status[data-node="${id}"]`);
-        tl.to(dot, { backgroundColor: RUN_TEAL, boxShadow: `0 0 0 4px ${TEAL_GLOW}`, scale: 1.5, duration: 0.2 }, at);
-        tl.to(dot, { backgroundColor: RUN_OK, boxShadow: "0 0 0 0 transparent", scale: 1, duration: 0.3 }, at + 0.22);
+        tl.to(
+          dot,
+          {
+            backgroundColor: RUN_TEAL,
+            boxShadow: `0 0 0 4px ${TEAL_GLOW}`,
+            scale: 1.5,
+            duration: 0.2,
+          },
+          at,
+        );
+        tl.to(
+          dot,
+          { backgroundColor: RUN_OK, boxShadow: "0 0 0 0 transparent", scale: 1, duration: 0.3 },
+          at + 0.22,
+        );
       });
       tl.to(q(".nf-bar"), { scaleY: 1, stagger: 0.07, duration: 0.4 }, runStart + 0.6);
       tl.to(q(".nf-pill"), { opacity: 1, y: 0, duration: 0.4 }, runStart + RUN_ORDER.length * 0.4);
@@ -205,7 +224,13 @@ export function LandingHero(): ReactElement {
 }
 
 /** Scales the fixed 1200×820 stage to fit the pinned viewport. */
-function StageScaler({ children, reduced }: { children: ReactNode; reduced: boolean }): ReactElement {
+function StageScaler({
+  children,
+  reduced,
+}: {
+  children: ReactNode;
+  reduced: boolean;
+}): ReactElement {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(0.62);
 
@@ -231,7 +256,14 @@ function StageScaler({ children, reduced }: { children: ReactNode; reduced: bool
       // Lift the stage up a touch so captions have room at the bottom.
       style={{ paddingBottom: reduced ? 0 : "8vh" }}
     >
-      <div style={{ width: DESIGN_W, height: DESIGN_H, transform: `scale(${scale})`, transformOrigin: "center center" }}>
+      <div
+        style={{
+          width: DESIGN_W,
+          height: DESIGN_H,
+          transform: `scale(${scale})`,
+          transformOrigin: "center center",
+        }}
+      >
         {children}
       </div>
     </div>
@@ -248,7 +280,8 @@ const CAPTIONS: Caption[] = [
     kicker: "A notebook is a graph",
     body: (
       <>
-        Mark cell groups with <code className="nf-code">{"# @node:"}</code> and NotebookFlow derives the DAG. Your
+        Mark cell groups with <code className="nf-code">{"# @node:"}</code> and NotebookFlow derives
+        the DAG. Your
         <code className="nf-code">.ipynb</code> stays the source of truth.
       </>
     ),
@@ -257,14 +290,19 @@ const CAPTIONS: Caption[] = [
     kicker: "Notebooks link to notebooks",
     body: (
       <>
-        Wire outputs across files with cross-notebook refs — <code className="nf-code">data:Node.port</code>. Reuse
-        whole pipelines like functions.
+        Wire outputs across files with cross-notebook refs —{" "}
+        <code className="nf-code">data:Node.port</code>. Reuse whole pipelines like functions.
       </>
     ),
   },
   {
     kicker: "Run it",
-    body: <>Execute in dependency order. Stream results, charts, and AI output straight back into your cells.</>,
+    body: (
+      <>
+        Execute in dependency order. Stream results, charts, and AI output straight back into your
+        cells.
+      </>
+    ),
   },
 ];
 
@@ -282,8 +320,9 @@ function Captions(): ReactElement {
             n8n for your <span className="text-primary">notebooks</span>.
           </h1>
           <p className="mt-4 max-w-xl text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
-            Turn notebooks and cell groups into visual pipelines — with AI assistance, bring-your-own-key models, and
-            bidirectional sync across the web, VS Code, and JupyterLab.
+            Turn notebooks and cell groups into visual pipelines — with AI assistance,
+            bring-your-own-key models, and bidirectional sync across the web, VS Code, and
+            JupyterLab.
           </p>
           <div className="mt-6 flex flex-wrap items-center gap-3">
             <Link
@@ -305,12 +344,14 @@ function Captions(): ReactElement {
         {/* Captions 1–3 — stacked in the same spot, crossfaded by the timeline */}
         {CAPTIONS.map((c, i) => (
           <div
-            key={i}
+            key={c.kicker}
             className="nf-cap absolute inset-x-5 bottom-12 sm:bottom-16"
             data-cap={i + 1}
             style={{ opacity: 0 }}
           >
-            <h2 className="text-2xl font-bold tracking-tight text-primary sm:text-3xl">{c.kicker}</h2>
+            <h2 className="text-2xl font-bold tracking-tight text-primary sm:text-3xl">
+              {c.kicker}
+            </h2>
             <p className="mt-3 max-w-xl text-pretty text-base leading-relaxed text-foreground/90 sm:text-lg">
               {c.body}
             </p>

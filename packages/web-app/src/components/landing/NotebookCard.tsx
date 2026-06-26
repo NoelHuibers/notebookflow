@@ -65,27 +65,65 @@ export function NotebookCard(): ReactElement {
         }}
       >
         <LogoMark className="size-4 text-primary" />
-        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>pipeline.ipynb</span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>
+          pipeline.ipynb
+        </span>
         <span style={{ marginLeft: "auto", display: "flex", gap: 5 }}>
           {["#ef4444", "#f59e0b", "#10b981"].map((c) => (
-            <span key={c} style={{ width: 9, height: 9, borderRadius: 999, background: c, opacity: 0.7 }} />
+            <span
+              key={c}
+              style={{ width: 9, height: 9, borderRadius: 999, background: c, opacity: 0.7 }}
+            />
           ))}
         </span>
       </div>
 
       {/* Cells */}
-      <div style={{ flex: 1, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 12, fontSize: 12, lineHeight: 1.55 }}>
+      <div
+        style={{
+          flex: 1,
+          padding: "12px 14px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          fontSize: 12,
+          lineHeight: 1.55,
+        }}
+      >
         {CELLS.map((cell, i) => (
-          <div key={i} style={{ display: "flex", gap: 10 }}>
-            <span style={{ color: "var(--muted-foreground)", opacity: 0.45, userSelect: "none", flex: "none" }}>
+          <div key={cell.marker} style={{ display: "flex", gap: 10 }}>
+            <span
+              style={{
+                color: "var(--muted-foreground)",
+                opacity: 0.45,
+                userSelect: "none",
+                flex: "none",
+              }}
+            >
               [{i + 1}]
             </span>
             <div style={{ minWidth: 0 }}>
-              <div className="nf-marker" style={{ color: "#14b8a6", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              <div
+                className="nf-marker"
+                style={{
+                  color: "#14b8a6",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
                 {cell.marker}
               </div>
-              {cell.lines.map((ln, j) => (
-                <div key={j} style={{ color: tint(ln.kind), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {cell.lines.map((ln) => (
+                <div
+                  key={ln.code}
+                  style={{
+                    color: tint(ln.kind),
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
                   {ln.code}
                 </div>
               ))}

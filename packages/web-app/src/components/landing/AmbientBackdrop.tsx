@@ -50,7 +50,13 @@ function PointField({ dark }: { dark: boolean }): JSX.Element {
   );
 }
 
-export function AmbientBackdrop({ paused = false, dark = false }: { paused?: boolean; dark?: boolean }): JSX.Element {
+export function AmbientBackdrop({
+  paused = false,
+  dark = false,
+}: {
+  paused?: boolean;
+  dark?: boolean;
+}): JSX.Element {
   return (
     <Canvas
       dpr={[1, 1.5]}

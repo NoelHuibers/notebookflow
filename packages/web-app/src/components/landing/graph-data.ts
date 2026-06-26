@@ -60,11 +60,55 @@ export interface GraphNode {
  * pipeline.ipynb, plus one cross-notebook AI node in model.ipynb.
  */
 export const NODES: GraphNode[] = [
-  { id: "load", name: "Load Data", tag: "input", x: 64, y: 150, out: ["df"], meta: "demo.csv · 6 rows" },
-  { id: "filter", name: "Filter", tag: "transform", x: 336, y: 150, in: ["Load Data.df"], out: ["clean_df"], meta: "5 rows" },
-  { id: "summarize", name: "Summarize", tag: "transform", x: 608, y: 150, in: ["Filter.clean_df"], out: ["by_region"], meta: "3 rows" },
-  { id: "report", name: "Report", tag: "output", x: 880, y: 150, in: ["Summarize.by_region"], meta: "by region", chart: true },
-  { id: "forecast", name: "Forecast", tag: "ai", x: 608, y: 470, in: ["data:Summarize.by_region"], out: ["trend"], meta: "model.ipynb" },
+  {
+    id: "load",
+    name: "Load Data",
+    tag: "input",
+    x: 64,
+    y: 150,
+    out: ["df"],
+    meta: "demo.csv · 6 rows",
+  },
+  {
+    id: "filter",
+    name: "Filter",
+    tag: "transform",
+    x: 336,
+    y: 150,
+    in: ["Load Data.df"],
+    out: ["clean_df"],
+    meta: "5 rows",
+  },
+  {
+    id: "summarize",
+    name: "Summarize",
+    tag: "transform",
+    x: 608,
+    y: 150,
+    in: ["Filter.clean_df"],
+    out: ["by_region"],
+    meta: "3 rows",
+  },
+  {
+    id: "report",
+    name: "Report",
+    tag: "output",
+    x: 880,
+    y: 150,
+    in: ["Summarize.by_region"],
+    meta: "by region",
+    chart: true,
+  },
+  {
+    id: "forecast",
+    name: "Forecast",
+    tag: "ai",
+    x: 608,
+    y: 470,
+    in: ["data:Summarize.by_region"],
+    out: ["trend"],
+    meta: "model.ipynb",
+  },
 ];
 
 /** Order the run-pulse sweeps the DAG (topological). */

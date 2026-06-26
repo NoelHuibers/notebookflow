@@ -9,7 +9,7 @@
  */
 import type { CSSProperties, ReactElement } from "react";
 
-import { IDLE_DOT, type GraphNode, TAG_COLOR } from "./graph-data";
+import { type GraphNode, IDLE_DOT, TAG_COLOR } from "./graph-data";
 
 const cardStyle: CSSProperties = {
   position: "absolute",
@@ -51,7 +51,15 @@ export function NodeCard({ node }: { node: GraphNode }): ReactElement {
             flex: "none",
           }}
         />
-        <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em", flex: 1, whiteSpace: "nowrap" }}>
+        <span
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            letterSpacing: "-0.01em",
+            flex: 1,
+            whiteSpace: "nowrap",
+          }}
+        >
           {node.name}
         </span>
         <span
@@ -106,7 +114,9 @@ function Bar({ w, muted }: { w: string; muted?: boolean }): ReactElement {
         height: 5,
         width: w,
         borderRadius: 3,
-        background: muted ? "var(--muted)" : "color-mix(in oklch, var(--muted-foreground) 45%, transparent)",
+        background: muted
+          ? "var(--muted)"
+          : "color-mix(in oklch, var(--muted-foreground) 45%, transparent)",
       }}
     />
   );
@@ -117,9 +127,9 @@ function Chart({ color }: { color: string }): ReactElement {
   const bars = [0.4, 0.7, 1, 0.55];
   return (
     <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 38 }}>
-      {bars.map((h, i) => (
+      {bars.map((h) => (
         <span
-          key={i}
+          key={h}
           className="nf-bar"
           style={{
             width: 12,
