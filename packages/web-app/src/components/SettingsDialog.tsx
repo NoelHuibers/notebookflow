@@ -3,6 +3,7 @@ import type { ReactElement } from "react";
 import { useEffect } from "react";
 
 import { Button } from "@/components/ui/button";
+import { LanguageSwitcher, useI18n } from "@/lib/i18n";
 import type { UserSettings } from "@/lib/settings";
 
 interface SettingsDialogProps {
@@ -30,6 +31,8 @@ export function SettingsDialog({
   onSaveKeyToAccount,
   onRemoveKeyFromAccount,
 }: SettingsDialogProps): ReactElement {
+  const { t } = useI18n();
+
   // Esc closes the modal, matching the other overlays.
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -121,6 +124,10 @@ export function SettingsDialog({
             <option value="dark">Dark</option>
           </select>
         </label>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-muted-foreground">{t("settings.language")}</span>
+          <LanguageSwitcher />
+        </div>
 
         <div className="mt-1 border-t pt-3">
           <span className="font-semibold tracking-tight">AI provider (bring your own key)</span>
