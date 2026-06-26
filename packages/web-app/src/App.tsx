@@ -68,6 +68,7 @@ import { ExplanationPanel } from "@/components/ExplanationPanel";
 import { FileDropZone } from "@/components/FileDropZone";
 import { FilesRail } from "@/components/FilesRail";
 import { InspectorPanel } from "@/components/InspectorPanel";
+import { Wordmark } from "@/components/Logo";
 import { PaletteDrawer } from "@/components/PaletteDrawer";
 import { PaneDivider } from "@/components/PaneDivider";
 import { SettingsDialog } from "@/components/SettingsDialog";
@@ -76,7 +77,7 @@ import { TriggersDialog } from "@/components/TriggersDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useSession } from "@/lib/auth-client";
+import { authClient, useSession } from "@/lib/auth-client";
 import { bootstrapBaselineSources, bootstrapFromFixture } from "@/lib/bootstrap";
 import { applyCellPatch } from "@/lib/cellPatch";
 import type {
@@ -1638,7 +1639,7 @@ export function App(): ReactElement {
     <FileDropZone onFile={handleFile}>
       <div className="flex h-screen overflow-hidden flex-col bg-background text-foreground font-sans">
         <header className="flex items-center gap-3 border-b bg-card px-4 py-2.5">
-          <span className="font-semibold tracking-tight">NotebookFlow</span>
+          <Wordmark />
           <EngineStatus client={clientRef.current} />
           <div className="ml-auto flex items-center gap-2">
             {canSaveInPlace && (
@@ -1817,6 +1818,8 @@ export function App(): ReactElement {
             onClose={() => {
               setIsSettingsOpen(false);
             }}
+            email={session.data?.user.email ?? null}
+            onSignOut={() => void authClient.signOut()}
             signedIn={session.data !== null && session.data !== undefined}
             accountKeyState={accountKeyState}
             onSaveKeyToAccount={() => {
