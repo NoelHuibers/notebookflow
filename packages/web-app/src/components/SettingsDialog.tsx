@@ -1,4 +1,4 @@
-import { Settings as SettingsIcon, X } from "lucide-react";
+import { LogOut, Settings as SettingsIcon, X } from "lucide-react";
 import type { ReactElement } from "react";
 import { useEffect } from "react";
 
@@ -9,6 +9,9 @@ interface SettingsDialogProps {
   settings: UserSettings;
   onChange: (next: UserSettings) => void;
   onClose: () => void;
+  // Account (#59) — the signed-in user's email + sign-out, or null when signed out.
+  email: string | null;
+  onSignOut: () => void;
   // Opt-in server-side key storage (#61). Only shown when signed in.
   signedIn: boolean;
   accountKeyState: "none" | "saved" | "saving";
@@ -20,6 +23,8 @@ export function SettingsDialog({
   settings,
   onChange,
   onClose,
+  email,
+  onSignOut,
   signedIn,
   accountKeyState,
   onSaveKeyToAccount,
@@ -56,6 +61,33 @@ export function SettingsDialog({
             <X className="size-3.5" />
           </Button>
         </div>
+
+        <div className="rounded-md border bg-background/40 p-3">
+          {signedIn && email !== null ? (
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Account
+                </div>
+                <div className="truncate text-[13px] font-medium">{email}</div>
+              </div>
+              <Button variant="outline" size="sm" className="h-7 shrink-0" onClick={onSignOut}>
+                <LogOut className="size-3.5" />
+                Sign out
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">
+                Not signed in — your work stays in this browser only.
+              </span>
+              <a href="/login" className="shrink-0 font-medium text-primary hover:underline">
+                Sign in
+              </a>
+            </div>
+          )}
+        </div>
+
         <label className="flex flex-col gap-1">
           <span className="text-muted-foreground">Engine URL override</span>
           <input
