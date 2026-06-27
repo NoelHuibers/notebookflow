@@ -1,5 +1,5 @@
 import type { NodeManifestDef, NodeModel } from "@notebookflow/graph-canvas";
-import { NODE_DRAG_MIME, NodeConfigEditor } from "@notebookflow/graph-canvas";
+import { NodeConfigEditor, setPaletteDragData } from "@notebookflow/graph-canvas";
 import type { ReactElement } from "react";
 import { useEffect, useState } from "react";
 
@@ -182,8 +182,7 @@ export function CanvasSidebar(props: CanvasSidebarProps): ReactElement {
                         type="button"
                         draggable
                         onDragStart={(event) => {
-                          event.dataTransfer.setData(NODE_DRAG_MIME, manifest.id);
-                          event.dataTransfer.effectAllowed = "copy";
+                          setPaletteDragData(event.dataTransfer, manifest.id);
                         }}
                         onClick={() => {
                           onPick(manifest);

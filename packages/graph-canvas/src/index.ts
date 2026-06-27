@@ -6,10 +6,17 @@
  * module so that visual behavior stays consistent across platforms.
  */
 
-export { Canvas, NODE_DRAG_MIME } from "./components/Canvas";
+export type { PaneDropTarget } from "./components/Canvas";
+export { Canvas } from "./components/Canvas";
 export { NotebookNode } from "./components/Node";
 export { NodeConfigEditor } from "./components/NodeConfigEditor";
 export { NodeGroup } from "./components/NodeGroup";
+export { NODE_DRAG_MIME } from "./components/nodeDragMime";
+export {
+  isPaletteDrag,
+  readPaletteDragManifestId,
+  setPaletteDragData,
+} from "./components/paletteDragData";
 export { Wire } from "./components/Wire";
 export type {
   NodeConfigFieldDef,

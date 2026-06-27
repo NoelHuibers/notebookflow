@@ -11,7 +11,7 @@
 
 import { Map as MapIcon, Network } from "lucide-react";
 import type { DragEvent, ReactElement } from "react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Connection, Edge, EdgeTypes, Node, NodeProps, NodeTypes } from "reactflow";
 import {
   Background,
@@ -31,6 +31,9 @@ import {
 
 import type { GraphModel, NodeModel, NodeTag, RunSummary, RuntimeState, WireModel } from "../types";
 import type { PortPlacement } from "./InletOutletGrid";
+import type { InsertSlotData } from "./InsertSlotNode";
+import { InsertSlotNode, insertSlotId } from "./InsertSlotNode";
+import { InsertDropContext } from "./insertDropContext";
 import type { NotebookNodeData } from "./Node";
 import { NotebookNode } from "./Node";
 import type { NodeGroupData } from "./NodeGroup";
@@ -47,6 +50,7 @@ import {
   type NodeLayoutHints,
   stackedGroupWidth,
 } from "./nodeLayout";
+import { isPaletteDrag, readPaletteDragManifestId } from "./paletteDragData";
 import { collectInputRefs, collectOutputSuggestions } from "./portSuggestions";
 import type { WireData } from "./Wire";
 import { Wire } from "./Wire";
@@ -54,7 +58,10 @@ import { Wire } from "./Wire";
 const NODE_TYPES = {
   notebook: MeasuredNotebookNode,
   group: NodeGroup,
+  insertSlot: InsertSlotNode,
 } satisfies NodeTypes;
+
+export { NODE_DRAG_MIME } from "./nodeDragMime";
 
 function MeasuredNotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
   const { id, data } = props;
@@ -128,12 +135,14 @@ const GROUP_LAYOUT: GroupLayoutConstants = {
 
 export type CanvasLayout = "manual" | "dagre";
 
-/**
- * MIME type used by the node-library palette to ship a manifest id through
- * the drag-and-drop dataTransfer payload. Hosts that render a palette set
- * this on `onDragStart`; Canvas reads it on `onDrop`.
- */
-export const NODE_DRAG_MIME = "application/notebookflow-manifest";
+export interface PaneDropTarget {
+  /** Flow coordinates when dropped on empty canvas space (appends to the active notebook). */
+  position?: { x: number; y: number };
+  /** Notebook group id (= notebook path) to insert into. */
+  groupId?: string;
+  /** Insert immediately after this cell index within the group notebook. */
+  insertAfterCellIndex?: number;
+}
 
 const FLOW_STYLE = {
   width: "100%",
@@ -191,11 +200,11 @@ export interface CanvasProps {
    */
   runSummary?: RunSummary | null;
   /**
-   * Fired when the user drops a palette item onto the canvas. The position
-   * is in React Flow coordinates (already projected from screen space).
-   * Hosts typically look the manifest up and call their createNode flow.
+   * Fired when the user drops a palette item onto the canvas or a gap slot.
+   * Gap drops include `groupId` and `insertAfterCellIndex` so hosts can insert
+   * the new cell after the leading node in that notebook.
    */
-  onPaneDrop?: (manifestId: string, position: { x: number; y: number }) => void;
+  onPaneDrop?: (manifestId: string, target: PaneDropTarget) => void;
   /** Whether the minimap is shown. Off by default; toggled by the host (M). */
   showMinimap?: boolean;
   /** Toggle the minimap from the canvas control cluster. */
@@ -234,6 +243,21 @@ function CanvasInner(props: CanvasProps): ReactElement {
   } = props;
 
   const [layout, setLayout] = useState<CanvasLayout>("manual");
+  const [paletteDragActive, setPaletteDragActive] = useState(false);
+  const [hoveredSlotId, setHoveredSlotId] = useState<string | null>(null);
+  const paletteDragDepthRef = useRef(0);
+
+  useEffect(() => {
+    const endPaletteDrag = (): void => {
+      paletteDragDepthRef.current = 0;
+      setPaletteDragActive(false);
+      setHoveredSlotId(null);
+    };
+    document.addEventListener("dragend", endPaletteDrag);
+    return () => {
+      document.removeEventListener("dragend", endPaletteDrag);
+    };
+  }, []);
 
   const rfEdges = useMemo<Edge<WireData>[]>(() => buildRfEdges(graph), [graph]);
 
@@ -345,97 +369,149 @@ function CanvasInner(props: CanvasProps): ReactElement {
   // Screen coordinates from the DragEvent are projected into React Flow's
   // own coordinate space so the host can record the drop position.
   const reactFlow = useReactFlow();
+  const handleWrapperDragEnter = useCallback((event: DragEvent<HTMLDivElement>): void => {
+    if (!isPaletteDrag(event.dataTransfer)) {
+      return;
+    }
+    paletteDragDepthRef.current += 1;
+    setPaletteDragActive(true);
+  }, []);
+
+  const handleWrapperDragLeave = useCallback((event: DragEvent<HTMLDivElement>): void => {
+    if (!isPaletteDrag(event.dataTransfer)) {
+      return;
+    }
+    paletteDragDepthRef.current = Math.max(0, paletteDragDepthRef.current - 1);
+    if (paletteDragDepthRef.current === 0) {
+      setPaletteDragActive(false);
+      setHoveredSlotId(null);
+    }
+  }, []);
+
   const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>): void => {
-    if (!event.dataTransfer.types.includes(NODE_DRAG_MIME)) {
+    if (!isPaletteDrag(event.dataTransfer)) {
       return;
     }
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
   }, []);
+
+  const handleInsertDrop = useCallback(
+    (manifestId: string, groupId: string, afterCellIndex: number): void => {
+      if (onPaneDrop === undefined) {
+        return;
+      }
+      onPaneDrop(manifestId, { groupId, insertAfterCellIndex: afterCellIndex });
+    },
+    [onPaneDrop],
+  );
+
+  const insertDropContextValue = useMemo(
+    () => ({
+      paletteDragActive,
+      setPaletteDragActive,
+      hoveredSlotId,
+      setHoveredSlotId,
+      onInsertDrop: handleInsertDrop,
+    }),
+    [paletteDragActive, hoveredSlotId, handleInsertDrop],
+  );
+
   const handleDrop = useCallback(
     (event: DragEvent<HTMLDivElement>): void => {
       if (onPaneDrop === undefined) {
         return;
       }
-      const manifestId = event.dataTransfer.getData(NODE_DRAG_MIME);
+      const manifestId = readPaletteDragManifestId(event.dataTransfer);
       if (manifestId === "") {
         return;
       }
       event.preventDefault();
+      paletteDragDepthRef.current = 0;
+      setPaletteDragActive(false);
+      setHoveredSlotId(null);
       const position = reactFlow.screenToFlowPosition({
         x: event.clientX,
         y: event.clientY,
       });
-      onPaneDrop(manifestId, position);
+      onPaneDrop(manifestId, { position });
     },
     [onPaneDrop, reactFlow],
   );
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: drop target for the palette drag-and-drop flow; keyboard equivalent is the palette's click-to-add
-    <div style={{ width: "100%", height: "100%" }} onDragOver={handleDragOver} onDrop={handleDrop}>
-      <style>{`.notebookflow-canvas .react-flow__handle { border: none; outline: none; box-shadow: none; }`}</style>
-      <ReactFlow
-        nodes={nodes}
-        edges={rfEdges}
-        onNodesChange={onNodesChange}
-        nodeTypes={NODE_TYPES}
-        edgeTypes={EDGE_TYPES}
-        defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
-        className="notebookflow-canvas"
-        style={FLOW_STYLE}
-        onConnect={handleConnect}
-        isValidConnection={isValidConnection}
-        onNodeClick={handleNodeClick}
-        onPaneClick={handlePaneClick}
-        onEdgesDelete={handleEdgesDelete}
-        nodesDraggable={false}
-        fitView
-        proOptions={{ hideAttribution: true }}
+    <InsertDropContext.Provider value={insertDropContextValue}>
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: drop target for the palette drag-and-drop flow; keyboard equivalent is the palette's click-to-add */}
+      <div
+        style={{ width: "100%", height: "100%" }}
+        onDragEnter={handleWrapperDragEnter}
+        onDragLeave={handleWrapperDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
       >
-        <MeasuredGroupLayout portPlacement={portPlacement} />
-        <Background />
-        <Controls>
-          <ControlButton
-            onClick={onToggleMinimap}
-            title={showMinimap === true ? "Hide minimap (M)" : "Show minimap (M)"}
-            aria-label="Toggle minimap"
-          >
-            <MapIcon size={14} />
-          </ControlButton>
-          <ControlButton
-            onClick={() => {
-              setLayout((current) => (current === "manual" ? "dagre" : "manual"));
-            }}
-            title={`Layout: ${layout} — click to switch to ${
-              layout === "manual" ? "horizontal" : "vertical"
-            }`}
-            aria-label="Toggle layout"
-          >
-            <Network size={14} />
-          </ControlButton>
-        </Controls>
-        {showMinimap === true && (
-          <MiniMap
-            nodeColor={miniMapNodeColor}
-            nodeStrokeWidth={2}
-            pannable
-            zoomable
-            position="bottom-right"
-            ariaLabel="Canvas minimap"
-            className="!rounded-md !border !bg-card"
-          />
-        )}
-        <Panel position="top-left">
-          <CanvasBreadcrumbs graph={graph} />
-        </Panel>
-        {runSummary !== undefined && runSummary !== null && (
-          <Panel position="bottom-center">
-            <RunSummaryOverlay summary={runSummary} />
+        <style>{`.notebookflow-canvas .react-flow__handle { border: none; outline: none; box-shadow: none; }`}</style>
+        <ReactFlow
+          nodes={nodes}
+          edges={rfEdges}
+          onNodesChange={onNodesChange}
+          nodeTypes={NODE_TYPES}
+          edgeTypes={EDGE_TYPES}
+          defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
+          className="notebookflow-canvas"
+          style={FLOW_STYLE}
+          onConnect={handleConnect}
+          isValidConnection={isValidConnection}
+          onNodeClick={handleNodeClick}
+          onPaneClick={handlePaneClick}
+          onEdgesDelete={handleEdgesDelete}
+          nodesDraggable={false}
+          fitView
+          proOptions={{ hideAttribution: true }}
+        >
+          <MeasuredGroupLayout portPlacement={portPlacement} />
+          <Background />
+          <Controls>
+            <ControlButton
+              onClick={onToggleMinimap}
+              title={showMinimap === true ? "Hide minimap (M)" : "Show minimap (M)"}
+              aria-label="Toggle minimap"
+            >
+              <MapIcon size={14} />
+            </ControlButton>
+            <ControlButton
+              onClick={() => {
+                setLayout((current) => (current === "manual" ? "dagre" : "manual"));
+              }}
+              title={`Layout: ${layout} — click to switch to ${
+                layout === "manual" ? "horizontal" : "vertical"
+              }`}
+              aria-label="Toggle layout"
+            >
+              <Network size={14} />
+            </ControlButton>
+          </Controls>
+          {showMinimap === true && (
+            <MiniMap
+              nodeColor={miniMapNodeColor}
+              nodeStrokeWidth={2}
+              pannable
+              zoomable
+              position="bottom-right"
+              ariaLabel="Canvas minimap"
+              className="!rounded-md !border !bg-card"
+            />
+          )}
+          <Panel position="top-left">
+            <CanvasBreadcrumbs graph={graph} />
           </Panel>
-        )}
-      </ReactFlow>
-    </div>
+          {runSummary !== undefined && runSummary !== null && (
+            <Panel position="bottom-center">
+              <RunSummaryOverlay summary={runSummary} />
+            </Panel>
+          )}
+        </ReactFlow>
+      </div>
+    </InsertDropContext.Provider>
   );
 }
 
@@ -655,6 +731,15 @@ function buildNodes(
 
     let stackedX = NODE_X_INSET;
     let stackedY = NODE_GROUP_HEADER_HEIGHT + GROUP_INNER_TOP_PADDING;
+    let maxCellHeight = 0;
+    for (const cell of cellLayouts) {
+      maxCellHeight = Math.max(maxCellHeight, cell.height);
+    }
+    const slotInnerWidth = Math.max(
+      groupWidth - NODE_X_INSET - GROUP_INNER_RIGHT_PADDING,
+      NODE_GAP,
+    );
+    const slotOrientation = horizontalCells ? "horizontal" : "vertical";
 
     for (const cell of cellLayouts) {
       const node = cell.node;
@@ -688,11 +773,6 @@ function buildNodes(
       nodeData.portPlacement = portPlacement;
       const childX = horizontalCells ? stackedX : NODE_X_INSET;
       const childY = stackedY;
-      if (horizontalCells) {
-        stackedX += cell.width + NODE_GAP;
-      } else {
-        stackedY += cell.height + NODE_GAP;
-      }
       rfNodes.push({
         id: node.id,
         type: "notebook",
@@ -703,6 +783,44 @@ function buildNodes(
         draggable: false,
         selectable: true,
       });
+
+      const afterCellIndex = node.cellIndices[0] ?? 0;
+      const slotData: InsertSlotData = {
+        groupId: group.id,
+        afterCellIndex,
+        orientation: slotOrientation,
+      };
+      if (horizontalCells) {
+        rfNodes.push({
+          id: insertSlotId(group.id, afterCellIndex),
+          type: "insertSlot",
+          parentNode: groupNodeId,
+          extent: "parent",
+          position: { x: stackedX + cell.width, y: childY },
+          data: slotData,
+          draggable: false,
+          selectable: false,
+          focusable: false,
+          zIndex: 5,
+          style: { width: NODE_GAP, height: maxCellHeight },
+        });
+        stackedX += cell.width + NODE_GAP;
+      } else {
+        rfNodes.push({
+          id: insertSlotId(group.id, afterCellIndex),
+          type: "insertSlot",
+          parentNode: groupNodeId,
+          extent: "parent",
+          position: { x: NODE_X_INSET, y: stackedY + cell.height },
+          data: slotData,
+          draggable: false,
+          selectable: false,
+          focusable: false,
+          zIndex: 5,
+          style: { width: slotInnerWidth, height: NODE_GAP },
+        });
+        stackedY += cell.height + NODE_GAP;
+      }
     }
   }
 

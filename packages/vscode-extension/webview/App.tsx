@@ -32,6 +32,7 @@ import {
   readNotebookflowMetadata,
   resolveNodeConfig,
   sanitizeConfigForManifest,
+  setPaletteDragData,
   writeNotebookflowMetadata,
 } from "@notebookflow/graph-canvas";
 import type { CellPatch, NotebookCell } from "@notebookflow/graph-canvas/sync";
@@ -237,9 +238,16 @@ export function App(): ReactElement {
   );
 
   const handleAddNode = useCallback(
-    (manifest: NodeManifestDef): void => {
+    (manifest: NodeManifestDef, options?: { insertAtCellIndex?: number }): void => {
       const engine = engineRef.current;
       if (notebookPath === "" || engineUrl === null || engine === null) {
+        setEvents((prev) => [
+          ...prev,
+          {
+            type: "error",
+            message: "Start the engine before adding nodes from the palette.",
+          },
+        ]);
         return;
       }
       const config = defaultConfigForManifest(manifest);
@@ -267,6 +275,9 @@ export function App(): ReactElement {
               outputs: manifest.outputs.map((port) => port.name),
               bodySource: result.source,
               metadata,
+              ...(options?.insertAtCellIndex === undefined
+                ? {}
+                : { insertAtCellIndex: options.insertAtCellIndex }),
             },
             Date.now(),
           );
@@ -277,6 +288,28 @@ export function App(): ReactElement {
         });
     },
     [engineUrl, notebookPath],
+  );
+
+  const handlePaneDrop = useCallback(
+    (
+      manifestId: string,
+      target: {
+        groupId?: string;
+        insertAfterCellIndex?: number;
+        position?: { x: number; y: number };
+      },
+    ): void => {
+      const manifest = paletteNodes.find((entry) => entry.id === manifestId);
+      if (manifest === undefined) {
+        return;
+      }
+      if (target.groupId !== undefined && target.insertAfterCellIndex !== undefined) {
+        handleAddNode(manifest, { insertAtCellIndex: target.insertAfterCellIndex + 1 });
+        return;
+      }
+      handleAddNode(manifest);
+    },
+    [paletteNodes, handleAddNode],
   );
 
   useEffect(() => {
@@ -624,6 +657,7 @@ export function App(): ReactElement {
             onOutputsChange={handleOutputsChange}
             onWireCreate={handleWireCreate}
             onWireDelete={handleWireDelete}
+            onPaneDrop={handlePaneDrop}
           />
         </main>
 
@@ -694,10 +728,20 @@ export function App(): ReactElement {
                           <button
                             key={manifest.id}
                             type="button"
+                            draggable={engineUrl !== null}
+                            disabled={engineUrl === null}
+                            onDragStart={(event) => {
+                              setPaletteDragData(event.dataTransfer, manifest.id);
+                            }}
                             onClick={() => {
                               handleAddNode(manifest);
                             }}
-                            className="rounded border bg-background px-3 py-2 text-left transition-colors hover:bg-muted"
+                            title={
+                              engineUrl === null
+                                ? "Start the engine to add nodes"
+                                : "Click to append at the end, or drag onto the canvas to place between nodes"
+                            }
+                            className="cursor-grab rounded border bg-background px-3 py-2 text-left transition-colors hover:bg-muted/70 active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-sm font-medium">{manifest.name}</span>

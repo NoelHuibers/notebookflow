@@ -14,6 +14,13 @@ export interface MeasuredSize {
   height: number;
 }
 
+export interface InsertSlotLayout {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface GroupLayoutConstants {
   columnWidth: number;
   columnGap: number;
@@ -207,6 +214,53 @@ export function groupRowY(priorGroupHeights: number[], gap = 0): number {
   return priorGroupHeights.reduce((y: number, height: number) => y + height + gap, 0);
 }
 
+/** Positions gap drop targets immediately after each notebook node in a group. */
+export function layoutInsertSlotsForGroup(
+  children: Node[],
+  sizes: MeasuredSize[],
+  childPositions: ReadonlyMap<string, { x: number; y: number }>,
+  constants: GroupLayoutConstants,
+  horizontalCells: boolean,
+  groupId: string,
+  groupWidth: number,
+  maxCellHeight: number,
+): Map<string, InsertSlotLayout> {
+  const slots = new Map<string, InsertSlotLayout>();
+  const innerWidth = Math.max(
+    groupWidth - constants.nodeXInset - constants.groupInnerRightPadding,
+    constants.nodeGap,
+  );
+
+  for (let index = 0; index < children.length; index += 1) {
+    const child = children[index];
+    const size = sizes[index];
+    const position = childPositions.get(child?.id ?? "");
+    if (child === undefined || size === undefined || position === undefined) {
+      continue;
+    }
+    const data = child.data as { cellIndices?: number[] };
+    const afterCellIndex = data.cellIndices?.[0] ?? 0;
+    const slotId = `insert:${groupId}::${String(afterCellIndex)}`;
+    if (horizontalCells) {
+      slots.set(slotId, {
+        x: position.x + size.width,
+        y: position.y,
+        width: constants.nodeGap,
+        height: maxCellHeight,
+      });
+    } else {
+      slots.set(slotId, {
+        x: constants.nodeXInset,
+        y: position.y + size.height,
+        width: innerWidth,
+        height: constants.nodeGap,
+      });
+    }
+  }
+
+  return slots;
+}
+
 /** Reposition notebook nodes and resize groups from measured DOM dimensions. */
 export function applyMeasuredGroupLayout(
   nodes: Node[],
@@ -221,6 +275,7 @@ export function applyMeasuredGroupLayout(
   }
 
   const childPositions = new Map<string, { x: number; y: number }>();
+  const insertSlotLayouts = new Map<string, InsertSlotLayout>();
   const groupStyles = new Map<string, { width: number; height: number }>();
   const groupPositions = new Map<string, { x: number; y: number }>();
 
@@ -267,6 +322,23 @@ export function applyMeasuredGroupLayout(
         constants.groupInnerTopPadding +
         maxCellHeight +
         constants.groupInnerBottomPadding;
+      if (!collapsed) {
+        const groupData = group.data as { id?: string };
+        const groupNotebookId = groupData.id ?? group.id.replace(/^group:/, "");
+        const slots = layoutInsertSlotsForGroup(
+          children,
+          sizes,
+          childPositions,
+          constants,
+          true,
+          groupNotebookId,
+          groupWidth,
+          maxCellHeight,
+        );
+        for (const [slotId, layout] of slots) {
+          insertSlotLayouts.set(slotId, layout);
+        }
+      }
     } else {
       let maxCellWidth = 0;
       let stackedY = constants.groupHeaderHeight + constants.groupInnerTopPadding;
@@ -290,6 +362,23 @@ export function applyMeasuredGroupLayout(
       groupWidth = stackedGroupWidth(maxCellWidth, constants);
       expandedHeight =
         constants.groupHeaderHeight + stackedContentHeight + constants.groupInnerBottomPadding;
+      if (!collapsed) {
+        const groupData = group.data as { id?: string };
+        const groupNotebookId = groupData.id ?? group.id.replace(/^group:/, "");
+        const slots = layoutInsertSlotsForGroup(
+          children,
+          sizes,
+          childPositions,
+          constants,
+          false,
+          groupNotebookId,
+          groupWidth,
+          0,
+        );
+        for (const [slotId, layout] of slots) {
+          insertSlotLayouts.set(slotId, layout);
+        }
+      }
     }
 
     groupStyles.set(group.id, {
@@ -334,13 +423,34 @@ export function applyMeasuredGroupLayout(
     }
 
     const position = childPositions.get(node.id);
-    if (position === undefined) {
-      return node;
+    if (position !== undefined) {
+      if (node.position.x === position.x && node.position.y === position.y) {
+        return node;
+      }
+      return { ...node, position };
     }
-    if (node.position.x === position.x && node.position.y === position.y) {
-      return node;
+
+    if (node.type === "insertSlot") {
+      const slotLayout = insertSlotLayouts.get(node.id);
+      if (slotLayout === undefined) {
+        return node;
+      }
+      const prevStyle = node.style as { width?: number; height?: number } | undefined;
+      const sizeUnchanged =
+        prevStyle?.width === slotLayout.width && prevStyle?.height === slotLayout.height;
+      const positionUnchanged =
+        node.position.x === slotLayout.x && node.position.y === slotLayout.y;
+      if (sizeUnchanged && positionUnchanged) {
+        return node;
+      }
+      return {
+        ...node,
+        position: { x: slotLayout.x, y: slotLayout.y },
+        style: { ...node.style, width: slotLayout.width, height: slotLayout.height },
+      };
     }
-    return { ...node, position };
+
+    return node;
   });
 }
 

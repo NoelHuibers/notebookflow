@@ -54,6 +54,8 @@ export interface CreateNodeOptions {
   bodySource?: string;
   /** Persisted notebook metadata for this node instance, e.g. manifest id. */
   metadata?: Record<string, unknown>;
+  /** When set, insert at this index instead of appending at the end. */
+  insertAtCellIndex?: number;
 }
 
 export interface UpdateNodeContentsOptions {
@@ -306,7 +308,7 @@ export class SyncEngine {
     await this.applyPorts(node, node.inputs, normalizeOutputs(nextOutputs), timestamp);
   }
 
-  /** Graph→cell: append a brand-new node cell to the notebook. */
+  /** Graph→cell: append or insert a brand-new node cell in the notebook. */
   async createNode(
     notebookPath: string,
     options: CreateNodeOptions,
@@ -319,6 +321,13 @@ export class SyncEngine {
       );
     }
 
+    const insertAt = options.insertAtCellIndex ?? cellCount;
+    if (insertAt < 0 || insertAt > cellCount) {
+      throw new Error(
+        `SyncEngine.createNode: insertAtCellIndex ${String(insertAt)} out of range for ${String(cellCount)} cells`,
+      );
+    }
+
     const name = this.uniqueNodeName(notebookPath, options.name);
     const markerBody = {
       name,
@@ -328,12 +337,19 @@ export class SyncEngine {
     } satisfies MarkerBody;
     const newSource = composeNodeSource(markerBody, options.bodySource ?? "");
 
-    this.sourceCache.set(cellKey(notebookPath, cellCount), newSource);
+    for (let index = cellCount - 1; index >= insertAt; index -= 1) {
+      const source = this.sourceCache.get(cellKey(notebookPath, index));
+      if (source !== undefined) {
+        this.sourceCache.set(cellKey(notebookPath, index + 1), source);
+        this.sourceCache.delete(cellKey(notebookPath, index));
+      }
+    }
+    this.sourceCache.set(cellKey(notebookPath, insertAt), newSource);
     this.notebookCellCounts.set(notebookPath, cellCount + 1);
 
     await this.opts.onCellPatch({
       notebookPath,
-      cellIndex: cellCount,
+      cellIndex: insertAt,
       operation: "insert",
       cellType: "code",
       newSource,

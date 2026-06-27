@@ -388,6 +388,35 @@ describe("SyncEngine.createNode", () => {
 
     expect(adapter.patches[0]?.newSource).toMatch(/^# @node: Load CSV 2 {2}\[input] {2}out=df\n/);
   });
+
+  it("inserts a node after a specific cell index", async () => {
+    const adapter = recordingAdapter();
+    const engine = new SyncEngine(adapter.options);
+    const cells = toNotebookCells(twoNode);
+    await engine.ingestNotebook(TWO_NODE_PATH, cells, 100);
+
+    await engine.createNode(
+      TWO_NODE_PATH,
+      {
+        name: "Middle",
+        tag: "transform",
+        outputs: ["mid"],
+        bodySource: "mid = df.copy()\n",
+        insertAtCellIndex: 1,
+      },
+      200,
+    );
+
+    expect(adapter.patches).toHaveLength(1);
+    expect(adapter.patches[0]).toMatchObject({
+      notebookPath: TWO_NODE_PATH,
+      cellIndex: 1,
+      operation: "insert",
+    });
+    expect(adapter.patches[0]?.newSource).toBe(
+      "# @node: Middle  [transform]  out=mid\nmid = df.copy()\n",
+    );
+  });
 });
 
 describe("SyncEngine.updateNodeContents", () => {

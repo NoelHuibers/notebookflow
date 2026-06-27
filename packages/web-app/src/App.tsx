@@ -736,7 +736,10 @@ export function App(): ReactElement {
   );
 
   const handleAddNode = useCallback(
-    (manifest: NodeManifestDef): void => {
+    (
+      manifest: NodeManifestDef,
+      options?: { notebookPath?: string; insertAtCellIndex?: number },
+    ): void => {
       const engine = engineRef.current;
       if (engine === null) {
         return;
@@ -761,13 +764,16 @@ export function App(): ReactElement {
             lastGenerationBackend: result.backend,
           });
           await engine.createNode(
-            notebook.name,
+            options?.notebookPath ?? notebook.name,
             {
               name: manifest.name,
               tag: manifest.tag,
               outputs: manifest.outputs.map((port) => port.name),
               bodySource: result.source,
               metadata,
+              ...(options?.insertAtCellIndex === undefined
+                ? {}
+                : { insertAtCellIndex: options.insertAtCellIndex }),
             },
             Date.now(),
           );
@@ -812,14 +818,26 @@ export function App(): ReactElement {
     [notebook.name, t],
   );
 
-  // Drag-from-palette drop handler: look the manifest up by id, then funnel
-  // through the same add-node flow as a click. The drop position is currently
-  // ignored at the SyncEngine layer (node layout is derived from cellIndex);
-  // wiring positional metadata into cell metadata is left to a follow-up.
+  // Drag-from-palette drop handler: gap slots insert after the leading cell;
+  // empty-canvas drops still append to the active notebook.
   const handlePaneDrop = useCallback(
-    (manifestId: string, _position: { x: number; y: number }): void => {
+    (
+      manifestId: string,
+      target: {
+        groupId?: string;
+        insertAfterCellIndex?: number;
+        position?: { x: number; y: number };
+      },
+    ): void => {
       const manifest = paletteNodes.find((entry) => entry.id === manifestId);
       if (manifest === undefined) {
+        return;
+      }
+      if (target.groupId !== undefined && target.insertAfterCellIndex !== undefined) {
+        handleAddNode(manifest, {
+          notebookPath: target.groupId,
+          insertAtCellIndex: target.insertAfterCellIndex + 1,
+        });
         return;
       }
       handleAddNode(manifest);

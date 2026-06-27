@@ -7,11 +7,25 @@
  * until a drag enters.
  */
 
+import { NODE_DRAG_MIME } from "@notebookflow/graph-canvas";
 import { Upload } from "lucide-react";
 import type { ReactElement, ReactNode } from "react";
 import { useCallback, useRef, useState } from "react";
 
 import { useI18n } from "@/lib/i18n";
+
+/** True when the drag carries OS files (e.g. Finder), not in-app palette drags. */
+export function isNotebookFileDrag(event: Pick<React.DragEvent, "dataTransfer">): boolean {
+  const types = event.dataTransfer?.types;
+  if (types === undefined) {
+    return false;
+  }
+  const typeList = Array.from(types);
+  if (typeList.includes(NODE_DRAG_MIME)) {
+    return false;
+  }
+  return typeList.includes("Files");
+}
 
 export interface FileDropZoneProps {
   onFile: (text: string, name: string) => void;
@@ -40,12 +54,18 @@ export function FileDropZone({ onFile, children }: FileDropZoneProps): ReactElem
   );
 
   const handleDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>): void => {
+    if (!isNotebookFileDrag(event)) {
+      return;
+    }
     event.preventDefault();
     dragDepthRef.current += 1;
     setIsDragging(true);
   }, []);
 
   const handleDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>): void => {
+    if (dragDepthRef.current === 0) {
+      return;
+    }
     event.preventDefault();
     dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
     if (dragDepthRef.current === 0) {
@@ -54,14 +74,18 @@ export function FileDropZone({ onFile, children }: FileDropZoneProps): ReactElem
   }, []);
 
   const handleDragOver = useCallback((event: React.DragEvent<HTMLDivElement>): void => {
-    event.preventDefault();
-    if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = "copy";
+    if (!isNotebookFileDrag(event)) {
+      return;
     }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
   }, []);
 
   const handleDrop = useCallback(
     (event: React.DragEvent<HTMLDivElement>): void => {
+      if (!isNotebookFileDrag(event)) {
+        return;
+      }
       event.preventDefault();
       dragDepthRef.current = 0;
       setIsDragging(false);
