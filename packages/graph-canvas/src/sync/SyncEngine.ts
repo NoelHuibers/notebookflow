@@ -586,10 +586,10 @@ export class SyncEngine {
   }
 
   /**
-   * Resolve the input ref a target should declare. When the upstream node sits
-   * earlier in the same notebook with marker nodes in between, wire the port
-   * through each intermediate cell (out on upstream, in+out passthrough on
-   * intermediates) instead of linking the target directly to the origin.
+   * Resolve the input ref a target should declare. When an upstream node sits
+   * earlier in the same notebook and a wire path already connects them through
+   * intermediate cells, wire the port through those intermediates. Otherwise
+   * link the target directly to the origin.
    */
   private async routeInputRef(
     target: NodeModel,
@@ -613,13 +613,12 @@ export class SyncEngine {
     }
 
     const ordered = this.orderedNodesInGroup(target.groupId);
-    const srcOrder = ordered.findIndex((node) => node.id === source.id);
-    const tgtOrder = ordered.findIndex((node) => node.id === target.id);
-    if (srcOrder === -1 || tgtOrder === -1 || tgtOrder <= srcOrder) {
-      return formatRef(parsed);
-    }
-
-    const intermediates = ordered.slice(srcOrder + 1, tgtOrder);
+    const intermediates = wiredIntermediatesBetween(
+      this.graph,
+      ordered,
+      source.id,
+      target.id,
+    );
     if (intermediates.length === 0) {
       return formatRef(parsed);
     }
@@ -864,4 +863,66 @@ function cloneMetadata(
 
 function localPortRef(from: { name: string }, portName: string): string {
   return `${from.name}.${portName}`;
+}
+
+/** Adjacency list from canvas wires (source node → downstream nodes). */
+function buildWireAdjacency(wires: GraphModel["wires"]): Map<string, string[]> {
+  const adj = new Map<string, string[]>();
+  for (const wire of Object.values(wires)) {
+    const next = adj.get(wire.sourceNodeId) ?? [];
+    next.push(wire.targetNodeId);
+    adj.set(wire.sourceNodeId, next);
+  }
+  return adj;
+}
+
+function hasWirePath(adj: Map<string, string[]>, fromId: string, toId: string): boolean {
+  if (fromId === toId) {
+    return true;
+  }
+  const visited = new Set<string>();
+  const queue = [fromId];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (current === undefined) {
+      continue;
+    }
+    if (current === toId) {
+      return true;
+    }
+    if (visited.has(current)) {
+      continue;
+    }
+    visited.add(current);
+    for (const downstream of adj.get(current) ?? []) {
+      if (!visited.has(downstream)) {
+        queue.push(downstream);
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Notebook-order nodes strictly between `sourceId` and `targetId` that lie on
+ * an existing wire path. Empty when no path exists or nothing qualifies.
+ */
+function wiredIntermediatesBetween(
+  graph: GraphModel,
+  ordered: NodeModel[],
+  sourceId: string,
+  targetId: string,
+): NodeModel[] {
+  const adj = buildWireAdjacency(graph.wires);
+  if (!hasWirePath(adj, sourceId, targetId)) {
+    return [];
+  }
+  const srcOrder = ordered.findIndex((node) => node.id === sourceId);
+  const tgtOrder = ordered.findIndex((node) => node.id === targetId);
+  if (srcOrder === -1 || tgtOrder === -1 || tgtOrder <= srcOrder) {
+    return [];
+  }
+  return ordered.slice(srcOrder + 1, tgtOrder).filter(
+    (node) => hasWirePath(adj, sourceId, node.id) && hasWirePath(adj, node.id, targetId),
+  );
 }
