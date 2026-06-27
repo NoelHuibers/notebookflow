@@ -249,16 +249,15 @@ export class SyncEngine {
       sameGroup || sourceAlias === undefined
         ? `${source.name}.${sourcePort}`
         : `${sourceAlias}:${source.name}.${sourcePort}`;
-    if (target.inputs.includes(refStr)) {
+    const routedRef = await this.routeInputRef(target, refStr, timestamp);
+    if (target.inputs.includes(routedRef)) {
       return;
     }
 
-    await this.ensureOutputPort(source, sourcePort, timestamp);
-
     const newInputs =
       targetPort === INLET_DROP_HANDLE_ID || !target.inputs.includes(targetPort)
-        ? [...target.inputs, refStr]
-        : target.inputs.map((existing) => (existing === targetPort ? refStr : existing));
+        ? [...target.inputs, routedRef]
+        : target.inputs.map((existing) => (existing === targetPort ? routedRef : existing));
     if (arraysEqual(newInputs, target.inputs)) {
       return;
     }
@@ -280,15 +279,7 @@ export class SyncEngine {
     }
 
     target.inputs = newInputs;
-    const wireId = makeWireId(sourceNodeId, sourcePort, targetNodeId, refStr);
-    this.graph.wires[wireId] = {
-      id: wireId,
-      sourceNodeId,
-      sourcePort,
-      targetNodeId,
-      targetPort: refStr,
-    };
-
+    this.recomputeAllWires();
     this.opts.onGraphUpdate(this.getGraph());
   }
 
@@ -299,8 +290,11 @@ export class SyncEngine {
       throw new Error(`SyncEngine.setNodeInputs: node ${JSON.stringify(nodeId)} not found`);
     }
     const normalized = normalizeInputs(nextInputs);
-    await this.ensureOutputsForInputRefs(node, normalized, timestamp);
-    await this.applyPorts(node, normalized, node.outputs, timestamp);
+    const routed: string[] = [];
+    for (const ref of normalized) {
+      routed.push(await this.routeInputRef(node, ref, timestamp));
+    }
+    await this.applyPorts(node, routed, node.outputs, timestamp);
   }
 
   /** Graph→cell: replace a node's declared output port names and rewrite its marker. */
@@ -592,21 +586,63 @@ export class SyncEngine {
   }
 
   /**
-   * When an input ref names an existing upstream node, ensure that node
-   * declares the referenced port as an output so the wire can resolve.
+   * Resolve the input ref a target should declare. When the upstream node sits
+   * earlier in the same notebook with marker nodes in between, wire the port
+   * through each intermediate cell (out on upstream, in+out passthrough on
+   * intermediates) instead of linking the target directly to the origin.
    */
-  private async ensureOutputsForInputRefs(
+  private async routeInputRef(
     target: NodeModel,
-    refs: readonly string[],
+    requestedRef: string,
     timestamp: number,
-  ): Promise<void> {
-    for (const ref of refs) {
-      const resolved = this.resolveRef(ref, target.groupId);
-      if (resolved === null) {
-        continue;
-      }
-      await this.ensureOutputPort(resolved.source, resolved.portName, timestamp);
+  ): Promise<string> {
+    const parsed = parseRef(requestedRef);
+    if (parsed === null) {
+      return requestedRef;
     }
+    const resolved = this.resolveRef(requestedRef, target.groupId);
+    if (resolved === null) {
+      return formatRef(parsed);
+    }
+    const { source, portName } = resolved;
+    await this.ensureOutputPort(source, portName, timestamp);
+
+    // Cross-notebook refs and targets outside the source notebook stay direct.
+    if (parsed.alias !== null || source.groupId !== target.groupId) {
+      return formatRef(parsed);
+    }
+
+    const ordered = this.orderedNodesInGroup(target.groupId);
+    const srcOrder = ordered.findIndex((node) => node.id === source.id);
+    const tgtOrder = ordered.findIndex((node) => node.id === target.id);
+    if (srcOrder === -1 || tgtOrder === -1 || tgtOrder <= srcOrder) {
+      return formatRef(parsed);
+    }
+
+    const intermediates = ordered.slice(srcOrder + 1, tgtOrder);
+    if (intermediates.length === 0) {
+      return formatRef(parsed);
+    }
+
+    let previous = source;
+    for (const mid of intermediates) {
+      const upstreamRef = localPortRef(previous, portName);
+      await this.ensurePassthroughNode(mid, upstreamRef, portName, timestamp);
+      previous = mid;
+    }
+    return localPortRef(previous, portName);
+  }
+
+  /** Marker nodes in a notebook group, ordered by their first cell index. */
+  private orderedNodesInGroup(groupId: string): NodeModel[] {
+    const group = this.graph.groups[groupId];
+    if (group === undefined) {
+      return [];
+    }
+    return group.nodeIds
+      .map((id) => this.graph.nodes[id])
+      .filter((node): node is NodeModel => node !== undefined)
+      .sort((a, b) => (a.cellIndices[0] ?? 0) - (b.cellIndices[0] ?? 0));
   }
 
   /** Append `portName` to `source`'s declared outputs when missing. */
@@ -638,6 +674,44 @@ export class SyncEngine {
     }
     source.outputs = nextOutputs;
     return true;
+  }
+
+  /** Ensure an intermediate node consumes `upstreamRef` and re-emits `portName`. */
+  private async ensurePassthroughNode(
+    node: NodeModel,
+    upstreamRef: string,
+    portName: string,
+    timestamp: number,
+  ): Promise<void> {
+    const normalizedUpstream = normalizeInputs([upstreamRef])[0];
+    if (normalizedUpstream === undefined) {
+      return;
+    }
+    const nextInputs = node.inputs.includes(normalizedUpstream)
+      ? node.inputs
+      : normalizeInputs([...node.inputs, normalizedUpstream]);
+    const nextOutputs = node.outputs.includes(portName)
+      ? node.outputs
+      : normalizeOutputs([...node.outputs, portName]);
+    if (arraysEqual(nextInputs, node.inputs) && arraysEqual(nextOutputs, node.outputs)) {
+      return;
+    }
+    const notebookPath = this.notebookPathOf(node);
+    const cellIndex = node.cellIndices[0];
+    if (cellIndex === undefined) {
+      return;
+    }
+    const applied = await this.applyMarkerPatch(
+      notebookPath,
+      cellIndex,
+      { name: node.name, tag: node.tag, inputs: nextInputs, outputs: nextOutputs },
+      timestamp,
+    );
+    if (!applied) {
+      return;
+    }
+    node.inputs = nextInputs;
+    node.outputs = nextOutputs;
   }
 
   /**
@@ -786,4 +860,8 @@ function cloneMetadata(
   metadata: Record<string, unknown> | undefined,
 ): Record<string, unknown> | undefined {
   return metadata === undefined ? undefined : { ...metadata };
+}
+
+function localPortRef(from: { name: string }, portName: string): string {
+  return `${from.name}.${portName}`;
 }

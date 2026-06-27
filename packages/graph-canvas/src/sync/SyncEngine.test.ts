@@ -476,6 +476,43 @@ describe("SyncEngine.setNodeInputs / setNodeOutputs", () => {
     expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::1`]?.outputs).toEqual([]);
   });
 
+  it("routes an input through intermediate nodes in notebook order", async () => {
+    const adapter = recordingAdapter();
+    const engine = new SyncEngine(adapter.options);
+    const cells: NotebookCell[] = [
+      { cellType: "code", source: "# @node: Cell1  [input]\n" },
+      { cellType: "code", source: "# @node: Cell2  [transform]\n" },
+      { cellType: "code", source: "# @node: Cell3  [transform]\n" },
+    ];
+    await engine.ingestNotebook(TWO_NODE_PATH, cells, 100);
+
+    await engine.setNodeInputs(`${TWO_NODE_PATH}::2`, ["Cell1.n"], 200);
+
+    expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::0`]?.outputs).toEqual(["n"]);
+    expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::1`]?.inputs).toEqual(["Cell1.n"]);
+    expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::1`]?.outputs).toEqual(["n"]);
+    expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::2`]?.inputs).toEqual(["Cell2.n"]);
+
+    const wires = Object.values(engine.getGraph().wires);
+    expect(wires).toHaveLength(2);
+    expect(wires).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceNodeId: `${TWO_NODE_PATH}::0`,
+          sourcePort: "n",
+          targetNodeId: `${TWO_NODE_PATH}::1`,
+          targetPort: "Cell1.n",
+        }),
+        expect.objectContaining({
+          sourceNodeId: `${TWO_NODE_PATH}::1`,
+          sourcePort: "n",
+          targetNodeId: `${TWO_NODE_PATH}::2`,
+          targetPort: "Cell2.n",
+        }),
+      ]),
+    );
+  });
+
   it("adds a missing output port on the upstream node when an input ref is declared", async () => {
     const adapter = recordingAdapter();
     const engine = new SyncEngine(adapter.options);
