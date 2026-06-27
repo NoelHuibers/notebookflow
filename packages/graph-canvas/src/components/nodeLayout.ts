@@ -165,6 +165,34 @@ function isGroupCollapsed(group: Node): boolean {
   return data.collapsed === true;
 }
 
+/** Notebook container width for vertically stacked cells from the widest measured cell. */
+export function stackedGroupWidth(
+  maxCellWidth: number,
+  constants: GroupLayoutConstants,
+): number {
+  return Math.max(
+    constants.columnWidth,
+    constants.nodeXInset + maxCellWidth + constants.groupInnerRightPadding,
+  );
+}
+
+/** Notebook container width for a horizontal row of cells. */
+export function horizontalGroupWidth(
+  cellWidths: number[],
+  constants: GroupLayoutConstants,
+): number {
+  if (cellWidths.length === 0) {
+    return constants.columnWidth;
+  }
+  let contentWidth = constants.nodeXInset;
+  for (const width of cellWidths) {
+    contentWidth += width + constants.nodeGap;
+  }
+  contentWidth -= constants.nodeGap;
+  contentWidth += constants.groupInnerRightPadding;
+  return Math.max(constants.columnWidth, contentWidth);
+}
+
 /** Reposition notebook nodes and resize groups from measured DOM dimensions. */
 export function applyMeasuredGroupLayout(
   nodes: Node[],
@@ -196,7 +224,7 @@ export function applyMeasuredGroupLayout(
       constants.groupInnerBottomPadding;
 
     if (horizontalCells) {
-      let contentWidth = constants.nodeXInset;
+      const cellWidths = sizes.map((size) => size.width);
       let maxCellHeight = 0;
       for (let index = 0; index < children.length; index++) {
         const child = children[index];
@@ -206,24 +234,24 @@ export function applyMeasuredGroupLayout(
         }
         if (!collapsed) {
           childPositions.set(child.id, {
-            x: contentWidth,
+            x: horizontalCellX(
+              cellWidths.slice(0, index),
+              constants.nodeXInset,
+              constants.nodeGap,
+            ),
             y: constants.groupHeaderHeight + constants.groupInnerTopPadding,
           });
         }
-        contentWidth += size.width + constants.nodeGap;
         maxCellHeight = Math.max(maxCellHeight, size.height);
       }
-      if (children.length > 0) {
-        contentWidth -= constants.nodeGap;
-      }
-      contentWidth += constants.groupInnerRightPadding;
-      groupWidth = Math.max(constants.columnWidth, contentWidth);
+      groupWidth = horizontalGroupWidth(cellWidths, constants);
       expandedHeight =
         constants.groupHeaderHeight +
         constants.groupInnerTopPadding +
         maxCellHeight +
         constants.groupInnerBottomPadding;
     } else {
+      let maxCellWidth = 0;
       let stackedY = constants.groupHeaderHeight + constants.groupInnerTopPadding;
       let stackedContentHeight = constants.groupInnerTopPadding;
       for (let index = 0; index < children.length; index++) {
@@ -232,6 +260,7 @@ export function applyMeasuredGroupLayout(
         if (child === undefined || size === undefined) {
           continue;
         }
+        maxCellWidth = Math.max(maxCellWidth, size.width);
         if (!collapsed) {
           childPositions.set(child.id, { x: constants.nodeXInset, y: stackedY });
         }
@@ -241,6 +270,7 @@ export function applyMeasuredGroupLayout(
       if (children.length > 0) {
         stackedContentHeight -= constants.nodeGap;
       }
+      groupWidth = stackedGroupWidth(maxCellWidth, constants);
       expandedHeight =
         constants.groupHeaderHeight + stackedContentHeight + constants.groupInnerBottomPadding;
     }

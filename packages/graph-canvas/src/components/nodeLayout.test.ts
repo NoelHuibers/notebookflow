@@ -122,6 +122,17 @@ describe("nodeLayout", () => {
     );
   });
 
+  it("grows stacked group width from the widest measured cell", () => {
+    const groupId = "group:g1";
+    const nodes = [groupNode(groupId), notebookNode("a", 0, groupId)];
+    const measured = new Map([["a", { width: 380, height: 120 }]]);
+    const fallback = (): { width: number; height: number } => ({ width: 200, height: 100 });
+    const laidOut = applyMeasuredGroupLayout(nodes, measured, false, GROUP_LAYOUT, fallback);
+    const group = laidOut.find((node) => node.id === groupId);
+
+    expect((group?.style as { width?: number })?.width).toBe(16 + 380 + 16);
+  });
+
   it("positions horizontal row from measured widths with uniform gap", () => {
     const groupId = "group:g1";
     const nodes = [

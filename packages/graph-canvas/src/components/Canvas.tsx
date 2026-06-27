@@ -39,8 +39,10 @@ import {
   applyMeasuredGroupLayout,
   estimateNodeHeight,
   estimateNodeWidth,
+  horizontalGroupWidth,
   measuredLayoutDiffers,
   NODE_GAP,
+  stackedGroupWidth,
   type GroupLayoutConstants,
   type MeasuredSize,
   type NodeLayoutHints,
@@ -610,30 +612,28 @@ function buildNodes(
       NODE_GROUP_HEADER_HEIGHT + GROUP_INNER_TOP_PADDING + GROUP_INNER_BOTTOM_PADDING;
 
     if (horizontalCells) {
-      let contentWidth = NODE_X_INSET;
+      const cellWidths = cellLayouts.map((cell) => cell.width);
       let maxCellHeight = 0;
       for (const cell of cellLayouts) {
-        contentWidth += cell.width + NODE_GAP;
         maxCellHeight = Math.max(maxCellHeight, cell.height);
       }
-      if (cellLayouts.length > 0) {
-        contentWidth -= NODE_GAP;
-      }
-      contentWidth += GROUP_INNER_RIGHT_PADDING;
-      groupWidth = Math.max(COLUMN_WIDTH, contentWidth);
+      groupWidth = horizontalGroupWidth(cellWidths, GROUP_LAYOUT);
       expandedGroupHeight =
         NODE_GROUP_HEADER_HEIGHT +
         GROUP_INNER_TOP_PADDING +
         maxCellHeight +
         GROUP_INNER_BOTTOM_PADDING;
     } else {
+      let maxCellWidth = 0;
       let stackedContentHeight = GROUP_INNER_TOP_PADDING;
       for (const cell of cellLayouts) {
+        maxCellWidth = Math.max(maxCellWidth, cell.width);
         stackedContentHeight += cell.height + NODE_GAP;
       }
       if (cellLayouts.length > 0) {
         stackedContentHeight -= NODE_GAP;
       }
+      groupWidth = stackedGroupWidth(maxCellWidth, GROUP_LAYOUT);
       expandedGroupHeight =
         NODE_GROUP_HEADER_HEIGHT + stackedContentHeight + GROUP_INNER_BOTTOM_PADDING;
     }
