@@ -15,6 +15,7 @@
  */
 
 import type { GraphModel, NodeModel, NodeTag } from "../types";
+import { INLET_DROP_HANDLE_ID } from "../components/portEditorShared";
 import type { NotebookCell, ParseResult } from "./MarkerParser";
 import { formatRef, MarkerParser, parseRef } from "./MarkerParser";
 
@@ -228,7 +229,7 @@ export class SyncEngine {
     sourceNodeId: string,
     sourcePort: string,
     targetNodeId: string,
-    _targetPort: string,
+    targetPort: string,
     timestamp: number,
   ): Promise<void> {
     const source = this.graph.nodes[sourceNodeId];
@@ -252,13 +253,20 @@ export class SyncEngine {
       return;
     }
 
+    const newInputs =
+      targetPort === INLET_DROP_HANDLE_ID || !target.inputs.includes(targetPort)
+        ? [...target.inputs, refStr]
+        : target.inputs.map((existing) => (existing === targetPort ? refStr : existing));
+    if (arraysEqual(newInputs, target.inputs)) {
+      return;
+    }
+
     const notebookPath = this.notebookPathOf(target);
     const cellIndex = target.cellIndices[0];
     if (cellIndex === undefined) {
       throw new Error(`SyncEngine.createWire: target node ${targetNodeId} has no cell index`);
     }
 
-    const newInputs = [...target.inputs, refStr];
     const applied = await this.applyMarkerPatch(
       notebookPath,
       cellIndex,

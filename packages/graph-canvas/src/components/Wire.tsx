@@ -1,5 +1,5 @@
 /**
- * Wire — custom React Flow edge for a node-to-node connection.
+ * Wire — custom React Flow edge for an outlet-to-inlet connection.
  *
  * Distinguishes intra-notebook wires (thin solid) from cross-notebook wires
  * (thick dashed) so users can read pipeline structure at a glance. The

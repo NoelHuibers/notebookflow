@@ -230,6 +230,22 @@ function CanvasInner(props: CanvasProps): ReactElement {
     [onWireCreate],
   );
 
+  const isValidConnection = useCallback((conn: Connection): boolean => {
+    if (
+      conn.source === null ||
+      conn.target === null ||
+      conn.sourceHandle === null ||
+      conn.targetHandle === null
+    ) {
+      return false;
+    }
+    // Wires must connect an outlet (source handle) to an inlet (target handle).
+    if (conn.source === conn.target) {
+      return false;
+    }
+    return true;
+  }, []);
+
   const handleNodeClick = useCallback(
     (_event: unknown, node: Node): void => {
       if (onNodeSelect === undefined) {
@@ -303,6 +319,7 @@ function CanvasInner(props: CanvasProps): ReactElement {
         className="notebookflow-canvas"
         style={FLOW_STYLE}
         onConnect={handleConnect}
+        isValidConnection={isValidConnection}
         onNodeClick={handleNodeClick}
         onPaneClick={handlePaneClick}
         onEdgesDelete={handleEdgesDelete}

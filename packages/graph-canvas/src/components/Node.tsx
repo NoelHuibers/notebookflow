@@ -2,8 +2,9 @@
  * NotebookNode — renders a single cell-group node on the canvas.
  *
  * Header shows the node name, an explicit rename button, and a tag chip.
- * Input handles on the left, one per declared `in=` ref. Output handles on
- * the right, one per declared `out=` port name. Rename flows through the
+ * Inlets and outlets are listed in a two-column grid; each row exposes a
+ * target handle on its inlet and a source handle on its outlet so wires
+ * connect port-to-port rather than cell-to-cell. Rename flows through the
  * host-provided callback that the Canvas passes via `data`.
  *
  * Styling is explicit so the shared node surface stays stable across hosts,
@@ -15,10 +16,9 @@ import { Pencil } from "lucide-react";
 import type { ChangeEvent, CSSProperties, KeyboardEvent, ReactElement } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { NodeProps } from "reactflow";
-import { Handle, Position } from "reactflow";
 
 import type { NodeModel, NodeTag, RuntimeState } from "../types";
-import { PortEditor } from "./PortEditor";
+import { InletOutletGrid } from "./InletOutletGrid";
 
 export interface NotebookNodeData extends NodeModel {
   onRename?: (nodeId: string, nextName: string) => void;
@@ -76,14 +76,6 @@ const TAG_RING: Record<NodeTag, string> = {
   io: "rgba(249, 115, 22, 0.28)",
 };
 
-const TAG_HANDLE_COLOR: Record<NodeTag, string> = {
-  input: "#3b82f6",
-  transform: "#10b981",
-  output: "#ef4444",
-  ai: "#a855f7",
-  io: "#f97316",
-};
-
 const NODE_BACKGROUND = "var(--notebookflow-node-bg, var(--card, #ffffff))";
 const NODE_FOREGROUND = "var(--notebookflow-node-fg, var(--card-foreground, #111827))";
 const NODE_MUTED = "var(--notebookflow-node-muted, var(--muted-foreground, #6b7280))";
@@ -112,8 +104,10 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
 
   // Input nodes only emit values, output nodes only consume them. Everything
   // else can do both.
-  const showInput = data.tag !== "input";
-  const showOutput = data.tag !== "output";
+  const showInlets = data.tag !== "input";
+  const showOutlets = data.tag !== "output";
+  const portsEditable =
+    data.onInputsChange !== undefined || data.onOutputsChange !== undefined;
 
   useEffect(() => {
     if (!isEditing) {
@@ -258,90 +252,40 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
             ⚠ unresolved: {data.unresolvedInputs.join(", ")}
           </div>
         )}
-        {showInput &&
-          (data.onInputsChange !== undefined ? (
-            <PortEditor
-              kind="input"
-              ports={data.inputs}
-              suggestions={data.inputSuggestions ?? []}
-              onChange={(next) => {
-                data.onInputsChange?.(data.id, next);
-              }}
-            />
-          ) : (
-            data.inputs.length > 0 && (
-              <div>
-                <strong>in:</strong> {data.inputs.join(", ")}
-              </div>
-            )
-          ))}
-        {showOutput &&
-          (data.onOutputsChange !== undefined ? (
-            <PortEditor
-              kind="output"
-              ports={data.outputs}
-              suggestions={data.outputSuggestions ?? []}
-              onChange={(next) => {
-                data.onOutputsChange?.(data.id, next);
-              }}
-            />
-          ) : (
-            data.outputs.length > 0 && (
-              <div>
-                <strong>out:</strong> {data.outputs.join(", ")}
-              </div>
-            )
-          ))}
-        {data.onInputsChange === undefined &&
-          data.onOutputsChange === undefined &&
+        {(showInlets || showOutlets) && (
+          <InletOutletGrid
+            tag={data.tag}
+            inputs={data.inputs}
+            outputs={data.outputs}
+            showInlets={showInlets}
+            showOutlets={showOutlets}
+            editable={portsEditable}
+            inputSuggestions={data.inputSuggestions ?? []}
+            outputSuggestions={data.outputSuggestions ?? []}
+            {...(data.onInputsChange === undefined
+              ? {}
+              : {
+                  onInputsChange: (next: string[]) => {
+                    data.onInputsChange?.(data.id, next);
+                  },
+                })}
+            {...(data.onOutputsChange === undefined
+              ? {}
+              : {
+                  onOutputsChange: (next: string[]) => {
+                    data.onOutputsChange?.(data.id, next);
+                  },
+                })}
+          />
+        )}
+        {!portsEditable &&
+          !showInlets &&
+          !showOutlets &&
           data.inputs.length === 0 &&
           data.outputs.length === 0 && <span style={styles.emptyState}>no ports</span>}
       </div>
-      {data.inputs.map((ref, idx) => (
-        <Handle
-          key={`in-${ref}`}
-          id={ref}
-          type="target"
-          position={Position.Left}
-          style={handleStyle(idx, data.inputs.length, data.tag)}
-        />
-      ))}
-      {/* Fallback drop target so a node with no declared inputs can still
-          receive a drawn connection; createWire appends the new in= ref. */}
-      {data.inputs.length === 0 && (
-        <Handle id="__in__" type="target" position={Position.Left} style={{ opacity: 0.45 }} />
-      )}
-      {data.outputs.map((port, idx) => (
-        <Handle
-          key={`out-${port}`}
-          id={port}
-          type="source"
-          position={Position.Right}
-          style={handleStyle(idx, data.outputs.length, data.tag)}
-        />
-      ))}
     </div>
   );
-}
-
-function handleStyle(index: number, total: number, tag: NodeTag): CSSProperties {
-  return {
-    top: portOffset(index, total),
-    width: 10,
-    height: 10,
-    borderRadius: 999,
-    border: `2px solid ${NODE_BACKGROUND}`,
-    background: TAG_HANDLE_COLOR[tag],
-    boxSizing: "border-box",
-  };
-}
-
-function portOffset(index: number, total: number): string {
-  if (total <= 1) {
-    return "50%";
-  }
-  const pct = 30 + (index / (total - 1)) * 40;
-  return `${String(pct)}%`;
 }
 
 function formatDuration(ms: number | undefined): string | null {

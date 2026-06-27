@@ -5,6 +5,7 @@ dist-webview/
 /lib/
 .turbo/
 *.tsbuildinfo
+.pnpm-store/
 
 # TanStack Start / Nitro build output (web-app)
 .output/
