@@ -29,7 +29,16 @@ export function PortComboboxFloating(props: PortComboboxFloatingProps): ReactEle
   const [highlight, setHighlight] = useState(0);
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
   const committedRef = useRef(false);
+
+  const dismiss = (): void => {
+    if (committedRef.current) {
+      return;
+    }
+    committedRef.current = true;
+    onCancel();
+  };
 
   useLayoutEffect(() => {
     const updatePosition = (): void => {
@@ -49,6 +58,31 @@ export function PortComboboxFloating(props: PortComboboxFloatingProps): ReactEle
     inputRef.current?.focus();
     inputRef.current?.select();
   }, []);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent): void => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (shellRef.current?.contains(target)) {
+        return;
+      }
+      if (anchorEl.contains(target)) {
+        return;
+      }
+      if (committedRef.current) {
+        return;
+      }
+      committedRef.current = true;
+      onCancel();
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+    };
+  }, [anchorEl, onCancel]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -77,8 +111,7 @@ export function PortComboboxFloating(props: PortComboboxFloatingProps): ReactEle
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      committedRef.current = true;
-      onCancel();
+      dismiss();
       return;
     }
     if (event.key === "ArrowDown") {
@@ -100,6 +133,8 @@ export function PortComboboxFloating(props: PortComboboxFloatingProps): ReactEle
 
   const content = (
     <div
+      ref={shellRef}
+      data-testid="port-combobox-floating"
       style={{
         ...portalShellStyle,
         top: position.top,
@@ -120,10 +155,8 @@ export function PortComboboxFloating(props: PortComboboxFloatingProps): ReactEle
         onKeyDown={handleKeyDown}
         onBlur={() => {
           window.setTimeout(() => {
-            if (!committedRef.current) {
-              onCancel();
-            }
-          }, 120);
+            dismiss();
+          }, 0);
         }}
         style={portChipStyles.comboInput}
       />
