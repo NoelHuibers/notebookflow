@@ -6,6 +6,11 @@
  * module so that visual behavior stays consistent across platforms.
  */
 
+export {
+  type AddManifestNodeOptions,
+  addManifestNode,
+  type SynthesizeNodeFn,
+} from "./addManifestNode";
 export type { PaneDropTarget } from "./components/Canvas";
 export { Canvas } from "./components/Canvas";
 export { NotebookNode } from "./components/Node";
@@ -18,6 +23,7 @@ export {
   setPaletteDragData,
 } from "./components/paletteDragData";
 export { Wire } from "./components/Wire";
+export { type RenderManifestTemplateParams, renderManifestTemplate } from "./manifestTemplate";
 export type {
   NodeConfigFieldDef,
   NodeConfigFieldKind,

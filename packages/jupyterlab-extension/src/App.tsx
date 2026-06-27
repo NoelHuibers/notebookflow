@@ -9,9 +9,9 @@
 
 import type { GraphModel, NodeManifestDef, NodeModel, WireModel } from "@notebookflow/graph-canvas";
 import {
+  addManifestNode,
   Canvas,
   configValuesEqual,
-  defaultConfigForManifest,
   hasMissingRequiredConfig,
   NodeConfigEditor,
   readNotebookflowMetadata,
@@ -173,39 +173,18 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
   );
 
   const handleAddNode = (manifest: NodeManifestDef): void => {
-    const config = defaultConfigForManifest(manifest);
-    void onSynthesizeNode({
-      manifestId: manifest.id,
-      nodeName: manifest.name,
-      inputs: [],
-      outputs: manifest.outputs.map((port) => port.name),
-      config,
-      currentSource: "",
-    })
-      .then(async (result) => {
-        const metadata = writeNotebookflowMetadata(undefined, {
-          manifestId: manifest.id,
-          manifestVersion: manifest.version,
-          config,
-          lastGeneratedAt: new Date().toISOString(),
-          lastGenerationBackend: result.backend,
-        });
-        await engine.createNode(
-          bridge.notebookPath,
-          {
-            name: manifest.name,
-            tag: manifest.tag,
-            outputs: manifest.outputs.map((port) => port.name),
-            bodySource: result.source,
-            metadata,
-          },
-          Date.now(),
-        );
-      })
-      .catch((err: unknown) => {
+    void addManifestNode(engine, onSynthesizeNode, {
+      manifest,
+      notebookPath: bridge.notebookPath,
+      insertAtCellIndex: bridge.readCells().length,
+      onSynthesisError: (err: unknown) => {
         const message = err instanceof Error ? err.message : "unknown error";
         setEvents((prev) => [...prev, { type: "error", message: `add node failed: ${message}` }]);
-      });
+      },
+    }).catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : "unknown error";
+      setEvents((prev) => [...prev, { type: "error", message: `add node failed: ${message}` }]);
+    });
   };
 
   const manifestById = useMemo(

@@ -19,9 +19,9 @@ import type {
   WireModel,
 } from "@notebookflow/graph-canvas";
 import {
+  addManifestNode,
   Canvas,
   configValuesEqual,
-  defaultConfigForManifest,
   hasMissingRequiredConfig,
   readNotebookflowMetadata,
   resolveNodeConfig,
@@ -744,46 +744,24 @@ export function App(): ReactElement {
       if (engine === null) {
         return;
       }
-      const config = defaultConfigForManifest(manifest);
+      const targetPath = options?.notebookPath ?? notebook.name;
+      const cells = cellsByPath.get(targetPath) ?? [];
+      const insertAtCellIndex = options?.insertAtCellIndex ?? cells.length;
       setError(null);
-      void clientRef.current
-        .synthesizeNode({
-          manifestId: manifest.id,
-          nodeName: manifest.name,
-          inputs: [],
-          outputs: manifest.outputs.map((port) => port.name),
-          config,
-          currentSource: "",
-        })
-        .then(async (result) => {
-          const metadata = writeNotebookflowMetadata(undefined, {
-            manifestId: manifest.id,
-            manifestVersion: manifest.version,
-            config,
-            lastGeneratedAt: new Date().toISOString(),
-            lastGenerationBackend: result.backend,
-          });
-          await engine.createNode(
-            options?.notebookPath ?? notebook.name,
-            {
-              name: manifest.name,
-              tag: manifest.tag,
-              outputs: manifest.outputs.map((port) => port.name),
-              bodySource: result.source,
-              metadata,
-              ...(options?.insertAtCellIndex === undefined
-                ? {}
-                : { insertAtCellIndex: options.insertAtCellIndex }),
-            },
-            Date.now(),
-          );
-        })
-        .catch((err: unknown) => {
+      void addManifestNode(engine, (request) => clientRef.current.synthesizeNode(request), {
+        manifest,
+        notebookPath: targetPath,
+        insertAtCellIndex,
+        onSynthesisError: (err: unknown) => {
           const message = err instanceof Error ? err.message : t("app.errors.unknown");
           setError(t("app.errors.addNodeNamed", { name: manifest.name, message }));
-        });
+        },
+      }).catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : t("app.errors.unknown");
+        setError(t("app.errors.addNodeNamed", { name: manifest.name, message }));
+      });
     },
-    [notebook.name, t],
+    [cellsByPath, notebook.name, t],
   );
 
   // One-click: turn an uploaded data file into an input node that reads it.

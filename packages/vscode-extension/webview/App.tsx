@@ -24,9 +24,9 @@ import type {
   WireModel,
 } from "@notebookflow/graph-canvas";
 import {
+  addManifestNode,
   Canvas,
   configValuesEqual,
-  defaultConfigForManifest,
   hasMissingRequiredConfig,
   NodeConfigEditor,
   readNotebookflowMetadata,
@@ -250,44 +250,21 @@ export function App(): ReactElement {
         ]);
         return;
       }
-      const config = defaultConfigForManifest(manifest);
-      void synthesizeNode(engineUrl, {
-        manifestId: manifest.id,
-        nodeName: manifest.name,
-        inputs: [],
-        outputs: manifest.outputs.map((port) => port.name),
-        config,
-        currentSource: "",
-      })
-        .then(async (result) => {
-          const metadata = writeNotebookflowMetadata(undefined, {
-            manifestId: manifest.id,
-            manifestVersion: manifest.version,
-            config,
-            lastGeneratedAt: new Date().toISOString(),
-            lastGenerationBackend: result.backend,
-          });
-          await engine.createNode(
-            notebookPath,
-            {
-              name: manifest.name,
-              tag: manifest.tag,
-              outputs: manifest.outputs.map((port) => port.name),
-              bodySource: result.source,
-              metadata,
-              ...(options?.insertAtCellIndex === undefined
-                ? {}
-                : { insertAtCellIndex: options.insertAtCellIndex }),
-            },
-            Date.now(),
-          );
-        })
-        .catch((err: unknown) => {
+      const insertAtCellIndex = options?.insertAtCellIndex ?? cells.length;
+      void addManifestNode(engine, (request) => synthesizeNode(engineUrl, request), {
+        manifest,
+        notebookPath,
+        insertAtCellIndex,
+        onSynthesisError: (err: unknown) => {
           const message = err instanceof Error ? err.message : "unknown error";
           setEvents((prev) => [...prev, { type: "error", message: `add node failed: ${message}` }]);
-        });
+        },
+      }).catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : "unknown error";
+        setEvents((prev) => [...prev, { type: "error", message: `add node failed: ${message}` }]);
+      });
     },
-    [engineUrl, notebookPath],
+    [cells.length, engineUrl, notebookPath],
   );
 
   const handlePaneDrop = useCallback(
