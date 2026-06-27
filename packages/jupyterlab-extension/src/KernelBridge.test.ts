@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { EngineEvent, PipelineDef } from "./EngineClient";
 import { KernelBridge } from "./KernelBridge";
+import { extractCellSourceFromWrapper } from "./isolatedExecution";
 
 interface ScriptStep {
   type: "iopub" | "reply";
@@ -276,7 +277,9 @@ describe("KernelBridge", () => {
       ],
     };
     await collectEvents(bridge, pipeline);
-    expect(invocations.map((inv) => inv.code)).toEqual(["code_a", "code_b", "code_c"]);
+    expect(
+      invocations.map((inv) => extractCellSourceFromWrapper(inv.code)),
+    ).toEqual(["code_a", "code_b", "code_c"]);
   });
 
   it("returns ok with no kernel invocation for nodes with empty source", async () => {

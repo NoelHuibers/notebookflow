@@ -3,8 +3,8 @@
  *
  * Drop-in replacement for the engine WS path: same `runPipeline` shape and
  * the same `EngineEvent` stream, but each node runs via `kernel.requestExecute`
- * against the user's live notebook kernel so variables/imports declared in
- * the host notebook stay available to the pipeline (and vice versa).
+ * in an isolated namespace (declared inputs only) so upstream locals do not
+ * leak into downstream cells.
  *
  * Topological order is derived from the supplied `PipelineDef.edges` via
  * Kahn's algorithm. On the first node failure we still emit a `nodeCompleted`
@@ -15,6 +15,11 @@
 import type { Kernel, KernelMessage } from "@jupyterlab/services";
 
 import type { EngineEvent, NbOutput, PipelineDef } from "./EngineClient";
+import {
+  buildIdIndex,
+  resolveInputBindings,
+  wrapIsolatedCellCode,
+} from "./isolatedExecution";
 
 type IOPubMessage =
   | KernelMessage.IStreamMsg
@@ -60,6 +65,7 @@ export class KernelBridge {
     opts.onEvent({ type: "executionStarted", pipelineId: opts.pipelineId });
 
     const ordered = topologicalOrder(opts.pipeline);
+    const idIndex = buildIdIndex(opts.pipeline.nodes);
     const results: NodeResult[] = [];
 
     let halted = false;
@@ -86,7 +92,7 @@ export class KernelBridge {
         pipelineId: opts.pipelineId,
         nodeId: node.id,
       });
-      const result = await executeNodeOnKernel(kernel, node);
+      const result = await executeNodeOnKernel(kernel, node, idIndex);
       results.push(result);
       opts.onEvent({
         type: "nodeCompleted",
@@ -117,6 +123,7 @@ interface NodeResult {
 async function executeNodeOnKernel(
   kernel: Kernel.IKernelConnection,
   node: PipelineDef["nodes"][number],
+  idIndex: Map<string, string>,
 ): Promise<NodeResult> {
   if (node.source === "") {
     return {
@@ -128,11 +135,14 @@ async function executeNodeOnKernel(
     };
   }
 
+  const bindings = resolveInputBindings(node, idIndex);
+  const code = wrapIsolatedCellCode(node.id, node.source, bindings, node.outputs);
+
   const outputs: NbOutput[] = [];
   let firstErrorSummary: string | null = null;
 
   const future = kernel.requestExecute({
-    code: node.source,
+    code,
     store_history: false,
     silent: false,
     stop_on_error: true,

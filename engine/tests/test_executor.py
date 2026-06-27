@@ -431,6 +431,70 @@ async def test_cross_notebook_same_name_nodes_do_not_collide(bus: DataBus) -> No
     assert bus.get("c::0", "got").value == 99
 
 
+async def test_cells_cannot_read_upstream_locals_without_input(bus: DataBus) -> None:
+    dag = DAG()
+    dag.add_node(
+        DAGNode(
+            id="a",
+            name="A",
+            tag="input",
+            outputs=["x"],
+            source="x = 1\nsecret = 99\n",
+        )
+    )
+    dag.add_node(
+        DAGNode(
+            id="b",
+            name="B",
+            tag="transform",
+            outputs=["y"],
+            source="y = secret\n",
+        )
+    )
+
+    results = await Executor(dag, bus).run_pipeline()
+    assert results[0].status == "ok"
+    assert results[1].status == "error"
+    assert results[1].error is not None
+    assert "NameError" in results[1].error
+
+
+async def test_sibling_cells_do_not_see_each_others_locals(bus: DataBus) -> None:
+    dag = DAG()
+    dag.add_node(
+        DAGNode(id="a", name="A", tag="input", outputs=["x"], source="x = 1\n"),
+    )
+    dag.add_node(
+        DAGNode(
+            id="b",
+            name="B",
+            tag="transform",
+            inputs=["A.x"],
+            outputs=["n"],
+            source="foo = 'bar'\nn = x\n",
+        )
+    )
+    dag.add_node(
+        DAGNode(
+            id="c",
+            name="C",
+            tag="transform",
+            inputs=["A.x"],
+            outputs=["y"],
+            source="y = foo\n",
+        )
+    )
+    dag.add_edge(DAGEdge("a", "x", "b", "A.x"))
+    dag.add_edge(DAGEdge("a", "x", "c", "A.x"))
+
+    results = await Executor(dag, bus).run_pipeline()
+    assert results[0].status == "ok"
+    assert results[1].status == "ok"
+    assert results[2].status == "error"
+    assert results[2].error is not None
+    assert "NameError" in results[2].error
+
+
 async def test_fanout_branches_get_isolated_copies(bus: DataBus) -> None:
     # One source fans out to two consumers; one mutates its input in place.
     # The other branch must compute against an untouched copy.

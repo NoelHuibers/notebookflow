@@ -1,8 +1,9 @@
 """Pipeline executor.
 
 Walks a DAG in topological order, runs each node's source via ``exec()``
-against a shared per-pipeline namespace, and mirrors each output port's
-value into the DataBus for downstream inspection and persistence.
+in an isolated namespace (declared inputs plus names the cell defines),
+and mirrors each output port's value into the DataBus for downstream
+inspection and persistence.
 
 This synchronous evaluator is the Phase-3 starting point — it lets us run
 a full pipeline end-to-end with no kernel and no platform adapter. The
@@ -188,6 +189,7 @@ class Executor:
         # this as the working directory so `pd.read_csv("orders.csv")` resolves
         # against the user's uploads.
         self._data_dir = data_dir
+        # Last executed node's namespace — exposed for tests / inspection only.
         self._namespace: dict[str, Any] = {}
 
     async def run_pipeline(self) -> list[ExecutionResult]:
@@ -231,8 +233,9 @@ class Executor:
                 return
 
     async def run_node(self, node: DAGNode, inputs: dict[str, Any]) -> ExecutionResult:
-        for port, value in inputs.items():
-            self._namespace[port] = value
+        # Each cell sees only its wired inputs and names it defines — no leaked
+        # locals from upstream nodes.
+        node_ns: dict[str, Any] = dict(inputs)
 
         outputs: list[NbOutput] = []
         stdout = _StreamCapture(outputs, "stdout")
@@ -240,13 +243,13 @@ class Executor:
         # Inject display() into the cell's namespace so cell source can call it
         # without importing IPython. Fresh binding per node so each node's
         # display() targets its own outputs list.
-        self._namespace["display"] = _make_display(outputs)
+        node_ns["display"] = _make_display(outputs)
 
         start = time.monotonic()
         try:
             with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
                 if node.source:
-                    self._exec_source(node.source)
+                    self._exec_source(node.source, node_ns)
         except Exception as exc:  # noqa: BLE001 — we deliberately surface every error
             duration_ms = (time.monotonic() - start) * 1000.0
             tb_lines = traceback.format_exception(type(exc), exc, exc.__traceback__)
@@ -269,30 +272,31 @@ class Executor:
         _capture_matplotlib_figures(outputs)
 
         for port in node.outputs:
-            if port in self._namespace:
-                self._bus.put(node.id, port, self._namespace[port])
+            if port in node_ns:
+                self._bus.put(node.id, port, node_ns[port])
 
+        self._namespace = node_ns
         return ExecutionResult(
             node_id=node.id,
             status="ok",
             duration_ms=duration_ms,
             outputs=outputs,
-            metadata=_introspect_outputs(self._namespace, node.outputs),
+            metadata=_introspect_outputs(node_ns, node.outputs),
         )
 
-    def _exec_source(self, source: str) -> None:
+    def _exec_source(self, source: str, namespace: dict[str, Any]) -> None:
         """Run cell source, optionally with the uploaded-data dir as the CWD.
 
         chdir is wrapped tightly around the synchronous ``exec`` (no awaits in
         between), so it stays correct even if pipelines run concurrently.
         """
         if self._data_dir is None or not self._data_dir.is_dir():
-            exec(source, self._namespace)  # noqa: S102
+            exec(source, namespace)  # noqa: S102
             return
         previous = os.getcwd()
         os.chdir(self._data_dir)
         try:
-            exec(source, self._namespace)  # noqa: S102
+            exec(source, namespace)  # noqa: S102
         finally:
             os.chdir(previous)
 
@@ -323,5 +327,5 @@ class Executor:
 
     @property
     def namespace(self) -> dict[str, Any]:
-        """The shared per-pipeline namespace. Exposed for tests / inspection."""
+        """The last executed node's namespace. Exposed for tests / inspection."""
         return self._namespace
