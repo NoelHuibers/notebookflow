@@ -33,6 +33,7 @@ import type { NodeGroupData } from "./NodeGroup";
 import { NODE_GROUP_HEADER_HEIGHT, NodeGroup } from "./NodeGroup";
 import type { WireData } from "./Wire";
 import { Wire } from "./Wire";
+import { collectOutputSuggestions, collectInputRefs } from "./portSuggestions";
 
 const NODE_TYPES = {
   notebook: NotebookNode,
@@ -472,13 +473,13 @@ function buildNodes(
       if (onRename !== undefined) {
         nodeData.onRename = onRename;
       }
+      nodeData.inputSuggestions = collectInputRefs(graph, vars, node.id);
+      nodeData.outputSuggestions = collectOutputSuggestions(node, vars);
       if (onInputsChange !== undefined) {
         nodeData.onInputsChange = onInputsChange;
-        nodeData.inputSuggestions = collectInputRefs(graph, vars, node.id);
       }
       if (onOutputsChange !== undefined) {
         nodeData.onOutputsChange = onOutputsChange;
-        nodeData.outputSuggestions = collectOutputSuggestions(node, vars);
       }
       // Position is relative to the parent group's top-left, since each child
       // node is rendered inside the group container via parentNode + extent.
@@ -676,53 +677,4 @@ function buildRfEdges(graph: GraphModel): Edge<WireData>[] {
     });
   }
   return edges;
-}
-
-/** Valid output port name per the marker grammar (lowercase identifier). */
-const PORT_RE = /^[a-z][a-z0-9_]*$/;
-
-/** Output port suggestions for a node: its declared ports plus cell variables. */
-function collectOutputSuggestions(
-  node: NodeModel,
-  variablesByNode: Record<string, string[]>,
-): string[] {
-  const names = new Set<string>(node.outputs);
-  for (const name of variablesByNode[node.id] ?? []) {
-    if (PORT_RE.test(name)) {
-      names.add(name);
-    }
-  }
-  return [...names].sort();
-}
-
-/** Upstream refs a node can consume, for input autocomplete. Refs to nodes in
- * another notebook are alias-qualified (`alias:Node.port`) so cross-file wires
- * resolve and same-named nodes in different files stay distinct. */
-function collectInputRefs(
-  graph: GraphModel,
-  variablesByNode: Record<string, string[]>,
-  selfId: string,
-): string[] {
-  const self = graph.nodes[selfId];
-  const selfGroupId = self?.groupId;
-  const refs = new Set<string>();
-  for (const node of Object.values(graph.nodes)) {
-    if (node.id === selfId) {
-      continue;
-    }
-    const ports = new Set<string>(node.outputs);
-    for (const name of variablesByNode[node.id] ?? []) {
-      if (PORT_RE.test(name)) {
-        ports.add(name);
-      }
-    }
-    // Cross-notebook: prefix the upstream group's alias so the ref resolves to
-    // the right file (a bare `Node.port` only resolves within the same group).
-    const alias = node.groupId === selfGroupId ? "" : (graph.groups[node.groupId]?.alias ?? "");
-    const prefix = alias === "" ? "" : `${alias}:`;
-    for (const port of ports) {
-      refs.add(`${prefix}${node.name}.${port}`);
-    }
-  }
-  return [...refs].sort();
 }

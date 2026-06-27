@@ -7,7 +7,7 @@
  * this component stays platform-agnostic.
  */
 
-import type { GraphModel, NodeManifestDef, NodeModel } from "@notebookflow/graph-canvas";
+import type { GraphModel, NodeManifestDef, NodeModel, WireModel } from "@notebookflow/graph-canvas";
 import {
   Canvas,
   configValuesEqual,
@@ -128,6 +128,43 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
   const handleRename = (nodeId: string, nextName: string): void => {
     void engine.renameNode(nodeId, nextName, Date.now());
   };
+
+  const handleInputsChange = useCallback((nodeId: string, nextInputs: string[]): void => {
+    void engine.setNodeInputs(nodeId, nextInputs, Date.now());
+  }, [engine]);
+
+  const handleOutputsChange = useCallback((nodeId: string, nextOutputs: string[]): void => {
+    void engine.setNodeOutputs(nodeId, nextOutputs, Date.now());
+  }, [engine]);
+
+  const handleWireCreate = useCallback(
+    (wire: Omit<WireModel, "id">): void => {
+      void engine.createWire(
+        wire.sourceNodeId,
+        wire.sourcePort,
+        wire.targetNodeId,
+        wire.targetPort,
+        Date.now(),
+      );
+    },
+    [engine],
+  );
+
+  const handleWireDelete = useCallback(
+    (wireId: string): void => {
+      const wire = graph.wires[wireId];
+      if (wire === undefined) {
+        return;
+      }
+      const target = graph.nodes[wire.targetNodeId];
+      if (target === undefined) {
+        return;
+      }
+      const nextInputs = target.inputs.filter((ref) => ref !== wire.targetPort);
+      void engine.setNodeInputs(wire.targetNodeId, nextInputs, Date.now());
+    },
+    [engine, graph],
+  );
 
   const handleAddNode = (manifest: NodeManifestDef): void => {
     const config = defaultConfigForManifest(manifest);
@@ -435,7 +472,15 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
       </header>
       <div ref={bodyRef} style={bodyLayoutStyle}>
         <main style={canvasStyle}>
-          <Canvas graph={graph} onNodeRename={handleRename} onNodeSelect={setSelected} />
+          <Canvas
+            graph={graph}
+            onNodeRename={handleRename}
+            onNodeSelect={setSelected}
+            onInputsChange={handleInputsChange}
+            onOutputsChange={handleOutputsChange}
+            onWireCreate={handleWireCreate}
+            onWireDelete={handleWireDelete}
+          />
         </main>
 
         {!isSidebarCollapsed && (

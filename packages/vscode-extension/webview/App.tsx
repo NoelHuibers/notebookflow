@@ -21,6 +21,7 @@ import type {
   NodeModel,
   NodeSynthesisRequest,
   NodeSynthesisResponse,
+  WireModel,
 } from "@notebookflow/graph-canvas";
 import {
   Canvas,
@@ -200,6 +201,40 @@ export function App(): ReactElement {
   const handleRename = (nodeId: string, nextName: string): void => {
     void engineRef.current?.renameNode(nodeId, nextName, Date.now());
   };
+
+  const handleInputsChange = useCallback((nodeId: string, nextInputs: string[]): void => {
+    void engineRef.current?.setNodeInputs(nodeId, nextInputs, Date.now());
+  }, []);
+
+  const handleOutputsChange = useCallback((nodeId: string, nextOutputs: string[]): void => {
+    void engineRef.current?.setNodeOutputs(nodeId, nextOutputs, Date.now());
+  }, []);
+
+  const handleWireCreate = useCallback((wire: Omit<WireModel, "id">): void => {
+    void engineRef.current?.createWire(
+      wire.sourceNodeId,
+      wire.sourcePort,
+      wire.targetNodeId,
+      wire.targetPort,
+      Date.now(),
+    );
+  }, []);
+
+  const handleWireDelete = useCallback(
+    (wireId: string): void => {
+      const wire = graph.wires[wireId];
+      if (wire === undefined) {
+        return;
+      }
+      const target = graph.nodes[wire.targetNodeId];
+      if (target === undefined) {
+        return;
+      }
+      const nextInputs = target.inputs.filter((ref) => ref !== wire.targetPort);
+      void engineRef.current?.setNodeInputs(wire.targetNodeId, nextInputs, Date.now());
+    },
+    [graph],
+  );
 
   const handleAddNode = useCallback(
     (manifest: NodeManifestDef): void => {
@@ -575,7 +610,15 @@ export function App(): ReactElement {
       </header>
       <div ref={bodyRef} className="grid min-h-0 flex-1 overflow-hidden" style={bodyStyle}>
         <main className="relative min-h-0 min-w-0">
-          <Canvas graph={graph} onNodeRename={handleRename} onNodeSelect={setSelected} />
+          <Canvas
+            graph={graph}
+            onNodeRename={handleRename}
+            onNodeSelect={setSelected}
+            onInputsChange={handleInputsChange}
+            onOutputsChange={handleOutputsChange}
+            onWireCreate={handleWireCreate}
+            onWireDelete={handleWireDelete}
+          />
         </main>
 
         {!isSidebarCollapsed && (

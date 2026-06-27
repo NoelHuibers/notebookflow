@@ -54,9 +54,9 @@ export function PortComboboxFloating(props: PortComboboxFloatingProps): ReactEle
     const needle = query.trim().toLowerCase();
     const pool = suggestions.filter((s) => s !== initialValue);
     if (needle === "") {
-      return pool.slice(0, 8);
+      return pool;
     }
-    return pool.filter((s) => s.toLowerCase().includes(needle)).slice(0, 8);
+    return pool.filter((s) => s.toLowerCase().includes(needle));
   }, [query, suggestions, initialValue]);
 
   const trimmed = query.trim();
