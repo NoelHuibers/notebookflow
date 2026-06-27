@@ -309,6 +309,25 @@ describe("SyncEngine.createWire", () => {
     expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::1`]?.inputs).toEqual(["Source.df"]);
   });
 
+  it("adds a missing output port on the upstream node when an input ref is declared", async () => {
+    const adapter = recordingAdapter();
+    const engine = new SyncEngine(adapter.options);
+    const cells: NotebookCell[] = [
+      { cellType: "code", source: "# @node: Source  [input]\n" },
+      { cellType: "code", source: "# @node: Sink  [transform]\n" },
+    ];
+    await engine.ingestNotebook(TWO_NODE_PATH, cells, 100);
+
+    await engine.createWire(`${TWO_NODE_PATH}::0`, "df", `${TWO_NODE_PATH}::1`, "__in__", 200);
+
+    expect(adapter.patches).toHaveLength(2);
+    expect(adapter.patches[0]?.cellIndex).toBe(0);
+    expect(adapter.patches[0]?.newSource).toContain("out=df");
+    expect(adapter.patches[1]?.cellIndex).toBe(1);
+    expect(adapter.patches[1]?.newSource).toContain("in=Source.df");
+    expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::0`]?.outputs).toEqual(["df"]);
+  });
+
   it("is a no-op when the target already has that input ref", async () => {
     const adapter = recordingAdapter();
     const engine = new SyncEngine(adapter.options);
@@ -455,6 +474,26 @@ describe("SyncEngine.setNodeInputs / setNodeOutputs", () => {
     expect(adapter.patches[0]?.newSource).not.toContain("out=");
     expect(Object.keys(engine.getGraph().wires)).toHaveLength(0);
     expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::1`]?.outputs).toEqual([]);
+  });
+
+  it("adds a missing output port on the upstream node when an input ref is declared", async () => {
+    const adapter = recordingAdapter();
+    const engine = new SyncEngine(adapter.options);
+    const cells: NotebookCell[] = [
+      { cellType: "code", source: "# @node: Source  [input]\n" },
+      { cellType: "code", source: "# @node: Sink  [transform]\n" },
+    ];
+    await engine.ingestNotebook(TWO_NODE_PATH, cells, 100);
+
+    await engine.setNodeInputs(`${TWO_NODE_PATH}::1`, ["Source.df"], 200);
+
+    expect(adapter.patches).toHaveLength(2);
+    expect(adapter.patches[0]?.cellIndex).toBe(0);
+    expect(adapter.patches[0]?.newSource).toContain("out=df");
+    expect(adapter.patches[1]?.cellIndex).toBe(1);
+    expect(adapter.patches[1]?.newSource).toContain("in=Source.df");
+    expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::0`]?.outputs).toEqual(["df"]);
+    expect(Object.keys(engine.getGraph().wires)).toHaveLength(1);
   });
 
   it("dedupes and rejects malformed refs", async () => {

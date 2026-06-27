@@ -253,6 +253,8 @@ export class SyncEngine {
       return;
     }
 
+    await this.ensureOutputPort(source, sourcePort, timestamp);
+
     const newInputs =
       targetPort === INLET_DROP_HANDLE_ID || !target.inputs.includes(targetPort)
         ? [...target.inputs, refStr]
@@ -296,7 +298,9 @@ export class SyncEngine {
     if (node === undefined) {
       throw new Error(`SyncEngine.setNodeInputs: node ${JSON.stringify(nodeId)} not found`);
     }
-    await this.applyPorts(node, normalizeInputs(nextInputs), node.outputs, timestamp);
+    const normalized = normalizeInputs(nextInputs);
+    await this.ensureOutputsForInputRefs(node, normalized, timestamp);
+    await this.applyPorts(node, normalized, node.outputs, timestamp);
   }
 
   /** Graph→cell: replace a node's declared output port names and rewrite its marker. */
@@ -585,6 +589,55 @@ export class SyncEngine {
     node.outputs = nextOutputs;
     this.recomputeAllWires();
     this.opts.onGraphUpdate(this.getGraph());
+  }
+
+  /**
+   * When an input ref names an existing upstream node, ensure that node
+   * declares the referenced port as an output so the wire can resolve.
+   */
+  private async ensureOutputsForInputRefs(
+    target: NodeModel,
+    refs: readonly string[],
+    timestamp: number,
+  ): Promise<void> {
+    for (const ref of refs) {
+      const resolved = this.resolveRef(ref, target.groupId);
+      if (resolved === null) {
+        continue;
+      }
+      await this.ensureOutputPort(resolved.source, resolved.portName, timestamp);
+    }
+  }
+
+  /** Append `portName` to `source`'s declared outputs when missing. */
+  private async ensureOutputPort(
+    source: NodeModel,
+    portName: string,
+    timestamp: number,
+  ): Promise<boolean> {
+    if (source.outputs.includes(portName)) {
+      return false;
+    }
+    if (!PORT_RE.test(portName)) {
+      return false;
+    }
+    const nextOutputs = normalizeOutputs([...source.outputs, portName]);
+    const notebookPath = this.notebookPathOf(source);
+    const cellIndex = source.cellIndices[0];
+    if (cellIndex === undefined) {
+      return false;
+    }
+    const applied = await this.applyMarkerPatch(
+      notebookPath,
+      cellIndex,
+      { name: source.name, tag: source.tag, inputs: source.inputs, outputs: nextOutputs },
+      timestamp,
+    );
+    if (!applied) {
+      return false;
+    }
+    source.outputs = nextOutputs;
+    return true;
   }
 
   /**
