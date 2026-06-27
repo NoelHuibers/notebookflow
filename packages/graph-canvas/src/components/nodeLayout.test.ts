@@ -14,6 +14,7 @@ import { NODE_GROUP_HEADER_HEIGHT } from "./NodeGroup";
 
 const GROUP_LAYOUT = {
   columnWidth: 320,
+  columnGap: 32,
   nodeXInset: 16,
   groupInnerTopPadding: 16,
   groupInnerBottomPadding: 24,
@@ -131,6 +132,31 @@ describe("nodeLayout", () => {
     const group = laidOut.find((node) => node.id === groupId);
 
     expect((group?.style as { width?: number })?.width).toBe(16 + 380 + 16);
+  });
+
+  it("spaces multiple stacked groups by measured width without overlap", () => {
+    const g1 = "group:g1";
+    const g2 = "group:g2";
+    const nodes = [
+      groupNode(g1),
+      notebookNode("a", 0, g1),
+      { ...groupNode(g2), position: { x: 352, y: 0 } },
+      notebookNode("b", 0, g2),
+    ];
+    const measured = new Map([
+      ["a", { width: 380, height: 100 }],
+      ["b", { width: 220, height: 100 }],
+    ]);
+    const fallback = (): { width: number; height: number } => ({ width: 200, height: 100 });
+    const laidOut = applyMeasuredGroupLayout(nodes, measured, false, GROUP_LAYOUT, fallback);
+
+    const group1 = laidOut.find((node) => node.id === g1);
+    const group2 = laidOut.find((node) => node.id === g2);
+    const wideWidth = 16 + 380 + 16;
+
+    expect(group1?.position.x).toBe(0);
+    expect((group1?.style as { width?: number })?.width).toBe(wideWidth);
+    expect(group2?.position.x).toBe(wideWidth + GROUP_LAYOUT.columnGap);
   });
 
   it("positions horizontal row from measured widths with uniform gap", () => {

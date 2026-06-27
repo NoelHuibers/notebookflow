@@ -16,6 +16,7 @@ export interface MeasuredSize {
 
 export interface GroupLayoutConstants {
   columnWidth: number;
+  columnGap: number;
   nodeXInset: number;
   groupInnerTopPadding: number;
   groupInnerBottomPadding: number;
@@ -193,6 +194,17 @@ export function horizontalGroupWidth(
   return Math.max(constants.columnWidth, contentWidth);
 }
 
+/** Cumulative X for the nth notebook group from prior group widths. */
+export function groupColumnX(
+  priorGroupWidths: number[],
+  gap: number = 0,
+): number {
+  if (priorGroupWidths.length === 0) {
+    return 0;
+  }
+  return priorGroupWidths.reduce((x: number, width: number) => x + width + gap, 0);
+}
+
 /** Reposition notebook nodes and resize groups from measured DOM dimensions. */
 export function applyMeasuredGroupLayout(
   nodes: Node[],
@@ -208,8 +220,12 @@ export function applyMeasuredGroupLayout(
 
   const childPositions = new Map<string, { x: number; y: number }>();
   const groupStyles = new Map<string, { width: number; height: number }>();
+  const groupPositions = new Map<string, { x: number; y: number }>();
 
-  for (const group of groupNodes) {
+  const sortedGroups = [...groupNodes].sort((a, b) => a.position.x - b.position.x);
+  const priorGroupWidths: number[] = [];
+
+  for (const group of sortedGroups) {
     const children = nodes
       .filter((node) => node.parentNode === group.id && node.type === "notebook")
       .sort((a, b) => cellSortKey(a) - cellSortKey(b));
@@ -279,20 +295,31 @@ export function applyMeasuredGroupLayout(
       width: groupWidth,
       height: collapsed ? constants.collapsedGroupHeight : expandedHeight,
     });
+    groupPositions.set(group.id, {
+      x: groupColumnX(priorGroupWidths, constants.columnGap),
+      y: group.position.y,
+    });
+    priorGroupWidths.push(groupWidth);
   }
 
   return nodes.map((node) => {
     if (node.type === "group") {
       const style = groupStyles.get(node.id);
-      if (style === undefined) {
+      const position = groupPositions.get(node.id);
+      if (style === undefined || position === undefined) {
         return node;
       }
       const prev = node.style as { width?: number; height?: number } | undefined;
-      if (prev?.width === style.width && prev?.height === style.height) {
+      const sizeUnchanged =
+        prev?.width === style.width && prev?.height === style.height;
+      const positionUnchanged =
+        node.position.x === position.x && node.position.y === position.y;
+      if (sizeUnchanged && positionUnchanged) {
         return node;
       }
       return {
         ...node,
+        position,
         style: { ...node.style, width: style.width, height: style.height },
       };
     }

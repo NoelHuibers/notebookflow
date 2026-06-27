@@ -115,6 +115,7 @@ const GROUP_INNER_RIGHT_PADDING = 16;
 
 const GROUP_LAYOUT: GroupLayoutConstants = {
   columnWidth: COLUMN_WIDTH,
+  columnGap: COLUMN_GAP,
   nodeXInset: NODE_X_INSET,
   groupInnerTopPadding: GROUP_INNER_TOP_PADDING,
   groupInnerBottomPadding: GROUP_INNER_BOTTOM_PADDING,
@@ -559,6 +560,7 @@ function buildNodes(
   const unresolved = unresolvedByNode ?? {};
   const rfNodes: Node[] = [];
   const groupIds = Object.keys(graph.groups).sort();
+  let nextGroupX = 0;
 
   for (let columnIdx = 0; columnIdx < groupIds.length; columnIdx++) {
     const groupId = groupIds[columnIdx];
@@ -570,7 +572,7 @@ function buildNodes(
       continue;
     }
 
-    const groupX = columnIdx * (COLUMN_WIDTH + COLUMN_GAP);
+    const groupX = nextGroupX;
     const groupData: NodeGroupData = { ...group };
     if (onGroupToggle !== undefined) {
       groupData.onToggle = onGroupToggle;
@@ -650,6 +652,8 @@ function buildNodes(
       selectable: true,
       style: { width: groupWidth, height: groupHeight },
     });
+
+    nextGroupX += groupWidth + COLUMN_GAP;
 
     if (group.collapsed) {
       continue;
