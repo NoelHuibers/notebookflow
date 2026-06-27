@@ -23,8 +23,8 @@ import {
   PORT_EDGE_INSET,
   type PortKind,
   portChipStyles,
-  STACKED_PORT_COLUMN_MAX,
   STACKED_CHIP_MIN_WIDTH,
+  STACKED_PORT_COLUMN_MAX,
 } from "./portEditorShared";
 
 const TAG_HANDLE_COLOR: Record<NodeTag, string> = {
@@ -171,7 +171,9 @@ function SidePortGrid(props: InletOutletGridProps): ReactElement | null {
   return (
     <div style={sideGridStyles.grid}>
       <div style={{ ...sideGridStyles.headerRow, gridTemplateColumns: gridColumns }}>
-        {showInlets && <span style={{ ...sideGridStyles.headerCell, textAlign: "left" }}>Input</span>}
+        {showInlets && (
+          <span style={{ ...sideGridStyles.headerCell, textAlign: "left" }}>Input</span>
+        )}
         {showOutlets && (
           <span style={{ ...sideGridStyles.headerCell, textAlign: "right" }}>Output</span>
         )}
@@ -403,40 +405,40 @@ function StackedPortSection(props: InletOutletGridProps): ReactElement | null {
           {columns.map((col) => (
             <div key={`label-${col.key}`} style={stackedStyles.portColumn}>
               <StackedPortCell>
-              {col.port === null ? (
-                editable ? (
-                  <button
-                    type="button"
-                    className="nodrag nopan"
-                    aria-label="Add input"
-                    title="Add input"
-                    onClick={(event) => {
-                      setEditing({ kind: "input", index: -1, anchorEl: event.currentTarget });
+                {col.port === null ? (
+                  editable ? (
+                    <button
+                      type="button"
+                      className="nodrag nopan"
+                      aria-label="Add input"
+                      title="Add input"
+                      onClick={(event) => {
+                        setEditing({ kind: "input", index: -1, anchorEl: event.currentTarget });
+                      }}
+                      style={stackedStyles.dropHint}
+                    >
+                      <Plus aria-hidden="true" size={11} strokeWidth={2.5} />
+                      <span>wire or add</span>
+                    </button>
+                  ) : (
+                    <span style={stackedStyles.emptySlot}>—</span>
+                  )
+                ) : editable && onInputsChange !== undefined ? (
+                  <PortChip
+                    value={col.port}
+                    dimmed={editing?.kind === "input" && editing.index === col.index}
+                    onEdit={(anchorEl) => {
+                      setEditing({ kind: "input", index: col.index, anchorEl });
                     }}
-                    style={stackedStyles.dropHint}
-                  >
-                    <Plus aria-hidden="true" size={11} strokeWidth={2.5} />
-                    <span>wire or add</span>
-                  </button>
+                    onRemove={() => {
+                      remove("input", col.index);
+                    }}
+                  />
                 ) : (
-                  <span style={stackedStyles.emptySlot}>—</span>
-                )
-              ) : editable && onInputsChange !== undefined ? (
-                <PortChip
-                  value={col.port}
-                  dimmed={editing?.kind === "input" && editing.index === col.index}
-                  onEdit={(anchorEl) => {
-                    setEditing({ kind: "input", index: col.index, anchorEl });
-                  }}
-                  onRemove={() => {
-                    remove("input", col.index);
-                  }}
-                />
-              ) : (
-                <span style={portChipStyles.readOnlyPort} title={col.port}>
-                  {col.port}
-                </span>
-              )}
+                  <span style={portChipStyles.readOnlyPort} title={col.port}>
+                    {col.port}
+                  </span>
+                )}
               </StackedPortCell>
             </div>
           ))}
@@ -481,39 +483,39 @@ function StackedPortSection(props: InletOutletGridProps): ReactElement | null {
         {columns.map((col) => (
           <div key={`label-${col.key}`} style={stackedStyles.portColumn}>
             <StackedPortCell>
-            {col.port === null ? (
-              editable ? (
-                <button
-                  type="button"
-                  className="nodrag nopan"
-                  aria-label="Add output"
-                  title="Add output"
-                  onClick={(event) => {
-                    setEditing({ kind: "output", index: -1, anchorEl: event.currentTarget });
+              {col.port === null ? (
+                editable ? (
+                  <button
+                    type="button"
+                    className="nodrag nopan"
+                    aria-label="Add output"
+                    title="Add output"
+                    onClick={(event) => {
+                      setEditing({ kind: "output", index: -1, anchorEl: event.currentTarget });
+                    }}
+                    style={portChipStyles.addButton}
+                  >
+                    <Plus aria-hidden="true" size={11} strokeWidth={2.5} />
+                  </button>
+                ) : (
+                  <span style={stackedStyles.emptySlot}>—</span>
+                )
+              ) : editable && onOutputsChange !== undefined ? (
+                <PortChip
+                  value={col.port}
+                  dimmed={editing?.kind === "output" && editing.index === col.index}
+                  onEdit={(anchorEl) => {
+                    setEditing({ kind: "output", index: col.index, anchorEl });
                   }}
-                  style={portChipStyles.addButton}
-                >
-                  <Plus aria-hidden="true" size={11} strokeWidth={2.5} />
-                </button>
+                  onRemove={() => {
+                    remove("output", col.index);
+                  }}
+                />
               ) : (
-                <span style={stackedStyles.emptySlot}>—</span>
-              )
-            ) : editable && onOutputsChange !== undefined ? (
-              <PortChip
-                value={col.port}
-                dimmed={editing?.kind === "output" && editing.index === col.index}
-                onEdit={(anchorEl) => {
-                  setEditing({ kind: "output", index: col.index, anchorEl });
-                }}
-                onRemove={() => {
-                  remove("output", col.index);
-                }}
-              />
-            ) : (
-              <span style={portChipStyles.readOnlyPort} title={col.port}>
-                {col.port}
-              </span>
-            )}
+                <span style={portChipStyles.readOnlyPort} title={col.port}>
+                  {col.port}
+                </span>
+              )}
             </StackedPortCell>
           </div>
         ))}

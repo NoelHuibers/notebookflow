@@ -7,7 +7,7 @@ import type { Node } from "reactflow";
 
 import type { NodeModel } from "../types";
 import type { PortPlacement } from "./InletOutletGrid";
-import { STACKED_PORT_COLUMN_MIN, SIDES_PORT_LABEL_MIN } from "./portEditorShared";
+import { SIDES_PORT_LABEL_MIN, STACKED_PORT_COLUMN_MIN } from "./portEditorShared";
 
 export interface MeasuredSize {
   width: number;
@@ -147,7 +147,7 @@ export function estimateNodeWidth(
 /** Cumulative X for the nth horizontal cell (0-based), given prior cell widths. */
 export function horizontalCellX(
   priorWidths: number[],
-  startInset: number = 16,
+  startInset = 16,
   gap: number = NODE_GAP,
 ): number {
   if (priorWidths.length === 0) {
@@ -167,10 +167,7 @@ function isGroupCollapsed(group: Node): boolean {
 }
 
 /** Notebook container width for vertically stacked cells from the widest measured cell. */
-export function stackedGroupWidth(
-  maxCellWidth: number,
-  constants: GroupLayoutConstants,
-): number {
+export function stackedGroupWidth(maxCellWidth: number, constants: GroupLayoutConstants): number {
   return Math.max(
     constants.columnWidth,
     constants.nodeXInset + maxCellWidth + constants.groupInnerRightPadding,
@@ -195,14 +192,19 @@ export function horizontalGroupWidth(
 }
 
 /** Cumulative X for the nth notebook group from prior group widths. */
-export function groupColumnX(
-  priorGroupWidths: number[],
-  gap: number = 0,
-): number {
+export function groupColumnX(priorGroupWidths: number[], gap = 0): number {
   if (priorGroupWidths.length === 0) {
     return 0;
   }
   return priorGroupWidths.reduce((x: number, width: number) => x + width + gap, 0);
+}
+
+/** Cumulative Y for the nth notebook group from prior group heights. */
+export function groupRowY(priorGroupHeights: number[], gap = 0): number {
+  if (priorGroupHeights.length === 0) {
+    return 0;
+  }
+  return priorGroupHeights.reduce((y: number, height: number) => y + height + gap, 0);
 }
 
 /** Reposition notebook nodes and resize groups from measured DOM dimensions. */
@@ -222,8 +224,11 @@ export function applyMeasuredGroupLayout(
   const groupStyles = new Map<string, { width: number; height: number }>();
   const groupPositions = new Map<string, { x: number; y: number }>();
 
-  const sortedGroups = [...groupNodes].sort((a, b) => a.position.x - b.position.x);
+  const sortedGroups = horizontalCells
+    ? [...groupNodes].sort((a, b) => a.position.y - b.position.y)
+    : [...groupNodes].sort((a, b) => a.position.x - b.position.x);
   const priorGroupWidths: number[] = [];
+  const priorGroupHeights: number[] = [];
 
   for (const group of sortedGroups) {
     const children = nodes
@@ -250,11 +255,7 @@ export function applyMeasuredGroupLayout(
         }
         if (!collapsed) {
           childPositions.set(child.id, {
-            x: horizontalCellX(
-              cellWidths.slice(0, index),
-              constants.nodeXInset,
-              constants.nodeGap,
-            ),
+            x: horizontalCellX(cellWidths.slice(0, index), constants.nodeXInset, constants.nodeGap),
             y: constants.groupHeaderHeight + constants.groupInnerTopPadding,
           });
         }
@@ -295,11 +296,21 @@ export function applyMeasuredGroupLayout(
       width: groupWidth,
       height: collapsed ? constants.collapsedGroupHeight : expandedHeight,
     });
-    groupPositions.set(group.id, {
-      x: groupColumnX(priorGroupWidths, constants.columnGap),
-      y: group.position.y,
-    });
+    const groupHeight = collapsed ? constants.collapsedGroupHeight : expandedHeight;
+    groupPositions.set(
+      group.id,
+      horizontalCells
+        ? {
+            x: group.position.x,
+            y: groupRowY(priorGroupHeights, constants.columnGap),
+          }
+        : {
+            x: groupColumnX(priorGroupWidths, constants.columnGap),
+            y: group.position.y,
+          },
+    );
     priorGroupWidths.push(groupWidth);
+    priorGroupHeights.push(groupHeight);
   }
 
   return nodes.map((node) => {
@@ -310,10 +321,8 @@ export function applyMeasuredGroupLayout(
         return node;
       }
       const prev = node.style as { width?: number; height?: number } | undefined;
-      const sizeUnchanged =
-        prev?.width === style.width && prev?.height === style.height;
-      const positionUnchanged =
-        node.position.x === position.x && node.position.y === position.y;
+      const sizeUnchanged = prev?.width === style.width && prev?.height === style.height;
+      const positionUnchanged = node.position.x === position.x && node.position.y === position.y;
       if (sizeUnchanged && positionUnchanged) {
         return node;
       }
@@ -336,10 +345,7 @@ export function applyMeasuredGroupLayout(
 }
 
 /** Whether measured layout would change any group bounds or child positions. */
-export function measuredLayoutDiffers(
-  before: Node[],
-  after: Node[],
-): boolean {
+export function measuredLayoutDiffers(before: Node[], after: Node[]): boolean {
   if (before.length !== after.length) {
     return true;
   }

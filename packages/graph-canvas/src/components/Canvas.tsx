@@ -39,13 +39,13 @@ import {
   applyMeasuredGroupLayout,
   estimateNodeHeight,
   estimateNodeWidth,
+  type GroupLayoutConstants,
   horizontalGroupWidth,
+  type MeasuredSize,
   measuredLayoutDiffers,
   NODE_GAP,
-  stackedGroupWidth,
-  type GroupLayoutConstants,
-  type MeasuredSize,
   type NodeLayoutHints,
+  stackedGroupWidth,
 } from "./nodeLayout";
 import { collectInputRefs, collectOutputSuggestions } from "./portSuggestions";
 import type { WireData } from "./Wire";
@@ -76,6 +76,7 @@ function MeasuredNotebookNode(props: NodeProps<NotebookNodeData>): ReactElement 
   ].join("|");
 
   useLayoutEffect(() => {
+    void measureRevision;
     updateNodeInternals(id);
   }, [id, measureRevision, updateNodeInternals]);
 
@@ -253,7 +254,6 @@ function CanvasInner(props: CanvasProps): ReactElement {
     });
   }, [
     graph,
-    layout,
     onNodeRename,
     onGroupToggle,
     onInputsChange,
@@ -463,8 +463,7 @@ function MeasuredGroupLayout({ portPlacement }: { portPlacement: PortPlacement }
     (node: Node): MeasuredSize => {
       const data = node.data as NotebookNodeData;
       const hints: NodeLayoutHints = {
-        portsEditable:
-          data.onInputsChange !== undefined || data.onOutputsChange !== undefined,
+        portsEditable: data.onInputsChange !== undefined || data.onOutputsChange !== undefined,
         hasMeta:
           (data.meta?.filename !== undefined && data.meta.filename !== "") ||
           (data.meta?.rows !== undefined && Number.isFinite(data.meta.rows)) ||
@@ -479,6 +478,7 @@ function MeasuredGroupLayout({ portPlacement }: { portPlacement: PortPlacement }
   );
 
   useLayoutEffect(() => {
+    void measureSignature;
     if (!initialized) {
       return;
     }
@@ -494,12 +494,7 @@ function MeasuredGroupLayout({ portPlacement }: { portPlacement: PortPlacement }
       notebookCount += 1;
       const width = internal.width;
       const height = internal.height;
-      if (
-        typeof width !== "number" ||
-        typeof height !== "number" ||
-        width <= 0 ||
-        height <= 0
-      ) {
+      if (typeof width !== "number" || typeof height !== "number" || width <= 0 || height <= 0) {
         return;
       }
       measured.set(id, { width, height });
@@ -561,6 +556,8 @@ function buildNodes(
   const rfNodes: Node[] = [];
   const groupIds = Object.keys(graph.groups).sort();
   let nextGroupX = 0;
+  let nextGroupY = 0;
+  const horizontalCells = portPlacement === "sides";
 
   for (let columnIdx = 0; columnIdx < groupIds.length; columnIdx++) {
     const groupId = groupIds[columnIdx];
@@ -572,7 +569,8 @@ function buildNodes(
       continue;
     }
 
-    const groupX = nextGroupX;
+    const groupX = horizontalCells ? 0 : nextGroupX;
+    const groupY = horizontalCells ? nextGroupY : GROUP_Y;
     const groupData: NodeGroupData = { ...group };
     if (onGroupToggle !== undefined) {
       groupData.onToggle = onGroupToggle;
@@ -583,8 +581,6 @@ function buildNodes(
       .filter((n): n is NodeModel => n !== undefined)
       .sort((a, b) => (a.cellIndices[0] ?? 0) - (b.cellIndices[0] ?? 0));
 
-    const horizontalCells = portPlacement === "sides";
-
     type CellLayout = {
       node: NodeModel;
       hints: NodeLayoutHints;
@@ -594,13 +590,7 @@ function buildNodes(
     const cellLayouts: CellLayout[] = groupNodes.map((node) => {
       const meta = metas[node.id];
       const unresolvedRefs = unresolved[node.id];
-      const hints = layoutHintsForNode(
-        node,
-        meta,
-        unresolvedRefs,
-        onInputsChange,
-        onOutputsChange,
-      );
+      const hints = layoutHintsForNode(node, meta, unresolvedRefs, onInputsChange, onOutputsChange);
       return {
         node,
         hints,
@@ -646,14 +636,18 @@ function buildNodes(
     rfNodes.push({
       id: groupNodeId,
       type: "group",
-      position: { x: groupX, y: GROUP_Y },
+      position: { x: groupX, y: groupY },
       data: groupData,
       draggable: false,
       selectable: true,
       style: { width: groupWidth, height: groupHeight },
     });
 
-    nextGroupX += groupWidth + COLUMN_GAP;
+    if (horizontalCells) {
+      nextGroupY += groupHeight + COLUMN_GAP;
+    } else {
+      nextGroupX += groupWidth + COLUMN_GAP;
+    }
 
     if (group.collapsed) {
       continue;
@@ -847,9 +841,7 @@ function layoutHintsForNode(
   return {
     portsEditable: onInputsChange !== undefined || onOutputsChange !== undefined,
     hasMeta:
-      hasMetaFilename ||
-      hasMetaRows ||
-      (unresolvedRefs !== undefined && unresolvedRefs.length > 0),
+      hasMetaFilename || hasMetaRows || (unresolvedRefs !== undefined && unresolvedRefs.length > 0),
   };
 }
 

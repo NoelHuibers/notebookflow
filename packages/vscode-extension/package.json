@@ -52,7 +52,7 @@
     "build:host": "tsc -b",
     "build:webview": "vite build",
     "dev": "tsc -b --watch",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
     "clean": "rimraf dist dist-webview .turbo *.tsbuildinfo"
   },

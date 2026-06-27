@@ -450,10 +450,14 @@ function nodeStyles(
   if (corners?.layout === "stacked") {
     return {
       wrapper: sharedWrapper,
-      header: headerStyle(tagColor, {
-        roundTop: corners.roundHeaderTop,
-        roundBottom: corners.roundHeaderBottom,
-      }, clip),
+      header: headerStyle(
+        tagColor,
+        {
+          roundTop: corners.roundHeaderTop,
+          roundBottom: corners.roundHeaderBottom,
+        },
+        clip,
+      ),
       titleRow: {
         display: "flex",
         alignItems: "center",

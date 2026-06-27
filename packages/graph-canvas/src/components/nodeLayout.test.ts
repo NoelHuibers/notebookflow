@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
 import type { Node } from "reactflow";
+import { describe, expect, it } from "vitest";
 
 import type { NodeModel } from "../types";
+import { NODE_GROUP_HEADER_HEIGHT } from "./NodeGroup";
 import {
   applyMeasuredGroupLayout,
   countSidePortRows,
@@ -10,7 +11,6 @@ import {
   horizontalCellX,
   NODE_GAP,
 } from "./nodeLayout";
-import { NODE_GROUP_HEADER_HEIGHT } from "./NodeGroup";
 
 const GROUP_LAYOUT = {
   columnWidth: 320,
@@ -57,10 +57,7 @@ const transformNode: NodeModel = {
 describe("nodeLayout", () => {
   it("grows side height with port rows", () => {
     const oneRow = estimateNodeHeight(transformNode, "sides");
-    const threeRows = estimateNodeHeight(
-      { ...transformNode, inputs: ["a", "b", "c"] },
-      "sides",
-    );
+    const threeRows = estimateNodeHeight({ ...transformNode, inputs: ["a", "b", "c"] }, "sides");
     expect(threeRows).toBeGreaterThan(oneRow);
   });
 
@@ -77,11 +74,9 @@ describe("nodeLayout", () => {
 
   it("estimates stacked width from port columns", () => {
     const narrow = estimateNodeWidth(transformNode, "stacked");
-    const wide = estimateNodeWidth(
-      { ...transformNode, inputs: ["a", "b", "c", "d"] },
-      "stacked",
-      { portsEditable: true },
-    );
+    const wide = estimateNodeWidth({ ...transformNode, inputs: ["a", "b", "c", "d"] }, "stacked", {
+      portsEditable: true,
+    });
     expect(wide).toBeGreaterThan(narrow);
   });
 
@@ -189,5 +184,29 @@ describe("nodeLayout", () => {
     expect((group?.style as { height?: number })?.height).toBe(
       NODE_GROUP_HEADER_HEIGHT + 16 + 140 + 24,
     );
+  });
+
+  it("stacks multiple horizontal-view groups vertically without overlap", () => {
+    const g1 = "group:g1";
+    const g2 = "group:g2";
+    const tallHeight = NODE_GROUP_HEADER_HEIGHT + 16 + 140 + 24;
+    const nodes = [
+      groupNode(g1),
+      notebookNode("a", 0, g1),
+      { ...groupNode(g2), position: { x: 0, y: 400 } },
+      notebookNode("b", 0, g2),
+    ];
+    const measured = new Map([
+      ["a", { width: 180, height: 140 }],
+      ["b", { width: 220, height: 110 }],
+    ]);
+    const fallback = (): { width: number; height: number } => ({ width: 200, height: 100 });
+    const laidOut = applyMeasuredGroupLayout(nodes, measured, true, GROUP_LAYOUT, fallback);
+
+    const group1 = laidOut.find((node) => node.id === g1);
+    const group2 = laidOut.find((node) => node.id === g2);
+
+    expect(group1?.position).toEqual({ x: 0, y: 0 });
+    expect(group2?.position.y).toBe(tallHeight + GROUP_LAYOUT.columnGap);
   });
 });
