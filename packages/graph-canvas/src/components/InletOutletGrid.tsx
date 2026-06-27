@@ -1,14 +1,14 @@
 /**
- * InletOutletGrid — two-column port layout for a notebook node.
+ * InletOutletGrid — port layout for a notebook node.
  *
- * Inlets (inputs) align left, outlets (outputs) align right. Each declared
- * port occupies one row so React Flow handles sit on the matching inlet or
- * outlet instead of being distributed along the node edge. Wires therefore
- * connect outlet → inlet rather than cell → cell.
+ * **Sides** (dagre / horizontal flow): inputs left, outputs right, one row per
+ * port pair. **Stacked** (manual / vertical flow): all handles on one horizontal
+ * rail at the top (inputs) or bottom (outputs); port labels sit in the adjacent
+ * row, each centered under its connector.
  */
 
 import { Plus, X } from "lucide-react";
-import type { CSSProperties, ReactElement } from "react";
+import type { CSSProperties, ReactElement, ReactNode } from "react";
 import { useState } from "react";
 import { Handle, Position } from "reactflow";
 
@@ -17,10 +17,14 @@ import { PortComboboxFloating } from "./PortComboboxFloating";
 import {
   INLET_DROP_HANDLE_ID,
   isValidPort,
+  NODE_BACKGROUND,
   NODE_BORDER,
   NODE_MUTED,
+  PORT_EDGE_INSET,
   type PortKind,
   portChipStyles,
+  STACKED_PORT_COLUMN_MAX,
+  STACKED_CHIP_MIN_WIDTH,
 } from "./portEditorShared";
 
 const TAG_HANDLE_COLOR: Record<NodeTag, string> = {
@@ -31,7 +35,17 @@ const TAG_HANDLE_COLOR: Record<NodeTag, string> = {
   io: "#f97316",
 };
 
-const NODE_BACKGROUND = "var(--notebookflow-node-bg, var(--card, #ffffff))";
+/** Matches the inner curve of the 8px node wrapper (8px radius − 2px border). */
+export const NODE_CLIP_RADIUS = 6;
+
+const HANDLE_RAIL_SIZE = 10;
+
+/** Side handles straddle the port row edge; stacked handles sit slightly inside the band. */
+const SIDE_HANDLE_EDGE_OFFSET = -PORT_EDGE_INSET;
+const STACKED_HANDLE_INSET = 2;
+
+export type PortPlacement = "sides" | "stacked";
+export type PortEdge = "top" | "bottom";
 
 interface EditingTarget {
   kind: PortKind;
@@ -48,11 +62,72 @@ export interface InletOutletGridProps {
   editable: boolean;
   inputSuggestions: string[];
   outputSuggestions: string[];
+  /** Side-by-side (horizontal flow) or stacked top/bottom (vertical flow). */
+  placement?: PortPlacement;
+  /** Which edge to render when `placement` is `"stacked"` or `"sides"`. */
+  edge?: PortEdge;
+  /** Round outer corners to match the node wrapper. */
+  clipCorner?: "top" | "bottom";
   onInputsChange?: (nextInputs: string[]) => void;
   onOutputsChange?: (nextOutputs: string[]) => void;
 }
 
 export function InletOutletGrid(props: InletOutletGridProps): ReactElement | null {
+  const placement = props.placement ?? "sides";
+  if (placement === "stacked") {
+    return <StackedPortSection {...props} />;
+  }
+  return <SidePortGrid {...props} />;
+}
+
+/** Whether the left / top inlet port band renders. */
+export function inletPortsVisible(
+  showInlets: boolean,
+  inputs: string[],
+  editable: boolean,
+  canChangeInputs: boolean,
+): boolean {
+  if (!showInlets) {
+    return false;
+  }
+  return inputs.length > 0 || (editable && canChangeInputs);
+}
+
+/** Whether the right / bottom outlet port band renders. */
+export function outletPortsVisible(
+  showOutlets: boolean,
+  outputs: string[],
+  editable: boolean,
+  canChangeOutputs: boolean,
+): boolean {
+  if (!showOutlets) {
+    return false;
+  }
+  return outputs.length > 0 || (editable && canChangeOutputs);
+}
+
+function clipSectionStyle(
+  base: CSSProperties,
+  clipCorner: "top" | "bottom" | undefined,
+): CSSProperties {
+  if (clipCorner === "top") {
+    return {
+      ...base,
+      borderTopLeftRadius: NODE_CLIP_RADIUS,
+      borderTopRightRadius: NODE_CLIP_RADIUS,
+    };
+  }
+  if (clipCorner === "bottom") {
+    return {
+      ...base,
+      borderBottomLeftRadius: NODE_CLIP_RADIUS,
+      borderBottomRightRadius: NODE_CLIP_RADIUS,
+    };
+  }
+  return base;
+}
+
+function SidePortGrid(props: InletOutletGridProps): ReactElement | null {
   const {
     tag,
     inputs,
@@ -81,8 +156,413 @@ export function InletOutletGrid(props: InletOutletGridProps): ReactElement | nul
     showOutlets ? outletRows + (addOutletRow ? 1 : 0) : 0,
     1,
   );
-  const gridColumns = showInlets && showOutlets ? "1fr 1fr" : showInlets ? "1fr" : "1fr";
+  const gridColumns = showInlets && showOutlets ? "1fr 1fr" : "1fr";
 
+  const { commit, remove } = createPortEditorActions(
+    inputs,
+    outputs,
+    onInputsChange,
+    onOutputsChange,
+    setEditing,
+  );
+
+  const handleColor = TAG_HANDLE_COLOR[tag];
+
+  return (
+    <div style={sideGridStyles.grid}>
+      <div style={{ ...sideGridStyles.headerRow, gridTemplateColumns: gridColumns }}>
+        {showInlets && <span style={{ ...sideGridStyles.headerCell, textAlign: "left" }}>Input</span>}
+        {showOutlets && (
+          <span style={{ ...sideGridStyles.headerCell, textAlign: "right" }}>Output</span>
+        )}
+      </div>
+      {Array.from({ length: rowCount }, (_, rowIdx) => {
+        const inlet = showInlets ? inputs[rowIdx] : undefined;
+        const outlet = showOutlets ? outputs[rowIdx] : undefined;
+        const isDropInletRow = dropInletRow && rowIdx === inletRows && inlet === undefined;
+        const isAddOutletRow = addOutletRow && rowIdx === outletRows && outlet === undefined;
+
+        if (inlet === undefined && outlet === undefined && !isDropInletRow && !isAddOutletRow) {
+          return null;
+        }
+
+        return (
+          <div
+            key={`port-row-${String(rowIdx)}`}
+            style={{ ...sideGridStyles.bodyRow, gridTemplateColumns: gridColumns }}
+          >
+            {showInlets && (
+              <div style={sideGridStyles.inletCell}>
+                {isDropInletRow ? (
+                  <>
+                    <Handle
+                      id={INLET_DROP_HANDLE_ID}
+                      type="target"
+                      position={Position.Left}
+                      style={sideHandleStyle(handleColor, "left")}
+                    />
+                    {editable ? (
+                      <button
+                        type="button"
+                        className="nodrag nopan"
+                        aria-label="Add input"
+                        title="Add input"
+                        onClick={(event) => {
+                          setEditing({ kind: "input", index: -1, anchorEl: event.currentTarget });
+                        }}
+                        style={sideGridStyles.dropHint}
+                      >
+                        <Plus aria-hidden="true" size={11} strokeWidth={2.5} />
+                        <span>wire or add</span>
+                      </button>
+                    ) : (
+                      <span style={sideGridStyles.emptySlot}>—</span>
+                    )}
+                  </>
+                ) : inlet !== undefined ? (
+                  <>
+                    <Handle
+                      id={inlet}
+                      type="target"
+                      position={Position.Left}
+                      style={sideHandleStyle(handleColor, "left")}
+                    />
+                    {editable && onInputsChange !== undefined ? (
+                      <PortChip
+                        value={inlet}
+                        dimmed={editing?.kind === "input" && editing.index === rowIdx}
+                        onEdit={(anchorEl) => {
+                          setEditing({ kind: "input", index: rowIdx, anchorEl });
+                        }}
+                        onRemove={() => {
+                          remove("input", rowIdx);
+                        }}
+                      />
+                    ) : (
+                      <span style={portChipStyles.readOnlyPort}>{inlet}</span>
+                    )}
+                  </>
+                ) : (
+                  <span style={sideGridStyles.emptySlot} />
+                )}
+              </div>
+            )}
+            {showOutlets && (
+              <div style={sideGridStyles.outletCell}>
+                {isAddOutletRow ? (
+                  editable ? (
+                    <button
+                      type="button"
+                      className="nodrag nopan"
+                      aria-label="Add output"
+                      title="Add output"
+                      onClick={(event) => {
+                        setEditing({ kind: "output", index: -1, anchorEl: event.currentTarget });
+                      }}
+                      style={{ ...portChipStyles.addButton, marginLeft: "auto" }}
+                    >
+                      <Plus aria-hidden="true" size={11} strokeWidth={2.5} />
+                    </button>
+                  ) : (
+                    <span style={sideGridStyles.emptySlot}>—</span>
+                  )
+                ) : outlet !== undefined ? (
+                  <>
+                    {editable && onOutputsChange !== undefined ? (
+                      <PortChip
+                        value={outlet}
+                        dimmed={editing?.kind === "output" && editing.index === rowIdx}
+                        onEdit={(anchorEl) => {
+                          setEditing({ kind: "output", index: rowIdx, anchorEl });
+                        }}
+                        onRemove={() => {
+                          remove("output", rowIdx);
+                        }}
+                      />
+                    ) : (
+                      <span style={portChipStyles.readOnlyPortSideRight}>{outlet}</span>
+                    )}
+                    <Handle
+                      id={outlet}
+                      type="source"
+                      position={Position.Right}
+                      style={sideHandleStyle(handleColor, "right")}
+                    />
+                  </>
+                ) : (
+                  <span style={sideGridStyles.emptySlot} />
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {editing !== null && (
+        <PortComboboxFloating
+          key={
+            editing.index === -1
+              ? `add-${editing.kind}`
+              : `edit-${editing.kind}-${String(editing.index)}`
+          }
+          anchorEl={editing.anchorEl}
+          kind={editing.kind}
+          initialValue={
+            editing.index === -1
+              ? ""
+              : editing.kind === "input"
+                ? (inputs[editing.index] ?? "")
+                : (outputs[editing.index] ?? "")
+          }
+          suggestions={editing.kind === "input" ? inputSuggestions : outputSuggestions}
+          onCommit={(value) => {
+            commit(editing.kind, editing.index, value);
+          }}
+          onCancel={() => {
+            setEditing(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function StackedPortCell(props: { children: ReactNode }): ReactElement {
+  return <div style={stackedStyles.portColumnContent}>{props.children}</div>;
+}
+
+function StackedPortSection(props: InletOutletGridProps): ReactElement | null {
+  const {
+    tag,
+    inputs,
+    outputs,
+    showInlets,
+    showOutlets,
+    editable,
+    inputSuggestions,
+    outputSuggestions,
+    edge,
+    clipCorner,
+    onInputsChange,
+    onOutputsChange,
+  } = props;
+
+  const [editing, setEditing] = useState<EditingTarget | null>(null);
+  const isTop = edge === "top";
+  const isBottom = edge === "bottom";
+
+  if (isTop && !showInlets) {
+    return null;
+  }
+  if (isBottom && !showOutlets) {
+    return null;
+  }
+  if (!isTop && !isBottom) {
+    return null;
+  }
+
+  const handleColor = TAG_HANDLE_COLOR[tag];
+  const { commit, remove } = createPortEditorActions(
+    inputs,
+    outputs,
+    onInputsChange,
+    onOutputsChange,
+    setEditing,
+  );
+
+  if (isTop) {
+    const dropInlet = editable && onInputsChange !== undefined;
+    if (inputs.length === 0 && !dropInlet) {
+      return null;
+    }
+
+    type InletColumn = { key: string; port: string | null; index: number };
+    const columns: InletColumn[] = inputs.map((port, index) => ({
+      key: port,
+      port,
+      index,
+    }));
+    if (dropInlet) {
+      columns.push({ key: INLET_DROP_HANDLE_ID, port: null, index: -1 });
+    }
+
+    return (
+      <div style={clipSectionStyle(stackedStyles.sectionTop, clipCorner)}>
+        <div style={stackedStyles.handleRailTop} data-testid="handle-rail-top">
+          {columns.map((col) => (
+            <div key={col.key} style={stackedStyles.portColumn}>
+              <Handle
+                id={col.key}
+                type="target"
+                position={Position.Top}
+                style={stackedHandleStyle(handleColor, "top")}
+              />
+            </div>
+          ))}
+        </div>
+        <div style={stackedStyles.labelRowBelowHandles}>
+          {columns.map((col) => (
+            <div key={`label-${col.key}`} style={stackedStyles.portColumn}>
+              <StackedPortCell>
+              {col.port === null ? (
+                editable ? (
+                  <button
+                    type="button"
+                    className="nodrag nopan"
+                    aria-label="Add input"
+                    title="Add input"
+                    onClick={(event) => {
+                      setEditing({ kind: "input", index: -1, anchorEl: event.currentTarget });
+                    }}
+                    style={stackedStyles.dropHint}
+                  >
+                    <Plus aria-hidden="true" size={11} strokeWidth={2.5} />
+                    <span>wire or add</span>
+                  </button>
+                ) : (
+                  <span style={stackedStyles.emptySlot}>—</span>
+                )
+              ) : editable && onInputsChange !== undefined ? (
+                <PortChip
+                  value={col.port}
+                  dimmed={editing?.kind === "input" && editing.index === col.index}
+                  onEdit={(anchorEl) => {
+                    setEditing({ kind: "input", index: col.index, anchorEl });
+                  }}
+                  onRemove={() => {
+                    remove("input", col.index);
+                  }}
+                />
+              ) : (
+                <span style={portChipStyles.readOnlyPort} title={col.port}>
+                  {col.port}
+                </span>
+              )}
+              </StackedPortCell>
+            </div>
+          ))}
+        </div>
+        {editing !== null && editing.kind === "input" && (
+          <PortComboboxFloating
+            key={editing.index === -1 ? "add-input" : `edit-input-${String(editing.index)}`}
+            anchorEl={editing.anchorEl}
+            kind="input"
+            initialValue={editing.index === -1 ? "" : (inputs[editing.index] ?? "")}
+            suggestions={inputSuggestions}
+            onCommit={(value) => {
+              commit("input", editing.index, value);
+            }}
+            onCancel={() => {
+              setEditing(null);
+            }}
+          />
+        )}
+      </div>
+    );
+  }
+
+  const addOutlet = editable && onOutputsChange !== undefined;
+  if (outputs.length === 0 && !addOutlet) {
+    return null;
+  }
+
+  type OutletColumn = { key: string; port: string | null; index: number };
+  const columns: OutletColumn[] = outputs.map((port, index) => ({
+    key: port,
+    port,
+    index,
+  }));
+  if (addOutlet) {
+    columns.push({ key: "__add_out__", port: null, index: -1 });
+  }
+
+  return (
+    <div style={clipSectionStyle(stackedStyles.sectionBottom, clipCorner)}>
+      <div style={stackedStyles.labelRowAboveHandles}>
+        {columns.map((col) => (
+          <div key={`label-${col.key}`} style={stackedStyles.portColumn}>
+            <StackedPortCell>
+            {col.port === null ? (
+              editable ? (
+                <button
+                  type="button"
+                  className="nodrag nopan"
+                  aria-label="Add output"
+                  title="Add output"
+                  onClick={(event) => {
+                    setEditing({ kind: "output", index: -1, anchorEl: event.currentTarget });
+                  }}
+                  style={portChipStyles.addButton}
+                >
+                  <Plus aria-hidden="true" size={11} strokeWidth={2.5} />
+                </button>
+              ) : (
+                <span style={stackedStyles.emptySlot}>—</span>
+              )
+            ) : editable && onOutputsChange !== undefined ? (
+              <PortChip
+                value={col.port}
+                dimmed={editing?.kind === "output" && editing.index === col.index}
+                onEdit={(anchorEl) => {
+                  setEditing({ kind: "output", index: col.index, anchorEl });
+                }}
+                onRemove={() => {
+                  remove("output", col.index);
+                }}
+              />
+            ) : (
+              <span style={portChipStyles.readOnlyPort} title={col.port}>
+                {col.port}
+              </span>
+            )}
+            </StackedPortCell>
+          </div>
+        ))}
+      </div>
+      <div style={stackedStyles.handleRailBottom} data-testid="handle-rail-bottom">
+        {columns.map((col) =>
+          col.port === null ? (
+            <div key={col.key} style={stackedStyles.portColumn} />
+          ) : (
+            <div key={col.key} style={stackedStyles.portColumn}>
+              <Handle
+                id={col.port}
+                type="source"
+                position={Position.Bottom}
+                style={stackedHandleStyle(handleColor, "bottom")}
+              />
+            </div>
+          ),
+        )}
+      </div>
+      {editing !== null && editing.kind === "output" && (
+        <PortComboboxFloating
+          key={editing.index === -1 ? "add-output" : `edit-output-${String(editing.index)}`}
+          anchorEl={editing.anchorEl}
+          kind="output"
+          initialValue={editing.index === -1 ? "" : (outputs[editing.index] ?? "")}
+          suggestions={outputSuggestions}
+          onCommit={(value) => {
+            commit("output", editing.index, value);
+          }}
+          onCancel={() => {
+            setEditing(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function createPortEditorActions(
+  inputs: string[],
+  outputs: string[],
+  onInputsChange: InletOutletGridProps["onInputsChange"],
+  onOutputsChange: InletOutletGridProps["onOutputsChange"],
+  setEditing: (target: EditingTarget | null) => void,
+): {
+  commit: (kind: PortKind, index: number, value: string) => void;
+  remove: (kind: PortKind, index: number) => void;
+} {
   const commit = (kind: PortKind, index: number, value: string): void => {
     const trimmed = value.trim();
     setEditing(null);
@@ -147,162 +627,7 @@ export function InletOutletGrid(props: InletOutletGridProps): ReactElement | nul
     onOutputsChange(next);
   };
 
-  const handleColor = TAG_HANDLE_COLOR[tag];
-
-  return (
-    <div style={styles.grid}>
-      <div style={{ ...styles.headerRow, gridTemplateColumns: gridColumns }}>
-        {showInlets && <span style={{ ...styles.headerCell, textAlign: "left" }}>Input</span>}
-        {showOutlets && <span style={{ ...styles.headerCell, textAlign: "right" }}>Output</span>}
-      </div>
-      {Array.from({ length: rowCount }, (_, rowIdx) => {
-        const inlet = showInlets ? inputs[rowIdx] : undefined;
-        const outlet = showOutlets ? outputs[rowIdx] : undefined;
-        const isDropInletRow = dropInletRow && rowIdx === inletRows && inlet === undefined;
-        const isAddOutletRow = addOutletRow && rowIdx === outletRows && outlet === undefined;
-
-        if (inlet === undefined && outlet === undefined && !isDropInletRow && !isAddOutletRow) {
-          return null;
-        }
-
-        return (
-          <div
-            key={`port-row-${String(rowIdx)}`}
-            style={{ ...styles.bodyRow, gridTemplateColumns: gridColumns }}
-          >
-            {showInlets && (
-              <div style={styles.inletCell}>
-                {isDropInletRow ? (
-                  <>
-                    <Handle
-                      id={INLET_DROP_HANDLE_ID}
-                      type="target"
-                      position={Position.Left}
-                      style={handleStyle(handleColor, "left")}
-                    />
-                    {editable ? (
-                      <button
-                        type="button"
-                        className="nodrag nopan"
-                        aria-label="Add input"
-                        title="Add input"
-                        onClick={(event) => {
-                          setEditing({ kind: "input", index: -1, anchorEl: event.currentTarget });
-                        }}
-                        style={styles.dropHint}
-                      >
-                        <Plus aria-hidden="true" size={11} strokeWidth={2.5} />
-                        <span>wire or add</span>
-                      </button>
-                    ) : (
-                      <span style={styles.emptySlot}>—</span>
-                    )}
-                  </>
-                ) : inlet !== undefined ? (
-                  <>
-                    <Handle
-                      id={inlet}
-                      type="target"
-                      position={Position.Left}
-                      style={handleStyle(handleColor, "left")}
-                    />
-                    {editable && onInputsChange !== undefined ? (
-                      <PortChip
-                        value={inlet}
-                        dimmed={editing?.kind === "input" && editing.index === rowIdx}
-                        onEdit={(anchorEl) => {
-                          setEditing({ kind: "input", index: rowIdx, anchorEl });
-                        }}
-                        onRemove={() => {
-                          remove("input", rowIdx);
-                        }}
-                      />
-                    ) : (
-                      <span style={styles.readOnlyPort}>{inlet}</span>
-                    )}
-                  </>
-                ) : (
-                  <span style={styles.emptySlot} />
-                )}
-              </div>
-            )}
-            {showOutlets && (
-              <div style={styles.outletCell}>
-                {isAddOutletRow ? (
-                  editable ? (
-                    <button
-                      type="button"
-                      className="nodrag nopan"
-                      aria-label="Add output"
-                      title="Add output"
-                      onClick={(event) => {
-                        setEditing({ kind: "output", index: -1, anchorEl: event.currentTarget });
-                      }}
-                      style={{ ...portChipStyles.addButton, marginLeft: "auto" }}
-                    >
-                      <Plus aria-hidden="true" size={11} strokeWidth={2.5} />
-                    </button>
-                  ) : (
-                    <span style={styles.emptySlot}>—</span>
-                  )
-                ) : outlet !== undefined ? (
-                  <>
-                    {editable && onOutputsChange !== undefined ? (
-                      <PortChip
-                        value={outlet}
-                        dimmed={editing?.kind === "output" && editing.index === rowIdx}
-                        onEdit={(anchorEl) => {
-                          setEditing({ kind: "output", index: rowIdx, anchorEl });
-                        }}
-                        onRemove={() => {
-                          remove("output", rowIdx);
-                        }}
-                      />
-                    ) : (
-                      <span style={styles.readOnlyPort}>{outlet}</span>
-                    )}
-                    <Handle
-                      id={outlet}
-                      type="source"
-                      position={Position.Right}
-                      style={handleStyle(handleColor, "right")}
-                    />
-                  </>
-                ) : (
-                  <span style={styles.emptySlot} />
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })}
-      {editing !== null && (
-        <PortComboboxFloating
-          key={
-            editing.index === -1
-              ? `add-${editing.kind}`
-              : `edit-${editing.kind}-${String(editing.index)}`
-          }
-          anchorEl={editing.anchorEl}
-          kind={editing.kind}
-          initialValue={
-            editing.index === -1
-              ? ""
-              : editing.kind === "input"
-                ? (inputs[editing.index] ?? "")
-                : (outputs[editing.index] ?? "")
-          }
-          suggestions={editing.kind === "input" ? inputSuggestions : outputSuggestions}
-          onCommit={(value) => {
-            commit(editing.kind, editing.index, value);
-          }}
-          onCancel={() => {
-            setEditing(null);
-          }}
-        />
-      )}
-    </div>
-  );
+  return { commit, remove };
 }
 
 interface PortChipProps {
@@ -314,49 +639,73 @@ interface PortChipProps {
 
 function PortChip(props: PortChipProps): ReactElement {
   const { value, dimmed, onEdit, onRemove } = props;
+  return <SidePortLabel value={value} dimmed={dimmed} onEdit={onEdit} onRemove={onRemove} />;
+}
+
+function SidePortLabel(props: PortChipProps): ReactElement {
+  const { value, dimmed, onEdit, onRemove } = props;
   return (
-    <span style={{ ...portChipStyles.chip, opacity: dimmed ? 0.4 : 1 }}>
-      <button
-        type="button"
-        className="nodrag nopan"
-        title="Click to edit"
-        onClick={(event) => {
-          onEdit(event.currentTarget);
-        }}
-        style={portChipStyles.chipLabel}
-      >
-        {value}
-      </button>
-      <button
-        type="button"
-        className="nodrag nopan"
-        aria-label={`Remove ${value}`}
-        title={`Remove ${value}`}
-        onClick={onRemove}
-        style={portChipStyles.chipRemove}
-      >
-        <X aria-hidden="true" size={10} strokeWidth={2.5} />
-      </button>
+    <span style={{ ...portChipStyles.sidesChip, opacity: dimmed ? 0.4 : 1 }}>
+      <span style={portChipStyles.sidesChipLabelRegion}>
+        <button
+          type="button"
+          className="nodrag nopan"
+          title={value}
+          onClick={(event) => {
+            onEdit(event.currentTarget);
+          }}
+          style={portChipStyles.chipLabel}
+        >
+          {value}
+        </button>
+      </span>
+      <span style={portChipStyles.sidesChipRemoveRegion}>
+        <button
+          type="button"
+          className="nodrag nopan"
+          aria-label={`Remove ${value}`}
+          title={`Remove ${value}`}
+          onClick={onRemove}
+          style={portChipStyles.sidesChipRemove}
+        >
+          <X aria-hidden="true" size={10} strokeWidth={2.5} />
+        </button>
+      </span>
     </span>
   );
 }
 
-function handleStyle(color: string, side: "left" | "right"): CSSProperties {
+function sideHandleStyle(color: string, side: "left" | "right"): CSSProperties {
   return {
     position: "absolute",
     top: "50%",
-    ...(side === "left" ? { left: -6 } : { right: -6 }),
+    ...(side === "left" ? { left: SIDE_HANDLE_EDGE_OFFSET } : { right: SIDE_HANDLE_EDGE_OFFSET }),
     transform: "translateY(-50%)",
     width: 10,
     height: 10,
     borderRadius: 999,
-    border: `2px solid ${NODE_BACKGROUND}`,
+    border: "none",
     background: color,
     boxSizing: "border-box",
   };
 }
 
-const styles = {
+function stackedHandleStyle(color: string, edge: "top" | "bottom"): CSSProperties {
+  return {
+    position: "absolute",
+    left: "50%",
+    ...(edge === "top" ? { top: STACKED_HANDLE_INSET } : { bottom: STACKED_HANDLE_INSET }),
+    transform: "translateX(-50%)",
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    border: "none",
+    background: color,
+    boxSizing: "border-box",
+  };
+}
+
+const sideGridStyles = {
   grid: {
     position: "relative",
     display: "flex",
@@ -390,7 +739,7 @@ const styles = {
     alignItems: "center",
     justifyContent: "flex-start",
     minWidth: 0,
-    paddingLeft: 6,
+    paddingLeft: PORT_EDGE_INSET,
   },
   outletCell: {
     position: "relative",
@@ -398,19 +747,112 @@ const styles = {
     alignItems: "center",
     justifyContent: "flex-end",
     minWidth: 0,
-    paddingRight: 6,
-  },
-  readOnlyPort: {
-    fontSize: 12,
-    lineHeight: 1.4,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    maxWidth: "100%",
+    paddingRight: PORT_EDGE_INSET,
   },
   emptySlot: {
     display: "block",
     minHeight: 20,
+  },
+  dropHint: {
+    appearance: "none",
+    border: `1px dashed ${NODE_BORDER}`,
+    borderRadius: 6,
+    background: "transparent",
+    color: NODE_MUTED,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+    font: "inherit",
+    fontSize: 11,
+    lineHeight: 1.3,
+    padding: "2px 6px",
+    cursor: "pointer",
+  },
+} satisfies Record<string, CSSProperties>;
+
+const stackedPortRailInset: CSSProperties = {
+  paddingInline: PORT_EDGE_INSET,
+  boxSizing: "border-box",
+};
+
+const stackedStyles = {
+  sectionTop: {
+    position: "relative",
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    paddingBottom: PORT_EDGE_INSET,
+    background: NODE_BACKGROUND,
+    boxSizing: "border-box",
+  },
+  sectionBottom: {
+    position: "relative",
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    paddingTop: PORT_EDGE_INSET,
+    background: NODE_BACKGROUND,
+    boxSizing: "border-box",
+  },
+  handleRailTop: {
+    position: "relative",
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "flex-start",
+    minHeight: HANDLE_RAIL_SIZE,
+    ...stackedPortRailInset,
+  },
+  handleRailBottom: {
+    position: "relative",
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "flex-end",
+    minHeight: HANDLE_RAIL_SIZE,
+    ...stackedPortRailInset,
+  },
+  labelRowBelowHandles: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "flex-start",
+    flexWrap: "nowrap",
+    gap: 4,
+    minHeight: 22,
+    boxSizing: "border-box",
+    ...stackedPortRailInset,
+  },
+  labelRowAboveHandles: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "flex-end",
+    flexWrap: "nowrap",
+    gap: 4,
+    minHeight: 22,
+    boxSizing: "border-box",
+    ...stackedPortRailInset,
+  },
+  portColumn: {
+    position: "relative",
+    flex: "1 1 0",
+    minWidth: STACKED_CHIP_MIN_WIDTH,
+    maxWidth: STACKED_PORT_COLUMN_MAX,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    minHeight: 0,
+    boxSizing: "border-box",
+  },
+  portColumnContent: {
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+    display: "flex",
+    justifyContent: "center",
+    boxSizing: "border-box",
+  },
+  emptySlot: {
+    display: "block",
+    minHeight: 18,
   },
   dropHint: {
     appearance: "none",

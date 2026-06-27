@@ -38,7 +38,70 @@ describe("InletOutletGrid", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders inlet and outlet column headers with row-aligned handles", () => {
+  it("renders stacked input handles on one rail with labels below", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    document.body.appendChild(container);
+    mounts.push({ container, root });
+
+    act(() => {
+      root.render(
+        <InletOutletGrid
+          tag="transform"
+          inputs={["Load CSV.df", "Other.x"]}
+          outputs={[]}
+          showInlets
+          showOutlets={false}
+          editable={false}
+          inputSuggestions={[]}
+          outputSuggestions={[]}
+          placement="stacked"
+          edge="top"
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("Load CSV.df");
+    expect(container.textContent).toContain("Other.x");
+    const rail = container.querySelector('[data-testid="handle-rail-top"]');
+    expect(rail).not.toBeNull();
+    const handles = rail?.querySelectorAll('[data-handle-type="target"]');
+    expect(handles?.length).toBe(2);
+    const labels = container.querySelector('[data-testid="handle-rail-top"]')?.nextElementSibling;
+    expect(labels?.childElementCount).toBe(2);
+  });
+
+  it("renders stacked output handles on one rail with labels above", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    document.body.appendChild(container);
+    mounts.push({ container, root });
+
+    act(() => {
+      root.render(
+        <InletOutletGrid
+          tag="transform"
+          inputs={[]}
+          outputs={["clean", "summary"]}
+          showInlets={false}
+          showOutlets
+          editable={false}
+          inputSuggestions={[]}
+          outputSuggestions={[]}
+          placement="stacked"
+          edge="bottom"
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("clean");
+    const rail = container.querySelector('[data-testid="handle-rail-bottom"]');
+    expect(rail).not.toBeNull();
+    const handles = rail?.querySelectorAll('[data-handle-type="source"]');
+    expect(handles?.length).toBe(2);
+  });
+
+  it("renders side input and output columns below the header row", () => {
     const container = document.createElement("div");
     const root = createRoot(container);
     document.body.appendChild(container);
@@ -55,6 +118,7 @@ describe("InletOutletGrid", () => {
           editable={false}
           inputSuggestions={[]}
           outputSuggestions={[]}
+          placement="sides"
         />,
       );
     });
@@ -89,6 +153,7 @@ describe("InletOutletGrid", () => {
           outputSuggestions={[]}
           onInputsChange={vi.fn()}
           onOutputsChange={vi.fn()}
+          placement="sides"
         />,
       );
     });

@@ -2,10 +2,10 @@
  * NotebookNode — renders a single cell-group node on the canvas.
  *
  * Header shows the node name, an explicit rename button, and a tag chip.
- * Inlets and outlets are listed in a two-column grid; each row exposes a
- * target handle on its inlet and a source handle on its outlet so wires
- * connect port-to-port rather than cell-to-cell. Rename flows through the
- * host-provided callback that the Canvas passes via `data`.
+ * Inlets and outlets adapt to canvas layout: side-by-side columns when the
+ * graph flows horizontally (dagre), or stacked along the top/bottom edges
+ * when nodes are arranged vertically (manual). Each port occupies one row with
+ * its connector aligned to the label indent.
  *
  * Styling is explicit so the shared node surface stays stable across hosts,
  * while still allowing a host to override palette tokens via CSS variables
@@ -18,7 +18,14 @@ import { useEffect, useRef, useState } from "react";
 import type { NodeProps } from "reactflow";
 
 import type { NodeModel, NodeTag, RuntimeState } from "../types";
-import { InletOutletGrid } from "./InletOutletGrid";
+import {
+  InletOutletGrid,
+  inletPortsVisible,
+  NODE_CLIP_RADIUS,
+  outletPortsVisible,
+  type PortPlacement,
+} from "./InletOutletGrid";
+import { STACKED_PORT_COLUMN_MIN } from "./portEditorShared";
 
 export interface NotebookNodeData extends NodeModel {
   onRename?: (nodeId: string, nextName: string) => void;
@@ -43,6 +50,8 @@ export interface NotebookNodeData extends NodeModel {
   /** Declared input refs that don't resolve to any wire (e.g. a missing
    * cross-notebook alias/node). Surfaced as a warning on the node. */
   unresolvedInputs?: string[];
+  /** Port handle placement — stacked for vertical flow, sides for dagre. */
+  portPlacement?: PortPlacement;
 }
 
 interface RuntimeBadge {
@@ -76,12 +85,24 @@ const TAG_RING: Record<NodeTag, string> = {
   io: "rgba(249, 115, 22, 0.28)",
 };
 
+const NODE_BORDER_WIDTH = 2;
+const NODE_OUTER_RADIUS = 8;
+
 const NODE_BACKGROUND = "var(--notebookflow-node-bg, var(--card, #ffffff))";
 const NODE_FOREGROUND = "var(--notebookflow-node-fg, var(--card-foreground, #111827))";
 const NODE_MUTED = "var(--notebookflow-node-muted, var(--muted-foreground, #6b7280))";
-const NODE_BORDER = "var(--notebookflow-node-border, var(--border, #d1d5db))";
 const NODE_FONT_FAMILY =
   "var(--notebookflow-font-family, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif)";
+
+interface StackedCornerOptions {
+  roundHeaderTop: boolean;
+  roundHeaderBottom: boolean;
+  roundMetaBottom: boolean;
+}
+
+interface BodyCornerOptions {
+  roundMetaBottom: boolean;
+}
 
 interface NotebookNodeStyles {
   wrapper: CSSProperties;
@@ -93,11 +114,11 @@ interface NotebookNodeStyles {
   tagChip: CSSProperties;
   meta: CSSProperties;
   emptyState: CSSProperties;
+  duration: CSSProperties;
 }
 
 export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
   const { data, selected } = props;
-  const styles = nodeStyles(data.tag, selected);
   const [isEditing, setIsEditing] = useState(false);
   const [draftName, setDraftName] = useState(data.name);
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -107,6 +128,78 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
   const showInlets = data.tag !== "input";
   const showOutlets = data.tag !== "output";
   const portsEditable = data.onInputsChange !== undefined || data.onOutputsChange !== undefined;
+  const portPlacement = data.portPlacement ?? "stacked";
+  const stackedPorts = portPlacement === "stacked";
+  const metaLabel = formatMeta(data.meta);
+  const portRows = Math.max(
+    showInlets ? data.inputs.length + (portsEditable ? 1 : 0) : 0,
+    showOutlets ? data.outputs.length + (portsEditable ? 1 : 0) : 0,
+    1,
+  );
+  const topPortsVisible = inletPortsVisible(
+    showInlets,
+    data.inputs,
+    portsEditable,
+    data.onInputsChange !== undefined,
+  );
+  const bottomPortsVisible = outletPortsVisible(
+    showOutlets,
+    data.outputs,
+    portsEditable,
+    data.onOutputsChange !== undefined,
+  );
+  const hasMetaContent =
+    metaLabel !== null || (data.unresolvedInputs !== undefined && data.unresolvedInputs.length > 0);
+  const showBodySection =
+    hasMetaContent ||
+    (!stackedPorts && (showInlets || showOutlets)) ||
+    (!stackedPorts &&
+      !portsEditable &&
+      !showInlets &&
+      !showOutlets &&
+      data.inputs.length === 0 &&
+      data.outputs.length === 0);
+  const styles = nodeStyles(
+    data.tag,
+    selected,
+    stackedPorts ? Math.max(220, portRows * STACKED_PORT_COLUMN_MIN + 20) : 200,
+    stackedPorts
+      ? {
+          layout: "stacked",
+          roundHeaderTop: !topPortsVisible,
+          roundHeaderBottom: !hasMetaContent && !bottomPortsVisible,
+          roundMetaBottom: hasMetaContent && !bottomPortsVisible,
+        }
+      : showBodySection
+        ? { layout: "body", roundMetaBottom: true }
+        : undefined,
+  );
+
+  const portGridProps = {
+    tag: data.tag,
+    inputs: data.inputs,
+    outputs: data.outputs,
+    showInlets,
+    showOutlets,
+    editable: portsEditable,
+    inputSuggestions: data.inputSuggestions ?? [],
+    outputSuggestions: data.outputSuggestions ?? [],
+    placement: portPlacement,
+    ...(data.onInputsChange === undefined
+      ? {}
+      : {
+          onInputsChange: (next: string[]) => {
+            data.onInputsChange?.(data.id, next);
+          },
+        }),
+    ...(data.onOutputsChange === undefined
+      ? {}
+      : {
+          onOutputsChange: (next: string[]) => {
+            data.onOutputsChange?.(data.id, next);
+          },
+        }),
+  } as const;
 
   useEffect(() => {
     if (!isEditing) {
@@ -164,125 +257,106 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
 
   const runtime = RUNTIME_BADGES[data.runtimeState ?? "idle"];
   const durationLabel = formatDuration(data.runtimeDurationMs);
-  const metaLabel = formatMeta(data.meta);
+
+  const header = (
+    <div style={styles.header}>
+      <div style={styles.titleRow}>
+        <span
+          role="img"
+          aria-label={`Status: ${runtime.label}`}
+          title={`Status: ${runtime.label}`}
+          style={{
+            display: "inline-block",
+            width: 8,
+            height: 8,
+            borderRadius: "50%",
+            flexShrink: 0,
+            background: runtime.color,
+            boxShadow: runtime.glow === null ? "none" : `0 0 6px ${runtime.glow}`,
+          }}
+        />
+        {durationLabel !== null && (
+          <span title={`Last run: ${durationLabel}`} style={styles.duration}>
+            {durationLabel}
+          </span>
+        )}
+        {isEditing ? (
+          <input
+            ref={renameInputRef}
+            aria-label="Node name"
+            className="nodrag nopan"
+            value={draftName}
+            onChange={handleDraftChange}
+            onBlur={commitRename}
+            onKeyDown={handleRenameKeyDown}
+            style={styles.renameInput}
+          />
+        ) : (
+          <>
+            <button
+              type="button"
+              className="nodrag nopan"
+              onDoubleClick={openRename}
+              title="Double-click to rename"
+              style={styles.renameButton}
+            >
+              {data.name}
+            </button>
+            <button
+              type="button"
+              className="nodrag nopan"
+              onClick={openRename}
+              aria-label="Rename node"
+              title="Rename node"
+              style={styles.renameAction}
+            >
+              <Pencil aria-hidden="true" size={12} strokeWidth={2} />
+            </button>
+          </>
+        )}
+      </div>
+      <span style={styles.tagChip}>{data.tag}</span>
+    </div>
+  );
+
+  const bodyBlock = showBodySection ? (
+    <div style={styles.meta}>
+      {metaLabel !== null && (
+        <div
+          title="Input file · output rows"
+          style={{ fontSize: 10, color: NODE_MUTED, fontVariantNumeric: "tabular-nums" }}
+        >
+          {metaLabel}
+        </div>
+      )}
+      {data.unresolvedInputs !== undefined && data.unresolvedInputs.length > 0 && (
+        <div
+          title={`Unresolved input refs:\n${data.unresolvedInputs.join("\n")}`}
+          style={{ fontSize: 10, color: "#b45309", fontWeight: 500 }}
+        >
+          ⚠ unresolved: {data.unresolvedInputs.join(", ")}
+        </div>
+      )}
+      {!stackedPorts && (showInlets || showOutlets) && <InletOutletGrid {...portGridProps} />}
+      {!stackedPorts &&
+        !portsEditable &&
+        !showInlets &&
+        !showOutlets &&
+        data.inputs.length === 0 &&
+        data.outputs.length === 0 && <span style={styles.emptyState}>no ports</span>}
+    </div>
+  ) : null;
 
   return (
     <div style={styles.wrapper}>
-      <div style={styles.header}>
-        <div style={styles.titleRow}>
-          <span
-            role="img"
-            aria-label={`Status: ${runtime.label}`}
-            title={`Status: ${runtime.label}`}
-            style={{
-              display: "inline-block",
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-              flexShrink: 0,
-              background: runtime.color,
-              boxShadow: runtime.glow === null ? "none" : `0 0 6px ${runtime.glow}`,
-            }}
-          />
-          {durationLabel !== null && (
-            <span
-              title={`Last run: ${durationLabel}`}
-              style={{
-                fontSize: 10,
-                color: NODE_MUTED,
-                fontVariantNumeric: "tabular-nums",
-                flexShrink: 0,
-              }}
-            >
-              {durationLabel}
-            </span>
-          )}
-          {isEditing ? (
-            <input
-              ref={renameInputRef}
-              aria-label="Node name"
-              className="nodrag nopan"
-              value={draftName}
-              onChange={handleDraftChange}
-              onBlur={commitRename}
-              onKeyDown={handleRenameKeyDown}
-              style={styles.renameInput}
-            />
-          ) : (
-            <>
-              <button
-                type="button"
-                className="nodrag nopan"
-                onDoubleClick={openRename}
-                title="Double-click to rename"
-                style={styles.renameButton}
-              >
-                {data.name}
-              </button>
-              <button
-                type="button"
-                className="nodrag nopan"
-                onClick={openRename}
-                aria-label="Rename node"
-                title="Rename node"
-                style={styles.renameAction}
-              >
-                <Pencil aria-hidden="true" size={12} strokeWidth={2} />
-              </button>
-            </>
-          )}
-        </div>
-        <span style={styles.tagChip}>{data.tag}</span>
-      </div>
-      <div style={styles.meta}>
-        {metaLabel !== null && (
-          <div
-            title="Input file · output rows"
-            style={{ fontSize: 10, color: NODE_MUTED, fontVariantNumeric: "tabular-nums" }}
-          >
-            {metaLabel}
-          </div>
-        )}
-        {data.unresolvedInputs !== undefined && data.unresolvedInputs.length > 0 && (
-          <div
-            title={`Unresolved input refs:\n${data.unresolvedInputs.join("\n")}`}
-            style={{ fontSize: 10, color: "#b45309", fontWeight: 500 }}
-          >
-            ⚠ unresolved: {data.unresolvedInputs.join(", ")}
-          </div>
-        )}
-        {(showInlets || showOutlets) && (
-          <InletOutletGrid
-            tag={data.tag}
-            inputs={data.inputs}
-            outputs={data.outputs}
-            showInlets={showInlets}
-            showOutlets={showOutlets}
-            editable={portsEditable}
-            inputSuggestions={data.inputSuggestions ?? []}
-            outputSuggestions={data.outputSuggestions ?? []}
-            {...(data.onInputsChange === undefined
-              ? {}
-              : {
-                  onInputsChange: (next: string[]) => {
-                    data.onInputsChange?.(data.id, next);
-                  },
-                })}
-            {...(data.onOutputsChange === undefined
-              ? {}
-              : {
-                  onOutputsChange: (next: string[]) => {
-                    data.onOutputsChange?.(data.id, next);
-                  },
-                })}
-          />
-        )}
-        {!portsEditable &&
-          !showInlets &&
-          !showOutlets &&
-          data.inputs.length === 0 &&
-          data.outputs.length === 0 && <span style={styles.emptyState}>no ports</span>}
-      </div>
+      {stackedPorts && topPortsVisible && (
+        <InletOutletGrid {...portGridProps} edge="top" clipCorner="top" />
+      )}
+      {header}
+      {stackedPorts ? (hasMetaContent ? bodyBlock : null) : bodyBlock}
+      {stackedPorts && bottomPortsVisible && (
+        <InletOutletGrid {...portGridProps} edge="bottom" clipCorner="bottom" />
+      )}
     </div>
   );
 }
@@ -314,13 +388,272 @@ function formatMeta(meta: NotebookNodeData["meta"]): string | null {
   return parts.length === 0 ? null : parts.join(" · ");
 }
 
-function nodeStyles(tag: NodeTag, selected: boolean): NotebookNodeStyles {
+type NodeCornerOptions =
+  | ({ layout: "stacked" } & StackedCornerOptions)
+  | ({ layout: "body" } & BodyCornerOptions);
+
+function headerStyle(
+  tagColor: string,
+  options: { roundTop: boolean; roundBottom?: boolean },
+  innerClip: number,
+): CSSProperties {
+  const { roundTop, roundBottom = false } = options;
+  return {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    padding: roundTop
+      ? `${String(6 + NODE_BORDER_WIDTH)}px ${String(8 + NODE_BORDER_WIDTH)}px 6px ${String(8 + NODE_BORDER_WIDTH)}px`
+      : `6px ${String(8 + NODE_BORDER_WIDTH)}px`,
+    margin: roundTop
+      ? `-${String(NODE_BORDER_WIDTH)}px -${String(NODE_BORDER_WIDTH)}px 0`
+      : `0 -${String(NODE_BORDER_WIDTH)}px 0`,
+    background: tagColor,
+    color: "#ffffff",
+    borderTopLeftRadius: roundTop ? NODE_OUTER_RADIUS : 0,
+    borderTopRightRadius: roundTop ? NODE_OUTER_RADIUS : 0,
+    ...(roundBottom
+      ? { borderBottomLeftRadius: innerClip, borderBottomRightRadius: innerClip }
+      : {}),
+    boxSizing: "border-box",
+  };
+}
+
+function nodeStyles(
+  tag: NodeTag,
+  selected: boolean,
+  minWidth = 200,
+  corners?: NodeCornerOptions,
+): NotebookNodeStyles {
+  const tagColor = TAG_HEADER_BG[tag];
+  const clip = NODE_CLIP_RADIUS;
+  const wrapperBorder = selected
+    ? "var(--notebookflow-node-selected-border, var(--foreground, #111827))"
+    : tagColor;
+  const sharedWrapper: CSSProperties = {
+    minWidth,
+    borderRadius: NODE_OUTER_RADIUS,
+    border: `${String(NODE_BORDER_WIDTH)}px solid ${wrapperBorder}`,
+    background: tagColor,
+    color: NODE_FOREGROUND,
+    fontFamily: NODE_FONT_FAMILY,
+    fontSize: 14,
+    lineHeight: 1.4,
+    boxShadow: selected
+      ? `0 0 0 2px ${TAG_RING[tag]}, 0 1px 2px rgba(15, 23, 42, 0.14)`
+      : "0 1px 2px rgba(15, 23, 42, 0.14)",
+    overflow: "visible",
+    boxSizing: "border-box",
+  };
+
+  if (corners?.layout === "stacked") {
+    return {
+      wrapper: sharedWrapper,
+      header: headerStyle(tagColor, {
+        roundTop: corners.roundHeaderTop,
+        roundBottom: corners.roundHeaderBottom,
+      }, clip),
+      titleRow: {
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+        minWidth: 0,
+        flex: 1,
+      },
+      renameButton: {
+        appearance: "none",
+        border: "none",
+        background: "transparent",
+        padding: 0,
+        margin: 0,
+        color: "inherit",
+        font: "inherit",
+        fontWeight: 600,
+        lineHeight: 1.2,
+        textAlign: "left",
+        cursor: "text",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        minWidth: 0,
+        flex: "0 1 auto",
+      },
+      renameAction: {
+        appearance: "none",
+        border: "none",
+        borderRadius: 4,
+        background: "transparent",
+        color: "inherit",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        lineHeight: 0,
+        padding: 2,
+        cursor: "pointer",
+        opacity: 0.78,
+        flexShrink: 0,
+      },
+      renameInput: {
+        appearance: "none",
+        border: "1px solid rgba(255, 255, 255, 0.45)",
+        borderRadius: 6,
+        background: "rgba(255, 255, 255, 0.16)",
+        color: "inherit",
+        font: "inherit",
+        fontWeight: 600,
+        lineHeight: 1.2,
+        padding: "4px 8px",
+        minWidth: 0,
+        width: "100%",
+        outline: "none",
+        boxSizing: "border-box",
+      },
+      tagChip: {
+        display: "inline-flex",
+        alignItems: "center",
+        borderRadius: 999,
+        background: "rgba(0, 0, 0, 0.2)",
+        padding: "1px 6px",
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: "0.08em",
+        textTransform: "uppercase",
+        lineHeight: 1.2,
+        flexShrink: 0,
+        boxSizing: "border-box",
+      },
+      meta: {
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+        padding: "6px 8px",
+        fontSize: 12,
+        color: NODE_MUTED,
+        background: NODE_BACKGROUND,
+        boxSizing: "border-box",
+        ...(corners.roundMetaBottom
+          ? { borderBottomLeftRadius: clip, borderBottomRightRadius: clip }
+          : {}),
+      },
+      emptyState: {
+        fontStyle: "italic",
+        opacity: 0.78,
+      },
+      duration: {
+        fontSize: 10,
+        color: "rgba(255, 255, 255, 0.82)",
+        fontVariantNumeric: "tabular-nums",
+        flexShrink: 0,
+      },
+    };
+  }
+
+  if (corners?.layout === "body") {
+    return {
+      wrapper: sharedWrapper,
+      header: headerStyle(tagColor, { roundTop: true }, clip),
+      titleRow: {
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+        minWidth: 0,
+        flex: 1,
+      },
+      renameButton: {
+        appearance: "none",
+        border: "none",
+        background: "transparent",
+        padding: 0,
+        margin: 0,
+        color: "inherit",
+        font: "inherit",
+        fontWeight: 600,
+        lineHeight: 1.2,
+        textAlign: "left",
+        cursor: "text",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        minWidth: 0,
+        flex: "0 1 auto",
+      },
+      renameAction: {
+        appearance: "none",
+        border: "none",
+        borderRadius: 4,
+        background: "transparent",
+        color: "inherit",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        lineHeight: 0,
+        padding: 2,
+        cursor: "pointer",
+        opacity: 0.78,
+        flexShrink: 0,
+      },
+      renameInput: {
+        appearance: "none",
+        border: "1px solid rgba(255, 255, 255, 0.45)",
+        borderRadius: 6,
+        background: "rgba(255, 255, 255, 0.16)",
+        color: "inherit",
+        font: "inherit",
+        fontWeight: 600,
+        lineHeight: 1.2,
+        padding: "4px 8px",
+        minWidth: 0,
+        width: "100%",
+        outline: "none",
+        boxSizing: "border-box",
+      },
+      tagChip: {
+        display: "inline-flex",
+        alignItems: "center",
+        borderRadius: 999,
+        background: "rgba(0, 0, 0, 0.2)",
+        padding: "1px 6px",
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: "0.08em",
+        textTransform: "uppercase",
+        lineHeight: 1.2,
+        flexShrink: 0,
+        boxSizing: "border-box",
+      },
+      meta: {
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+        padding: "6px 8px",
+        fontSize: 12,
+        color: NODE_MUTED,
+        background: NODE_BACKGROUND,
+        boxSizing: "border-box",
+        ...(corners.roundMetaBottom
+          ? { borderBottomLeftRadius: clip, borderBottomRightRadius: clip }
+          : {}),
+      },
+      emptyState: {
+        fontStyle: "italic",
+        opacity: 0.78,
+      },
+      duration: {
+        fontSize: 10,
+        color: "rgba(255, 255, 255, 0.82)",
+        fontVariantNumeric: "tabular-nums",
+        flexShrink: 0,
+      },
+    };
+  }
+
   return {
     wrapper: {
-      minWidth: 200,
-      borderRadius: 8,
-      border: `2px solid ${selected ? "var(--notebookflow-node-selected-border, var(--foreground, #111827))" : NODE_BORDER}`,
-      background: NODE_BACKGROUND,
+      minWidth,
+      borderRadius: NODE_OUTER_RADIUS,
+      border: `${String(NODE_BORDER_WIDTH)}px solid ${wrapperBorder}`,
+      background: tagColor,
       color: NODE_FOREGROUND,
       fontFamily: NODE_FONT_FAMILY,
       fontSize: 14,
@@ -332,18 +665,7 @@ function nodeStyles(tag: NodeTag, selected: boolean): NotebookNodeStyles {
       overflow: "visible",
       boxSizing: "border-box",
     },
-    header: {
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 8,
-      padding: "6px 8px",
-      background: TAG_HEADER_BG[tag],
-      color: "#ffffff",
-      borderTopLeftRadius: 6,
-      borderTopRightRadius: 6,
-      boxSizing: "border-box",
-    },
+    header: headerStyle(tagColor, { roundTop: true }, 6),
     titleRow: {
       display: "flex",
       alignItems: "center",
@@ -419,11 +741,18 @@ function nodeStyles(tag: NodeTag, selected: boolean): NotebookNodeStyles {
       padding: "6px 8px",
       fontSize: 12,
       color: NODE_MUTED,
+      background: NODE_BACKGROUND,
       boxSizing: "border-box",
     },
     emptyState: {
       fontStyle: "italic",
       opacity: 0.78,
+    },
+    duration: {
+      fontSize: 10,
+      color: "rgba(255, 255, 255, 0.82)",
+      fontVariantNumeric: "tabular-nums",
+      flexShrink: 0,
     },
   };
 }

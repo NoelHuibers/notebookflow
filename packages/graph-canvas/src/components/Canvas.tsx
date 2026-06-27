@@ -9,11 +9,10 @@
  * draggable yet — a future iteration will introduce free-form layout.
  */
 
-import dagre from "dagre";
 import { Map as MapIcon, Network } from "lucide-react";
 import type { DragEvent, ReactElement } from "react";
-import { useCallback, useMemo, useState } from "react";
-import type { Connection, Edge, EdgeTypes, Node, NodeTypes } from "reactflow";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import type { Connection, Edge, EdgeTypes, Node, NodeProps, NodeTypes } from "reactflow";
 import {
   Background,
   ControlButton,
@@ -22,23 +21,64 @@ import {
   Panel,
   ReactFlow,
   ReactFlowProvider,
+  useNodesInitialized,
+  useNodesState,
   useReactFlow,
   useStore,
+  useStoreApi,
+  useUpdateNodeInternals,
 } from "reactflow";
 
 import type { GraphModel, NodeModel, NodeTag, RunSummary, RuntimeState, WireModel } from "../types";
+import type { PortPlacement } from "./InletOutletGrid";
 import type { NotebookNodeData } from "./Node";
 import { NotebookNode } from "./Node";
 import type { NodeGroupData } from "./NodeGroup";
 import { NODE_GROUP_HEADER_HEIGHT, NodeGroup } from "./NodeGroup";
+import {
+  applyMeasuredGroupLayout,
+  estimateNodeHeight,
+  estimateNodeWidth,
+  measuredLayoutDiffers,
+  NODE_GAP,
+  type GroupLayoutConstants,
+  type MeasuredSize,
+  type NodeLayoutHints,
+} from "./nodeLayout";
 import { collectInputRefs, collectOutputSuggestions } from "./portSuggestions";
 import type { WireData } from "./Wire";
 import { Wire } from "./Wire";
 
 const NODE_TYPES = {
-  notebook: NotebookNode,
+  notebook: MeasuredNotebookNode,
   group: NodeGroup,
 } satisfies NodeTypes;
+
+function MeasuredNotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
+  const { id, data } = props;
+  const updateNodeInternals = useUpdateNodeInternals();
+  const metaLabel =
+    data.meta?.filename !== undefined && data.meta.filename !== ""
+      ? data.meta.filename
+      : data.meta?.rows !== undefined && Number.isFinite(data.meta.rows)
+        ? String(data.meta.rows)
+        : "";
+  const measureRevision = [
+    data.portPlacement ?? "stacked",
+    data.inputs.length,
+    data.outputs.length,
+    data.inputs.join("\0"),
+    data.outputs.join("\0"),
+    metaLabel,
+    data.unresolvedInputs?.join("\0") ?? "",
+  ].join("|");
+
+  useLayoutEffect(() => {
+    updateNodeInternals(id);
+  }, [id, measureRevision, updateNodeInternals]);
+
+  return <NotebookNode {...props} />;
+}
 
 const MINIMAP_TAG_COLOR: Record<NodeTag, string> = {
   input: "#3b82f6",
@@ -64,16 +104,23 @@ const EDGE_TYPES = {
 const COLUMN_WIDTH = 320;
 const COLUMN_GAP = 32;
 const GROUP_Y = 0;
-const NODE_VERTICAL_SPACING = 160;
 const NODE_X_INSET = 16;
 const GROUP_INNER_TOP_PADDING = 16;
 const GROUP_INNER_BOTTOM_PADDING = 24;
 const COLLAPSED_GROUP_HEIGHT = NODE_GROUP_HEADER_HEIGHT;
 
-const DAGRE_NODE_WIDTH = 240;
-const DAGRE_NODE_HEIGHT = 160;
-const DAGRE_RANKSEP = 90;
-const DAGRE_NODESEP = 50;
+const GROUP_INNER_RIGHT_PADDING = 16;
+
+const GROUP_LAYOUT: GroupLayoutConstants = {
+  columnWidth: COLUMN_WIDTH,
+  nodeXInset: NODE_X_INSET,
+  groupInnerTopPadding: GROUP_INNER_TOP_PADDING,
+  groupInnerBottomPadding: GROUP_INNER_BOTTOM_PADDING,
+  groupInnerRightPadding: GROUP_INNER_RIGHT_PADDING,
+  groupHeaderHeight: NODE_GROUP_HEADER_HEIGHT,
+  collapsedGroupHeight: COLLAPSED_GROUP_HEIGHT,
+  nodeGap: NODE_GAP,
+};
 
 export type CanvasLayout = "manual" | "dagre";
 
@@ -91,6 +138,13 @@ const FLOW_STYLE = {
   fontFamily:
     "var(--notebookflow-font-family, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif)",
   lineHeight: 1.4,
+} as const;
+
+/** Wires render above nodes — RF paints nodes after edges in DOM, so edges need a higher z-index. */
+const WIRE_LAYER_Z_INDEX = 2000;
+
+const DEFAULT_EDGE_OPTIONS = {
+  zIndex: WIRE_LAYER_Z_INDEX,
 } as const;
 
 export interface CanvasProps {
@@ -179,8 +233,10 @@ function CanvasInner(props: CanvasProps): ReactElement {
 
   const rfEdges = useMemo<Edge<WireData>[]>(() => buildRfEdges(graph), [graph]);
 
-  const rfNodes = useMemo<Node[]>(() => {
-    const manualNodes = buildNodes(graph, {
+  const portPlacement: PortPlacement = layout === "manual" ? "stacked" : "sides";
+
+  const baseNodes = useMemo<Node[]>(() => {
+    return buildNodes(graph, {
       onNodeRename,
       onGroupToggle,
       onInputsChange,
@@ -190,15 +246,11 @@ function CanvasInner(props: CanvasProps): ReactElement {
       timingByNode,
       metaByNode,
       unresolvedByNode,
+      portPlacement,
     });
-    if (layout === "manual") {
-      return manualNodes;
-    }
-    return applyDagreLayout(manualNodes, rfEdges);
   }, [
     graph,
     layout,
-    rfEdges,
     onNodeRename,
     onGroupToggle,
     onInputsChange,
@@ -208,7 +260,14 @@ function CanvasInner(props: CanvasProps): ReactElement {
     timingByNode,
     metaByNode,
     unresolvedByNode,
+    portPlacement,
   ]);
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(baseNodes);
+
+  useEffect(() => {
+    setNodes(baseNodes);
+  }, [baseNodes, setNodes]);
 
   const handleConnect = useCallback(
     (conn: Connection): void => {
@@ -312,11 +371,14 @@ function CanvasInner(props: CanvasProps): ReactElement {
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: drop target for the palette drag-and-drop flow; keyboard equivalent is the palette's click-to-add
     <div style={{ width: "100%", height: "100%" }} onDragOver={handleDragOver} onDrop={handleDrop}>
+      <style>{`.notebookflow-canvas .react-flow__handle { border: none; outline: none; box-shadow: none; }`}</style>
       <ReactFlow
-        nodes={rfNodes}
+        nodes={nodes}
         edges={rfEdges}
+        onNodesChange={onNodesChange}
         nodeTypes={NODE_TYPES}
         edgeTypes={EDGE_TYPES}
+        defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
         className="notebookflow-canvas"
         style={FLOW_STYLE}
         onConnect={handleConnect}
@@ -328,6 +390,7 @@ function CanvasInner(props: CanvasProps): ReactElement {
         fitView
         proOptions={{ hideAttribution: true }}
       >
+        <MeasuredGroupLayout portPlacement={portPlacement} />
         <Background />
         <Controls>
           <ControlButton
@@ -342,7 +405,7 @@ function CanvasInner(props: CanvasProps): ReactElement {
               setLayout((current) => (current === "manual" ? "dagre" : "manual"));
             }}
             title={`Layout: ${layout} — click to switch to ${
-              layout === "manual" ? "dagre (auto)" : "manual"
+              layout === "manual" ? "horizontal" : "vertical"
             }`}
             aria-label="Toggle layout"
           >
@@ -373,6 +436,93 @@ function CanvasInner(props: CanvasProps): ReactElement {
   );
 }
 
+function MeasuredGroupLayout({ portPlacement }: { portPlacement: PortPlacement }): null {
+  const initialized = useNodesInitialized();
+  const store = useStoreApi();
+  const { getNodes, setNodes } = useReactFlow();
+  const horizontalCells = portPlacement === "sides";
+
+  const measureSignature = useStore((state) => {
+    const parts: string[] = [];
+    state.nodeInternals.forEach((internal, id) => {
+      if (internal.type !== "notebook") {
+        return;
+      }
+      parts.push(
+        `${id}:${String(Math.round(internal.width ?? 0))}:${String(Math.round(internal.height ?? 0))}`,
+      );
+    });
+    parts.sort();
+    return parts.join("|");
+  });
+
+  const fallbackSize = useCallback(
+    (node: Node): MeasuredSize => {
+      const data = node.data as NotebookNodeData;
+      const hints: NodeLayoutHints = {
+        portsEditable:
+          data.onInputsChange !== undefined || data.onOutputsChange !== undefined,
+        hasMeta:
+          (data.meta?.filename !== undefined && data.meta.filename !== "") ||
+          (data.meta?.rows !== undefined && Number.isFinite(data.meta.rows)) ||
+          (data.unresolvedInputs !== undefined && data.unresolvedInputs.length > 0),
+      };
+      return {
+        width: estimateNodeWidth(data, portPlacement, hints),
+        height: estimateNodeHeight(data, portPlacement, hints),
+      };
+    },
+    [portPlacement],
+  );
+
+  useLayoutEffect(() => {
+    if (!initialized) {
+      return;
+    }
+
+    const { nodeInternals } = store.getState();
+    const measured = new Map<string, MeasuredSize>();
+    let notebookCount = 0;
+
+    nodeInternals.forEach((internal, id) => {
+      if (internal.type !== "notebook") {
+        return;
+      }
+      notebookCount += 1;
+      const width = internal.width;
+      const height = internal.height;
+      if (
+        typeof width !== "number" ||
+        typeof height !== "number" ||
+        width <= 0 ||
+        height <= 0
+      ) {
+        return;
+      }
+      measured.set(id, { width, height });
+    });
+
+    if (notebookCount === 0 || measured.size < notebookCount) {
+      return;
+    }
+
+    const current = getNodes();
+    const next = applyMeasuredGroupLayout(
+      current,
+      measured,
+      horizontalCells,
+      GROUP_LAYOUT,
+      fallbackSize,
+    );
+
+    if (measuredLayoutDiffers(current, next)) {
+      setNodes(next);
+    }
+  }, [initialized, measureSignature, horizontalCells, store, getNodes, setNodes, fallbackSize]);
+
+  return null;
+}
+
 function buildNodes(
   graph: GraphModel,
   callbacks: {
@@ -385,6 +535,7 @@ function buildNodes(
     timingByNode: CanvasProps["timingByNode"];
     metaByNode: CanvasProps["metaByNode"];
     unresolvedByNode: CanvasProps["unresolvedByNode"];
+    portPlacement: PortPlacement;
   },
 ): Node[] {
   const {
@@ -397,6 +548,7 @@ function buildNodes(
     timingByNode,
     metaByNode,
     unresolvedByNode,
+    portPlacement,
   } = callbacks;
   const vars = variablesByNode ?? {};
   const runtime = runtimeByNode ?? {};
@@ -427,11 +579,65 @@ function buildNodes(
       .filter((n): n is NodeModel => n !== undefined)
       .sort((a, b) => (a.cellIndices[0] ?? 0) - (b.cellIndices[0] ?? 0));
 
-    const expandedGroupHeight =
-      NODE_GROUP_HEADER_HEIGHT +
-      GROUP_INNER_TOP_PADDING +
-      Math.max(1, groupNodes.length) * NODE_VERTICAL_SPACING +
-      GROUP_INNER_BOTTOM_PADDING;
+    const horizontalCells = portPlacement === "sides";
+
+    type CellLayout = {
+      node: NodeModel;
+      hints: NodeLayoutHints;
+      width: number;
+      height: number;
+    };
+    const cellLayouts: CellLayout[] = groupNodes.map((node) => {
+      const meta = metas[node.id];
+      const unresolvedRefs = unresolved[node.id];
+      const hints = layoutHintsForNode(
+        node,
+        meta,
+        unresolvedRefs,
+        onInputsChange,
+        onOutputsChange,
+      );
+      return {
+        node,
+        hints,
+        width: estimateNodeWidth(node, portPlacement, hints),
+        height: estimateNodeHeight(node, portPlacement, hints),
+      };
+    });
+
+    let groupWidth = COLUMN_WIDTH;
+    let expandedGroupHeight =
+      NODE_GROUP_HEADER_HEIGHT + GROUP_INNER_TOP_PADDING + GROUP_INNER_BOTTOM_PADDING;
+
+    if (horizontalCells) {
+      let contentWidth = NODE_X_INSET;
+      let maxCellHeight = 0;
+      for (const cell of cellLayouts) {
+        contentWidth += cell.width + NODE_GAP;
+        maxCellHeight = Math.max(maxCellHeight, cell.height);
+      }
+      if (cellLayouts.length > 0) {
+        contentWidth -= NODE_GAP;
+      }
+      contentWidth += GROUP_INNER_RIGHT_PADDING;
+      groupWidth = Math.max(COLUMN_WIDTH, contentWidth);
+      expandedGroupHeight =
+        NODE_GROUP_HEADER_HEIGHT +
+        GROUP_INNER_TOP_PADDING +
+        maxCellHeight +
+        GROUP_INNER_BOTTOM_PADDING;
+    } else {
+      let stackedContentHeight = GROUP_INNER_TOP_PADDING;
+      for (const cell of cellLayouts) {
+        stackedContentHeight += cell.height + NODE_GAP;
+      }
+      if (cellLayouts.length > 0) {
+        stackedContentHeight -= NODE_GAP;
+      }
+      expandedGroupHeight =
+        NODE_GROUP_HEADER_HEIGHT + stackedContentHeight + GROUP_INNER_BOTTOM_PADDING;
+    }
+
     const groupHeight = group.collapsed ? COLLAPSED_GROUP_HEIGHT : expandedGroupHeight;
 
     const groupNodeId = `group:${group.id}`;
@@ -442,18 +648,18 @@ function buildNodes(
       data: groupData,
       draggable: false,
       selectable: true,
-      style: { width: COLUMN_WIDTH, height: groupHeight },
+      style: { width: groupWidth, height: groupHeight },
     });
 
     if (group.collapsed) {
       continue;
     }
 
-    for (let rowIdx = 0; rowIdx < groupNodes.length; rowIdx++) {
-      const node = groupNodes[rowIdx];
-      if (node === undefined) {
-        continue;
-      }
+    let stackedX = NODE_X_INSET;
+    let stackedY = NODE_GROUP_HEADER_HEIGHT + GROUP_INNER_TOP_PADDING;
+
+    for (const cell of cellLayouts) {
+      const node = cell.node;
       const nodeData: NotebookNodeData = {
         ...node,
         runtimeState: runtime[node.id] ?? "idle",
@@ -481,16 +687,20 @@ function buildNodes(
       if (onOutputsChange !== undefined) {
         nodeData.onOutputsChange = onOutputsChange;
       }
-      // Position is relative to the parent group's top-left, since each child
-      // node is rendered inside the group container via parentNode + extent.
-      const childY =
-        NODE_GROUP_HEADER_HEIGHT + GROUP_INNER_TOP_PADDING + rowIdx * NODE_VERTICAL_SPACING;
+      nodeData.portPlacement = portPlacement;
+      const childX = horizontalCells ? stackedX : NODE_X_INSET;
+      const childY = stackedY;
+      if (horizontalCells) {
+        stackedX += cell.width + NODE_GAP;
+      } else {
+        stackedY += cell.height + NODE_GAP;
+      }
       rfNodes.push({
         id: node.id,
         type: "notebook",
         parentNode: groupNodeId,
         extent: "parent",
-        position: { x: NODE_X_INSET, y: childY },
+        position: { x: childX, y: childY },
         data: nodeData,
         draggable: false,
         selectable: true,
@@ -621,41 +831,22 @@ function CanvasBreadcrumbs({ graph }: { graph: GraphModel }): ReactElement {
   );
 }
 
-/**
- * Re-position notebook nodes via dagre's layered layout. The group container
- * is dropped from the rendered set so dagre can space siblings freely; the
- * parentNode / extent wiring is also stripped so positions are absolute.
- */
-function applyDagreLayout(nodes: Node[], edges: Edge[]): Node[] {
-  const notebookNodes = nodes.filter((node) => node.type === "notebook");
-  if (notebookNodes.length === 0) {
-    return nodes;
-  }
-  const dagreGraph = new dagre.graphlib.Graph();
-  dagreGraph.setGraph({ rankdir: "LR", nodesep: DAGRE_NODESEP, ranksep: DAGRE_RANKSEP });
-  dagreGraph.setDefaultEdgeLabel(() => ({}));
-  for (const node of notebookNodes) {
-    dagreGraph.setNode(node.id, { width: DAGRE_NODE_WIDTH, height: DAGRE_NODE_HEIGHT });
-  }
-  const ids = new Set(notebookNodes.map((node) => node.id));
-  for (const edge of edges) {
-    if (ids.has(edge.source) && ids.has(edge.target)) {
-      dagreGraph.setEdge(edge.source, edge.target);
-    }
-  }
-  dagre.layout(dagreGraph);
-  return notebookNodes.map((node) => {
-    const { x, y } = dagreGraph.node(node.id);
-    // dagre returns the centre point; React Flow expects top-left.
-    // Drop parentNode + extent so children float free for dagre's layout.
-    const { parentNode, extent, ...rest } = node;
-    void parentNode;
-    void extent;
-    return {
-      ...rest,
-      position: { x: x - DAGRE_NODE_WIDTH / 2, y: y - DAGRE_NODE_HEIGHT / 2 },
-    };
-  });
+function layoutHintsForNode(
+  _node: NodeModel,
+  meta: { filename?: string; rows?: number } | undefined,
+  unresolvedRefs: string[] | undefined,
+  onInputsChange: CanvasProps["onInputsChange"],
+  onOutputsChange: CanvasProps["onOutputsChange"],
+): NodeLayoutHints {
+  const hasMetaFilename = meta?.filename !== undefined && meta.filename !== "";
+  const hasMetaRows = meta?.rows !== undefined && Number.isFinite(meta.rows);
+  return {
+    portsEditable: onInputsChange !== undefined || onOutputsChange !== undefined,
+    hasMeta:
+      hasMetaFilename ||
+      hasMetaRows ||
+      (unresolvedRefs !== undefined && unresolvedRefs.length > 0),
+  };
 }
 
 function buildRfEdges(graph: GraphModel): Edge<WireData>[] {
@@ -673,6 +864,7 @@ function buildRfEdges(graph: GraphModel): Edge<WireData>[] {
       target: wire.targetNodeId,
       targetHandle: wire.targetPort,
       type: "wire",
+      zIndex: WIRE_LAYER_Z_INDEX,
       data: { crossNotebook: sourceNode.groupId !== targetNode.groupId },
     });
   }

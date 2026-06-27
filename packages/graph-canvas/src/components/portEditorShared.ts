@@ -5,6 +5,30 @@ export const NODE_BORDER = "var(--notebookflow-node-border, var(--border, #d1d5d
 export const NODE_BACKGROUND = "var(--notebookflow-node-bg, var(--card, #ffffff))";
 export const NODE_FOREGROUND = "var(--notebookflow-node-fg, var(--card-foreground, #111827))";
 
+/** Minimum label width for side (horizontal) port bands. */
+export const SIDES_PORT_LABEL_MIN = 96;
+export const SIDES_PORT_LABEL_MAX = 168;
+/** Width of the × remove strip on port chips (label + strip = chip min width). */
+export const CHIP_REMOVE_STRIP_WIDTH = 26;
+/** Minimum stacked port column / chip width — keeps chips inside padded rails. */
+export const STACKED_CHIP_MIN_WIDTH: number = SIDES_PORT_LABEL_MIN + CHIP_REMOVE_STRIP_WIDTH;
+/** Minimum width per port column in stacked (vertical) layout. */
+export const STACKED_PORT_COLUMN_MIN: number = STACKED_CHIP_MIN_WIDTH;
+/** Maximum width per port column before wrapping to additional lines. */
+export const STACKED_PORT_COLUMN_MAX = 184;
+/** Inset for port chips from the cell edge; pairs with handle edge offset in each layout. */
+export const PORT_EDGE_INSET = 6;
+
+/** Ellipsis at the text start so port suffixes (e.g. `.df`) stay visible when truncated. */
+export function portLabelEllipsis(textAlign: "left" | "right" = "left"): CSSProperties {
+  return {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    direction: "rtl",
+    textAlign,
+  };
+}
 export const NAME_RE: RegExp = /^[A-Za-z0-9 _-]+$/;
 export const PORT_RE: RegExp = /^[a-z][a-z0-9_]*$/;
 
@@ -34,6 +58,12 @@ export function isValidPort(kind: PortKind, value: string): boolean {
 interface PortChipStyles {
   chip: CSSProperties;
   chipLabel: CSSProperties;
+  sidesChip: CSSProperties;
+  sidesChipLabelRegion: CSSProperties;
+  sidesChipRemoveRegion: CSSProperties;
+  sidesChipRemove: CSSProperties;
+  readOnlyPort: CSSProperties;
+  readOnlyPortSideRight: CSSProperties;
   chipRemove: CSSProperties;
   addButton: CSSProperties;
   combobox: CSSProperties;
@@ -45,12 +75,12 @@ interface PortChipStyles {
 export const portChipStyles: PortChipStyles = {
   chip: {
     display: "inline-flex",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: 2,
     borderRadius: 6,
     border: `1px solid ${NODE_BORDER}`,
     background: "rgba(127, 127, 127, 0.08)",
-    padding: "0 2px 0 4px",
+    padding: "1px 2px 1px 4px",
     maxWidth: "100%",
     boxSizing: "border-box",
   },
@@ -61,13 +91,72 @@ export const portChipStyles: PortChipStyles = {
     color: "inherit",
     font: "inherit",
     fontSize: 12,
-    lineHeight: 1.4,
+    lineHeight: 1.35,
     padding: 0,
     cursor: "text",
+    minWidth: 0,
+    maxWidth: "100%",
+    width: "100%",
+    ...portLabelEllipsis("left"),
+  },
+  sidesChip: {
+    display: "inline-flex",
+    flexDirection: "row",
+    alignItems: "stretch",
+    borderRadius: 6,
+    border: `1px solid ${NODE_BORDER}`,
+    background: "rgba(127, 127, 127, 0.08)",
+    padding: 0,
+    minWidth: SIDES_PORT_LABEL_MIN + CHIP_REMOVE_STRIP_WIDTH,
+    maxWidth: "100%",
+    boxSizing: "border-box",
     overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    maxWidth: 120,
+  },
+  sidesChipLabelRegion: {
+    display: "flex",
+    alignItems: "center",
+    minWidth: SIDES_PORT_LABEL_MIN,
+    maxWidth: SIDES_PORT_LABEL_MAX,
+    flex: 1,
+    padding: "2px 4px",
+    boxSizing: "border-box",
+  },
+  sidesChipRemoveRegion: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderLeft: `1px solid ${NODE_BORDER}`,
+    background: "rgba(127, 127, 127, 0.06)",
+    padding: "0 1px",
+    boxSizing: "border-box",
+    flexShrink: 0,
+  },
+  sidesChipRemove: {
+    appearance: "none",
+    border: "none",
+    borderRadius: 0,
+    background: "transparent",
+    color: "inherit",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    lineHeight: 0,
+    padding: "2px 4px",
+    cursor: "pointer",
+    opacity: 0.6,
+  },
+  readOnlyPort: {
+    fontSize: 12,
+    lineHeight: 1.4,
+    maxWidth: "100%",
+    ...portLabelEllipsis("left"),
+  },
+  readOnlyPortSideRight: {
+    fontSize: 12,
+    lineHeight: 1.4,
+    maxWidth: "100%",
+    width: "100%",
+    ...portLabelEllipsis("right"),
   },
   chipRemove: {
     appearance: "none",
