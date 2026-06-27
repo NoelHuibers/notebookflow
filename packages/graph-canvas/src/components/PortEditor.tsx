@@ -10,7 +10,7 @@ import type { CSSProperties, ReactElement } from "react";
 import { useState } from "react";
 
 import { PortComboboxFloating } from "./PortComboboxFloating";
-import { isValidPort, portChipStyles, type PortKind } from "./portEditorShared";
+import { isValidPort, type PortKind, portChipStyles } from "./portEditorShared";
 
 export type { PortKind };
 
@@ -65,7 +65,10 @@ export function PortEditor(props: PortEditorProps): ReactElement {
       <strong style={styles.label}>{label}:</strong>
       <div style={styles.chips}>
         {ports.map((port, idx) => (
-          <span key={`chip-${port}`} style={{ ...portChipStyles.chip, opacity: editing?.index === idx ? 0.4 : 1 }}>
+          <span
+            key={`chip-${port}`}
+            style={{ ...portChipStyles.chip, opacity: editing?.index === idx ? 0.4 : 1 }}
+          >
             <button
               type="button"
               className="nodrag nopan"

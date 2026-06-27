@@ -106,8 +106,7 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
   // else can do both.
   const showInlets = data.tag !== "input";
   const showOutlets = data.tag !== "output";
-  const portsEditable =
-    data.onInputsChange !== undefined || data.onOutputsChange !== undefined;
+  const portsEditable = data.onInputsChange !== undefined || data.onOutputsChange !== undefined;
 
   useEffect(() => {
     if (!isEditing) {

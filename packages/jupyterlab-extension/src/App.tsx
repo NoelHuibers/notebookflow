@@ -129,13 +129,19 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
     void engine.renameNode(nodeId, nextName, Date.now());
   };
 
-  const handleInputsChange = useCallback((nodeId: string, nextInputs: string[]): void => {
-    void engine.setNodeInputs(nodeId, nextInputs, Date.now());
-  }, [engine]);
+  const handleInputsChange = useCallback(
+    (nodeId: string, nextInputs: string[]): void => {
+      void engine.setNodeInputs(nodeId, nextInputs, Date.now());
+    },
+    [engine],
+  );
 
-  const handleOutputsChange = useCallback((nodeId: string, nextOutputs: string[]): void => {
-    void engine.setNodeOutputs(nodeId, nextOutputs, Date.now());
-  }, [engine]);
+  const handleOutputsChange = useCallback(
+    (nodeId: string, nextOutputs: string[]): void => {
+      void engine.setNodeOutputs(nodeId, nextOutputs, Date.now());
+    },
+    [engine],
+  );
 
   const handleWireCreate = useCallback(
     (wire: Omit<WireModel, "id">): void => {

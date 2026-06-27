@@ -10,7 +10,7 @@ import type { CSSProperties, KeyboardEvent, ReactElement } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { isValidPort, portChipStyles, type PortKind } from "./portEditorShared";
+import { isValidPort, type PortKind, portChipStyles } from "./portEditorShared";
 
 const PORTAL_Z_INDEX = 10_000;
 

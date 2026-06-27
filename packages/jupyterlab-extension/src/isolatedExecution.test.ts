@@ -30,8 +30,6 @@ describe("isolatedExecution", () => {
     ];
     const idIndex = buildIdIndex(nodes);
     const bindings = resolveInputBindings(nodes[1]!, idIndex);
-    expect(bindings).toEqual([
-      { localPort: "df", sourceNodeId: "a::0", sourcePort: "df" },
-    ]);
+    expect(bindings).toEqual([{ localPort: "df", sourceNodeId: "a::0", sourcePort: "df" }]);
   });
 });

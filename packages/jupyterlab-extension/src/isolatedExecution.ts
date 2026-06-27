@@ -27,6 +27,24 @@ export function busKey(nodeId: string, port: string): string {
   return `${nodeId}\0${port}`;
 }
 
+function utf8ToBase64(source: string): string {
+  const bytes = new TextEncoder().encode(source);
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary);
+}
+
+function base64ToUtf8(encoded: string): string {
+  const binary = atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new TextDecoder().decode(bytes);
+}
+
 export function buildIdIndex(nodes: IsolatedPipelineNode[]): Map<string, string> {
   const index = new Map<string, string>();
   for (const node of nodes) {
@@ -72,7 +90,7 @@ export function extractCellSourceFromWrapper(code: string): string | null {
     return null;
   }
   const encoded = code.slice(encodedStart, encodedEnd);
-  return Buffer.from(encoded, "base64").toString("utf-8");
+  return base64ToUtf8(encoded);
 }
 
 export function wrapIsolatedCellCode(
@@ -81,7 +99,7 @@ export function wrapIsolatedCellCode(
   inputBindings: InputBinding[],
   outputPorts: string[],
 ): string {
-  const encoded = Buffer.from(source, "utf-8").toString("base64");
+  const encoded = utf8ToBase64(source);
   const inputLines = inputBindings.map(
     (binding) =>
       `__nf_ns[${JSON.stringify(binding.localPort)}] = __nf_bus[${JSON.stringify(busKey(binding.sourceNodeId, binding.sourcePort))}]`,

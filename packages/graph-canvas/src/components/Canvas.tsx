@@ -31,9 +31,9 @@ import type { NotebookNodeData } from "./Node";
 import { NotebookNode } from "./Node";
 import type { NodeGroupData } from "./NodeGroup";
 import { NODE_GROUP_HEADER_HEIGHT, NodeGroup } from "./NodeGroup";
+import { collectInputRefs, collectOutputSuggestions } from "./portSuggestions";
 import type { WireData } from "./Wire";
 import { Wire } from "./Wire";
-import { collectOutputSuggestions, collectInputRefs } from "./portSuggestions";
 
 const NODE_TYPES = {
   notebook: NotebookNode,

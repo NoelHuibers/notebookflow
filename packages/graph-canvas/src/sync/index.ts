@@ -5,7 +5,7 @@
  * can import them as `@notebookflow/graph-canvas/sync`.
  */
 
-export type { NotebookCell, ParseError, ParseResult, ParsedRef } from "./MarkerParser";
+export type { NotebookCell, ParsedRef, ParseError, ParseResult } from "./MarkerParser";
 export { MarkerParser, parseRef } from "./MarkerParser";
 export type {
   CellPatch,

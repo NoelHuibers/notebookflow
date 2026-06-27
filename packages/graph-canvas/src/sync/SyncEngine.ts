@@ -14,8 +14,8 @@
  * cell so the engine can apply this policy when pushing graph edits.
  */
 
-import type { GraphModel, NodeModel, NodeTag } from "../types";
 import { INLET_DROP_HANDLE_ID } from "../components/portEditorShared";
+import type { GraphModel, NodeModel, NodeTag } from "../types";
 import type { NotebookCell, ParseResult } from "./MarkerParser";
 import { formatRef, MarkerParser, parseRef } from "./MarkerParser";
 
@@ -613,12 +613,7 @@ export class SyncEngine {
     }
 
     const ordered = this.orderedNodesInGroup(target.groupId);
-    const intermediates = wiredIntermediatesBetween(
-      this.graph,
-      ordered,
-      source.id,
-      target.id,
-    );
+    const intermediates = wiredIntermediatesBetween(this.graph, ordered, source.id, target.id);
     if (intermediates.length === 0) {
       return formatRef(parsed);
     }
@@ -922,7 +917,7 @@ function wiredIntermediatesBetween(
   if (srcOrder === -1 || tgtOrder === -1 || tgtOrder <= srcOrder) {
     return [];
   }
-  return ordered.slice(srcOrder + 1, tgtOrder).filter(
-    (node) => hasWirePath(adj, sourceId, node.id) && hasWirePath(adj, node.id, targetId),
-  );
+  return ordered
+    .slice(srcOrder + 1, tgtOrder)
+    .filter((node) => hasWirePath(adj, sourceId, node.id) && hasWirePath(adj, node.id, targetId));
 }

@@ -13,15 +13,15 @@ import { useState } from "react";
 import { Handle, Position } from "reactflow";
 
 import type { NodeTag } from "../types";
+import { PortComboboxFloating } from "./PortComboboxFloating";
 import {
   INLET_DROP_HANDLE_ID,
   isValidPort,
   NODE_BORDER,
   NODE_MUTED,
-  portChipStyles,
   type PortKind,
+  portChipStyles,
 } from "./portEditorShared";
-import { PortComboboxFloating } from "./PortComboboxFloating";
 
 const TAG_HANDLE_COLOR: Record<NodeTag, string> = {
   input: "#3b82f6",
@@ -81,8 +81,7 @@ export function InletOutletGrid(props: InletOutletGridProps): ReactElement | nul
     showOutlets ? outletRows + (addOutletRow ? 1 : 0) : 0,
     1,
   );
-  const gridColumns =
-    showInlets && showOutlets ? "1fr 1fr" : showInlets ? "1fr" : "1fr";
+  const gridColumns = showInlets && showOutlets ? "1fr 1fr" : showInlets ? "1fr" : "1fr";
 
   const commit = (kind: PortKind, index: number, value: string): void => {
     const trimmed = value.trim();
@@ -153,12 +152,8 @@ export function InletOutletGrid(props: InletOutletGridProps): ReactElement | nul
   return (
     <div style={styles.grid}>
       <div style={{ ...styles.headerRow, gridTemplateColumns: gridColumns }}>
-        {showInlets && (
-          <span style={{ ...styles.headerCell, textAlign: "left" }}>Input</span>
-        )}
-        {showOutlets && (
-          <span style={{ ...styles.headerCell, textAlign: "right" }}>Output</span>
-        )}
+        {showInlets && <span style={{ ...styles.headerCell, textAlign: "left" }}>Input</span>}
+        {showOutlets && <span style={{ ...styles.headerCell, textAlign: "right" }}>Output</span>}
       </div>
       {Array.from({ length: rowCount }, (_, rowIdx) => {
         const inlet = showInlets ? inputs[rowIdx] : undefined;
@@ -283,7 +278,11 @@ export function InletOutletGrid(props: InletOutletGridProps): ReactElement | nul
       })}
       {editing !== null && (
         <PortComboboxFloating
-          key={editing.index === -1 ? `add-${editing.kind}` : `edit-${editing.kind}-${String(editing.index)}`}
+          key={
+            editing.index === -1
+              ? `add-${editing.kind}`
+              : `edit-${editing.kind}-${String(editing.index)}`
+          }
           anchorEl={editing.anchorEl}
           kind={editing.kind}
           initialValue={
