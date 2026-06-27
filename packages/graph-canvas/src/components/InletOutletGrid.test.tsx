@@ -161,4 +161,66 @@ describe("InletOutletGrid", () => {
     const dropHandle = container.querySelector(`[data-handle-id="${INLET_DROP_HANDLE_ID}"]`);
     expect(dropHandle?.getAttribute("data-handle-type")).toBe("target");
   });
+
+  it("centers stacked drop hint and handle when no inputs are defined", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    document.body.appendChild(container);
+    mounts.push({ container, root });
+
+    act(() => {
+      root.render(
+        <InletOutletGrid
+          tag="transform"
+          inputs={[]}
+          outputs={[]}
+          showInlets
+          showOutlets={false}
+          editable
+          inputSuggestions={[]}
+          outputSuggestions={[]}
+          onInputsChange={vi.fn()}
+          placement="stacked"
+          edge="top"
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("wire or add");
+    const rail = container.querySelector('[data-testid="handle-rail-top"]');
+    expect(rail).not.toBeNull();
+    expect((rail as HTMLElement).style.justifyContent).toBe("center");
+    expect(container.querySelector(`[data-handle-id="${INLET_DROP_HANDLE_ID}"]`)).not.toBeNull();
+  });
+
+  it("centers stacked add output when no outputs are defined", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    document.body.appendChild(container);
+    mounts.push({ container, root });
+
+    act(() => {
+      root.render(
+        <InletOutletGrid
+          tag="transform"
+          inputs={[]}
+          outputs={[]}
+          showInlets={false}
+          showOutlets
+          editable
+          inputSuggestions={[]}
+          outputSuggestions={[]}
+          onOutputsChange={vi.fn()}
+          placement="stacked"
+          edge="bottom"
+        />,
+      );
+    });
+
+    const labelRow = container.querySelector(
+      '[data-testid="handle-rail-bottom"]',
+    )?.previousElementSibling;
+    expect(labelRow).not.toBeNull();
+    expect((labelRow as HTMLElement).style.justifyContent).toBe("center");
+  });
 });

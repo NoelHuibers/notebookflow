@@ -332,6 +332,21 @@ function StackedPortCell(props: { children: ReactNode }): ReactElement {
   return <div style={stackedStyles.portColumnContent}>{props.children}</div>;
 }
 
+/** Center the lone drop/add affordance when no ports exist yet. */
+function stackedPortRowStyles(
+  columns: ReadonlyArray<{ port: string | null }>,
+  baseRow: CSSProperties,
+): { row: CSSProperties; column: CSSProperties } {
+  const centerPlaceholder = columns.length === 1 && columns[0]?.port === null;
+  if (!centerPlaceholder) {
+    return { row: baseRow, column: stackedStyles.portColumn };
+  }
+  return {
+    row: { ...baseRow, justifyContent: "center" },
+    column: stackedStyles.portColumnCentered,
+  };
+}
+
 function StackedPortSection(props: InletOutletGridProps): ReactElement | null {
   const {
     tag,
@@ -387,11 +402,20 @@ function StackedPortSection(props: InletOutletGridProps): ReactElement | null {
       columns.push({ key: INLET_DROP_HANDLE_ID, port: null, index: -1 });
     }
 
+    const { row: handleRowStyle, column: portColumnStyle } = stackedPortRowStyles(
+      columns,
+      stackedStyles.handleRailTop,
+    );
+    const { row: labelRowStyle } = stackedPortRowStyles(
+      columns,
+      stackedStyles.labelRowBelowHandles,
+    );
+
     return (
       <div style={clipSectionStyle(stackedStyles.sectionTop, clipCorner)}>
-        <div style={stackedStyles.handleRailTop} data-testid="handle-rail-top">
+        <div style={handleRowStyle} data-testid="handle-rail-top">
           {columns.map((col) => (
-            <div key={col.key} style={stackedStyles.portColumn}>
+            <div key={col.key} style={portColumnStyle}>
               <Handle
                 id={col.key}
                 type="target"
@@ -401,9 +425,9 @@ function StackedPortSection(props: InletOutletGridProps): ReactElement | null {
             </div>
           ))}
         </div>
-        <div style={stackedStyles.labelRowBelowHandles}>
+        <div style={labelRowStyle}>
           {columns.map((col) => (
-            <div key={`label-${col.key}`} style={stackedStyles.portColumn}>
+            <div key={`label-${col.key}`} style={portColumnStyle}>
               <StackedPortCell>
                 {col.port === null ? (
                   editable ? (
@@ -477,11 +501,17 @@ function StackedPortSection(props: InletOutletGridProps): ReactElement | null {
     columns.push({ key: "__add_out__", port: null, index: -1 });
   }
 
+  const { row: labelRowStyle, column: portColumnStyle } = stackedPortRowStyles(
+    columns,
+    stackedStyles.labelRowAboveHandles,
+  );
+  const { row: handleRowStyle } = stackedPortRowStyles(columns, stackedStyles.handleRailBottom);
+
   return (
     <div style={clipSectionStyle(stackedStyles.sectionBottom, clipCorner)}>
-      <div style={stackedStyles.labelRowAboveHandles}>
+      <div style={labelRowStyle}>
         {columns.map((col) => (
-          <div key={`label-${col.key}`} style={stackedStyles.portColumn}>
+          <div key={`label-${col.key}`} style={portColumnStyle}>
             <StackedPortCell>
               {col.port === null ? (
                 editable ? (
@@ -520,12 +550,12 @@ function StackedPortSection(props: InletOutletGridProps): ReactElement | null {
           </div>
         ))}
       </div>
-      <div style={stackedStyles.handleRailBottom} data-testid="handle-rail-bottom">
+      <div style={handleRowStyle} data-testid="handle-rail-bottom">
         {columns.map((col) =>
           col.port === null ? (
-            <div key={col.key} style={stackedStyles.portColumn} />
+            <div key={col.key} style={portColumnStyle} />
           ) : (
-            <div key={col.key} style={stackedStyles.portColumn}>
+            <div key={col.key} style={portColumnStyle}>
               <Handle
                 id={col.port}
                 type="source"
@@ -837,6 +867,16 @@ const stackedStyles = {
     flex: "1 1 0",
     minWidth: STACKED_CHIP_MIN_WIDTH,
     maxWidth: STACKED_PORT_COLUMN_MAX,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    minHeight: 0,
+    boxSizing: "border-box",
+  },
+  portColumnCentered: {
+    position: "relative",
+    flex: "0 0 auto",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
