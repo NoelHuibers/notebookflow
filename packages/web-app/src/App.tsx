@@ -23,7 +23,6 @@ import {
   configValuesEqual,
   defaultConfigForManifest,
   hasMissingRequiredConfig,
-  NodeConfigEditor,
   readNotebookflowMetadata,
   resolveNodeConfig,
   sanitizeConfigForManifest,
@@ -32,17 +31,18 @@ import {
 import type { CellPatch, NotebookCell } from "@notebookflow/graph-canvas/sync";
 import { SyncEngine } from "@notebookflow/graph-canvas/sync";
 import {
-  ChevronDown,
-  ChevronRight,
   Cloud,
   Command,
   Download,
   ExternalLink,
   Keyboard,
   MoreHorizontal,
+  PanelBottom,
+  PanelBottomClose,
   PanelLeftOpen,
+  PanelRight,
+  PanelRightClose,
   Play,
-  Plus,
   RotateCcw,
   Save,
   Settings as SettingsIcon,
@@ -57,6 +57,7 @@ import type {
 } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AskPalette } from "@/components/AskPalette";
+import { CanvasSidebar } from "@/components/CanvasSidebar";
 import { CellList } from "@/components/CellList";
 import { CellPaneFooter } from "@/components/CellPaneFooter";
 import type { CellKind } from "@/components/CellToolbar";
@@ -69,7 +70,6 @@ import { FileDropZone } from "@/components/FileDropZone";
 import { FilesRail } from "@/components/FilesRail";
 import { InspectorPanel } from "@/components/InspectorPanel";
 import { Wordmark } from "@/components/Logo";
-import { PaletteDrawer } from "@/components/PaletteDrawer";
 import { PaneDivider } from "@/components/PaneDivider";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { ShortcutsDialog } from "@/components/ShortcutsDialog";
@@ -129,6 +129,8 @@ const DEV_MODE = import.meta.env.DEV;
 
 const MIN_NOTEBOOK_WIDTH_PX = 280;
 const MIN_CANVAS_BODY_WIDTH_PX = 320;
+const MIN_SIDEBAR_WIDTH_PX = 240;
+const DEFAULT_SIDEBAR_WIDTH_PX = 288;
 const MIN_MAIN_HEIGHT_PX = 220;
 const MIN_INSPECTOR_HEIGHT_PX = 140;
 const DEFAULT_NOTEBOOK_RATIO = 50;
@@ -200,10 +202,12 @@ export function App(): ReactElement {
   );
   const [notebookRatio, setNotebookRatio] = useState(DEFAULT_NOTEBOOK_RATIO);
   const [mainRatio, setMainRatio] = useState(DEFAULT_MAIN_RATIO);
-  // The node palette is an on-demand drawer (Alt+A or the "+ Add node"
-  // button), not a docked pane — it slides over the canvas and closes
-  // after use, reclaiming the width for the graph.
-  const [isPaletteOpen, setIsPaletteOpen] = useState(false);
+  // Right sidebar: selected node + node palette (Alt+A or the canvas toggle).
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(
+    () => readPanelLayout().sidebarCollapsed,
+  );
+  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH_PX);
+  const lastOpenSidebarWidthRef = useRef(DEFAULT_SIDEBAR_WIDTH_PX);
   const [settings, setSettings] = useState<UserSettings>(() => readUserSettings());
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [explanation, setExplanation] = useState<PipelineExplanation | null>(null);
@@ -307,11 +311,11 @@ export function App(): ReactElement {
       }
       if (event.altKey && (event.key === "a" || event.key === "A")) {
         event.preventDefault();
-        setIsPaletteOpen((open) => !open);
+        setIsSidebarCollapsed((collapsed) => !collapsed);
         return;
       }
       if (event.key === "Escape") {
-        setIsPaletteOpen((open) => (open ? false : open));
+        setIsSidebarCollapsed((collapsed) => (collapsed ? collapsed : true));
         setIsShortcutsOpen((open) => (open ? false : open));
         return;
       }
@@ -334,11 +338,10 @@ export function App(): ReactElement {
     };
   }, []);
 
-  // Opening a node's inspector should be one click: selecting a node expands
-  // the (default-collapsed) inspector. Deselecting does not auto-collapse.
+  // Selecting a node should surface its inspector in the right sidebar.
   useEffect(() => {
     if (selected !== null) {
-      setIsInspectorCollapsed(false);
+      setIsSidebarCollapsed(false);
     }
   }, [selected]);
   const fileHandleRef = useRef<FileSystemFileHandle | null>(null);
@@ -346,6 +349,7 @@ export function App(): ReactElement {
   const contentRef = useRef<HTMLDivElement | null>(null);
   const topPaneRef = useRef<HTMLDivElement | null>(null);
   const canvasPaneRef = useRef<HTMLDivElement | null>(null);
+  const canvasBodyRef = useRef<HTMLDivElement | null>(null);
 
   // Cells of every open file, keyed by notebook path (= file name). The active
   // file is live; inactive files come from their frozen snapshots. Drives both
@@ -428,12 +432,13 @@ export function App(): ReactElement {
           filesCollapsed: isFilesCollapsed,
           cellsCollapsed: isCellsCollapsed,
           inspectorCollapsed: isInspectorCollapsed,
+          sidebarCollapsed: isSidebarCollapsed,
         }),
       );
     } catch {
       // Quota / disabled storage -- silently keep working in-memory.
     }
-  }, [isFilesCollapsed, isCellsCollapsed, isInspectorCollapsed]);
+  }, [isFilesCollapsed, isCellsCollapsed, isInspectorCollapsed, isSidebarCollapsed]);
 
   // Persist Settings dialog state (engine URL override + theme) and apply the
   // theme to the <html> element. "system" tracks prefers-color-scheme.
@@ -1615,10 +1620,106 @@ export function App(): ReactElement {
     [clampMainRatio],
   );
 
+  const [sidebarDragState, setSidebarDragState] = useState<{
+    startCoord: number;
+    startWidth: number;
+  } | null>(null);
+
+  const clampSidebarWidth = useCallback((value: number): number => {
+    const host = canvasBodyRef.current ?? canvasPaneRef.current;
+    if (host === null) {
+      return Math.max(MIN_SIDEBAR_WIDTH_PX, value);
+    }
+    const maxWidth = Math.max(
+      host.clientWidth - MIN_CANVAS_BODY_WIDTH_PX - DIVIDER_SIZE_PX,
+      MIN_SIDEBAR_WIDTH_PX,
+    );
+    return clamp(value, MIN_SIDEBAR_WIDTH_PX, maxWidth);
+  }, []);
+
+  const toggleSidebar = useCallback((): void => {
+    setIsSidebarCollapsed((collapsed) => {
+      if (collapsed) {
+        setSidebarWidth(clampSidebarWidth(lastOpenSidebarWidthRef.current));
+        return false;
+      }
+      lastOpenSidebarWidthRef.current = sidebarWidth;
+      return true;
+    });
+  }, [clampSidebarWidth, sidebarWidth]);
+
+  useEffect(() => {
+    if (!isSidebarCollapsed) {
+      lastOpenSidebarWidthRef.current = sidebarWidth;
+    }
+  }, [isSidebarCollapsed, sidebarWidth]);
+
+  useEffect(() => {
+    if (sidebarDragState === null) {
+      return;
+    }
+
+    const handlePointerMove = (event: PointerEvent): void => {
+      const nextWidth = sidebarDragState.startWidth - (event.clientX - sidebarDragState.startCoord);
+      setSidebarWidth(clampSidebarWidth(nextWidth));
+    };
+
+    const handlePointerUp = (): void => {
+      setSidebarDragState(null);
+    };
+
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+
+    return () => {
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [clampSidebarWidth, sidebarDragState]);
+
+  useEffect(() => {
+    const handleResize = (): void => {
+      if (!isSidebarCollapsed) {
+        setSidebarWidth((current) => clampSidebarWidth(current));
+      }
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [clampSidebarWidth, isSidebarCollapsed]);
+
+  const handleSidebarDividerPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>): void => {
+      event.preventDefault();
+      setSidebarDragState({ startCoord: event.clientX, startWidth: sidebarWidth });
+    },
+    [sidebarWidth],
+  );
+
+  const handleSidebarDividerKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLButtonElement>): void => {
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setSidebarWidth((current) => clampSidebarWidth(current + KEYBOARD_RESIZE_STEP * 8));
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setSidebarWidth((current) => clampSidebarWidth(current - KEYBOARD_RESIZE_STEP * 8));
+      }
+    },
+    [clampSidebarWidth],
+  );
+
   const contentStyle = useMemo(
     () =>
       isInspectorCollapsed
-        ? { gridTemplateRows: "minmax(0, 1fr) 0px auto" }
+        ? { gridTemplateRows: "minmax(0, 1fr)" }
         : {
             gridTemplateRows: `minmax(${MIN_MAIN_HEIGHT_PX}px, ${mainRatio}%) ${DIVIDER_SIZE_PX}px minmax(${MIN_INSPECTOR_HEIGHT_PX}px, calc(${100 - mainRatio}% - ${DIVIDER_SIZE_PX}px))`,
           },
@@ -1635,6 +1736,16 @@ export function App(): ReactElement {
             gridTemplateColumns: `minmax(${MIN_NOTEBOOK_WIDTH_PX}px, ${notebookRatio}%) ${DIVIDER_SIZE_PX}px minmax(${MIN_CANVAS_BODY_WIDTH_PX}px, calc(${100 - notebookRatio}% - ${DIVIDER_SIZE_PX}px))`,
           },
     [isCellsCollapsed, notebookRatio],
+  );
+
+  const canvasBodyStyle = useMemo(
+    () =>
+      isSidebarCollapsed
+        ? { gridTemplateColumns: "minmax(0, 1fr)" }
+        : {
+            gridTemplateColumns: `minmax(0, 1fr) ${DIVIDER_SIZE_PX}px ${sidebarWidth}px`,
+          },
+    [isSidebarCollapsed, sidebarWidth],
   );
 
   return (
@@ -2018,182 +2129,179 @@ export function App(): ReactElement {
               <section className="flex min-h-0 min-w-0 flex-col">
                 <div
                   ref={canvasPaneRef}
-                  className="relative min-h-0 flex-1 overflow-hidden bg-background"
+                  className="relative grid min-h-0 flex-1 overflow-hidden bg-background"
+                  style={canvasBodyStyle}
                 >
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="absolute right-3 top-3 z-10 h-7 px-2 text-[11px] shadow-sm"
-                    onClick={() => {
-                      setIsPaletteOpen(true);
-                    }}
-                    title={t("app.panels.addNodeTitle")}
-                  >
-                    <Plus className="mr-1 size-3.5" />
-                    {t("app.panels.addNode")}
-                  </Button>
-                  <Canvas
-                    graph={graph}
-                    onNodeRename={handleRename}
-                    onNodeSelect={setSelected}
-                    onInputsChange={handleInputsChange}
-                    onOutputsChange={handleOutputsChange}
-                    onWireCreate={handleWireCreate}
-                    onWireDelete={handleWireDelete}
-                    variablesByNode={variablesByNode}
-                    runtimeByNode={runtimeByNode}
-                    timingByNode={timingByNode}
-                    metaByNode={metaByNode}
-                    unresolvedByNode={unresolvedByNode}
-                    runSummary={runSummary}
-                    onPaneDrop={handlePaneDrop}
-                    showMinimap={showMinimap}
-                    onToggleMinimap={() => {
-                      setShowMinimap((on) => !on);
-                    }}
-                  />
-                  {isPaletteOpen && (
-                    <PaletteDrawer
-                      nodes={paletteNodes}
-                      filteredNodes={filteredPaletteNodes}
-                      error={paletteError}
-                      search={paletteSearch}
-                      tagFilter={paletteTagFilter}
-                      onSearchChange={setPaletteSearch}
-                      onToggleTag={togglePaletteTag}
-                      onClearFilters={clearPaletteFilters}
-                      onPick={(manifest) => {
-                        handleAddNode(manifest);
-                        setIsPaletteOpen(false);
+                  <div ref={canvasBodyRef} className="relative min-h-0 min-w-0">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="absolute right-3 top-3 z-10 h-7 w-7 px-0 shadow-sm"
+                      onClick={toggleSidebar}
+                      title={
+                        isSidebarCollapsed
+                          ? t("app.panels.showSidebarTitle")
+                          : t("app.panels.hideSidebarTitle")
+                      }
+                      aria-label={
+                        isSidebarCollapsed
+                          ? t("app.panels.showSidebar")
+                          : t("app.panels.hideSidebar")
+                      }
+                    >
+                      {isSidebarCollapsed ? (
+                        <PanelRight className="size-3.5" />
+                      ) : (
+                        <PanelRightClose className="size-3.5" />
+                      )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="absolute right-3 bottom-3 z-10 h-7 w-7 px-0 shadow-sm"
+                      onClick={() => {
+                        setIsInspectorCollapsed((open) => !open);
                       }}
-                      onClose={() => {
-                        setIsPaletteOpen(false);
+                      title={
+                        isInspectorCollapsed
+                          ? t("app.panels.expandInspector")
+                          : t("app.panels.collapseInspector")
+                      }
+                      aria-label={
+                        isInspectorCollapsed
+                          ? t("app.panels.expandInspector")
+                          : t("app.panels.collapseInspector")
+                      }
+                    >
+                      {isInspectorCollapsed ? (
+                        <PanelBottom className="size-3.5" />
+                      ) : (
+                        <PanelBottomClose className="size-3.5" />
+                      )}
+                    </Button>
+                    <Canvas
+                      graph={graph}
+                      onNodeRename={handleRename}
+                      onNodeSelect={setSelected}
+                      onInputsChange={handleInputsChange}
+                      onOutputsChange={handleOutputsChange}
+                      onWireCreate={handleWireCreate}
+                      onWireDelete={handleWireDelete}
+                      variablesByNode={variablesByNode}
+                      runtimeByNode={runtimeByNode}
+                      timingByNode={timingByNode}
+                      metaByNode={metaByNode}
+                      unresolvedByNode={unresolvedByNode}
+                      runSummary={runSummary}
+                      onPaneDrop={handlePaneDrop}
+                      showMinimap={showMinimap}
+                      onToggleMinimap={() => {
+                        setShowMinimap((on) => !on);
                       }}
                     />
+                  </div>
+                  {!isSidebarCollapsed && (
+                    <>
+                      <PaneDivider
+                        orientation="vertical"
+                        label={t("app.panels.resizeCanvasSidebar")}
+                        onPointerDown={handleSidebarDividerPointerDown}
+                        onKeyDown={handleSidebarDividerKeyDown}
+                      />
+                      <CanvasSidebar
+                        selected={selected}
+                        selectedManifest={selectedManifest}
+                        configDraft={configDraft}
+                        isConfigDirty={isConfigDirty}
+                        isConfigSubmitting={isConfigSubmitting}
+                        isConfigBlocked={isConfigBlocked}
+                        configError={configError}
+                        configWarnings={configWarnings}
+                        configStatus={configStatus}
+                        onConfigChange={(key, value) => {
+                          setConfigDraft((current) => ({ ...current, [key]: value }));
+                        }}
+                        onApplyConfig={handleApplySelectedConfig}
+                        nodes={paletteNodes}
+                        filteredNodes={filteredPaletteNodes}
+                        error={paletteError}
+                        search={paletteSearch}
+                        tagFilter={paletteTagFilter}
+                        onSearchChange={setPaletteSearch}
+                        onToggleTag={togglePaletteTag}
+                        onClearFilters={clearPaletteFilters}
+                        onPick={(manifest) => {
+                          handleAddNode(manifest);
+                        }}
+                      />
+                    </>
                   )}
                 </div>
               </section>
             </div>
 
             {!isInspectorCollapsed && (
-              <PaneDivider
-                orientation="horizontal"
-                label={t("app.panels.resizeEditorInspector")}
-                onPointerDown={handleHorizontalDividerPointerDown}
-                onKeyDown={handleHorizontalDividerKeyDown}
-              />
-            )}
-
-            <aside className="flex min-h-0 flex-col bg-muted/30 text-xs">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsInspectorCollapsed((open) => !open);
-                }}
-                className="flex items-center gap-2 border-t px-4 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-muted/50"
-                aria-label={
-                  isInspectorCollapsed
-                    ? t("app.panels.expandInspector")
-                    : t("app.panels.collapseInspector")
-                }
-              >
-                {isInspectorCollapsed ? (
-                  <ChevronRight className="size-3" />
-                ) : (
-                  <ChevronDown className="size-3" />
-                )}
-                <span className="uppercase tracking-wider">{t("app.panels.inspector")}</span>
-                {selected !== null && (
-                  <span className="font-mono text-[10px]">· {selected.name}</span>
-                )}
-                {events.length > 0 && (
-                  <span className="font-mono text-[10px]">
-                    · {t("app.panels.events", { count: events.length })}
-                  </span>
-                )}
-              </button>
-              {!isInspectorCollapsed && (
-                <div
-                  className={cn(
-                    "grid min-h-0 flex-1 divide-x",
-                    DEV_MODE ? "grid-cols-3" : "grid-cols-2",
-                  )}
-                >
-                  <InspectorPanel
-                    title={t("app.panels.selected")}
-                    count={selected === null ? 0 : 1}
-                    empty={t("app.panels.selectedEmpty")}
-                  >
-                    {selected !== null &&
-                    selectedManifest !== null &&
-                    selectedManifest.configFields.length > 0 ? (
-                      <NodeConfigEditor
-                        manifest={selectedManifest}
-                        values={configDraft}
-                        isDirty={isConfigDirty}
-                        isSubmitting={isConfigSubmitting}
-                        isDisabled={isConfigBlocked}
-                        error={configError}
-                        warnings={configWarnings}
-                        status={configStatus}
-                        onChange={(key, value) => {
-                          setConfigDraft((current) => ({ ...current, [key]: value }));
-                        }}
-                        onSubmit={handleApplySelectedConfig}
-                      />
-                    ) : (
-                      <pre className="overflow-x-auto rounded-md border bg-background p-2 font-mono text-[11px]">
-                        {JSON.stringify(selected, null, 2)}
-                      </pre>
+              <>
+                <PaneDivider
+                  orientation="horizontal"
+                  label={t("app.panels.resizeEditorInspector")}
+                  onPointerDown={handleHorizontalDividerPointerDown}
+                  onKeyDown={handleHorizontalDividerKeyDown}
+                />
+                <aside className="flex min-h-0 flex-col bg-muted/30 text-xs">
+                  <div
+                    className={cn(
+                      "grid min-h-0 flex-1 divide-x",
+                      DEV_MODE ? "grid-cols-2" : "grid-cols-1",
                     )}
-                  </InspectorPanel>
-
-                  <InspectorPanel
-                    title={t("app.panels.executionEvents")}
-                    count={events.length}
-                    empty={t("app.panels.executionEventsEmpty")}
                   >
-                    <ul className="flex flex-col gap-1">
-                      {events.map((event, idx) => (
-                        <li
-                          key={`${event.type}-${String(idx)}`}
-                          className="rounded border bg-background px-2 py-1 font-mono text-[11px]"
-                        >
-                          {renderEvent(event)}
-                        </li>
-                      ))}
-                    </ul>
-                  </InspectorPanel>
-
-                  {DEV_MODE && (
                     <InspectorPanel
-                      title={t("app.panels.cellPatches")}
-                      count={patches.length}
-                      empty={t("app.panels.cellPatchesEmpty")}
+                      title={t("app.panels.executionEvents")}
+                      count={events.length}
+                      empty={t("app.panels.executionEventsEmpty")}
                     >
-                      {patches.map((patch, idx) => (
-                        <div
-                          key={`${patch.notebookPath}-${String(patch.cellIndex)}-${String(idx)}`}
-                          className="rounded border bg-background p-2"
-                        >
-                          <div className="mb-1 flex items-center gap-2 text-[10px] text-muted-foreground">
-                            <Badge variant="outline" className="font-mono uppercase">
-                              {patch.operation}
-                            </Badge>
-                            <Badge variant="secondary" className="font-mono">
-                              {t("app.panels.cellLabel", { index: patch.cellIndex })}
-                            </Badge>
-                          </div>
-                          <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[11px]">
-                            {patch.newSource ?? t("app.panels.deleted")}
-                          </pre>
-                        </div>
-                      ))}
+                      <ul className="flex flex-col gap-1">
+                        {events.map((event, idx) => (
+                          <li
+                            key={`${event.type}-${String(idx)}`}
+                            className="rounded border bg-background px-2 py-1 font-mono text-[11px]"
+                          >
+                            {renderEvent(event)}
+                          </li>
+                        ))}
+                      </ul>
                     </InspectorPanel>
-                  )}
-                </div>
-              )}
-            </aside>
+
+                    {DEV_MODE && (
+                      <InspectorPanel
+                        title={t("app.panels.cellPatches")}
+                        count={patches.length}
+                        empty={t("app.panels.cellPatchesEmpty")}
+                      >
+                        {patches.map((patch, idx) => (
+                          <div
+                            key={`${patch.notebookPath}-${String(patch.cellIndex)}-${String(idx)}`}
+                            className="rounded border bg-background p-2"
+                          >
+                            <div className="mb-1 flex items-center gap-2 text-[10px] text-muted-foreground">
+                              <Badge variant="outline" className="font-mono uppercase">
+                                {patch.operation}
+                              </Badge>
+                              <Badge variant="secondary" className="font-mono">
+                                {t("app.panels.cellLabel", { index: patch.cellIndex })}
+                              </Badge>
+                            </div>
+                            <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[11px]">
+                              {patch.newSource ?? t("app.panels.deleted")}
+                            </pre>
+                          </div>
+                        ))}
+                      </InspectorPanel>
+                    )}
+                  </div>
+                </aside>
+              </>
+            )}
           </div>
         </div>
       </div>

@@ -377,6 +377,12 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
   }, [collapseSidebar, isSidebarCollapsed, openSidebar]);
 
   useEffect(() => {
+    if (selected !== null) {
+      openSidebar();
+    }
+  }, [selected, openSidebar]);
+
+  useEffect(() => {
     if (!isSidebarCollapsed) {
       lastOpenSidebarWidthRef.current = sidebarWidth;
     }
@@ -469,7 +475,7 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
         </span>
         <div style={headerActionsStyle}>
           <button type="button" style={secondaryButtonStyle} onClick={toggleSidebar}>
-            {isSidebarCollapsed ? "Show palette" : "Hide palette"}
+            {isSidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
           </button>
           <button type="button" style={buttonStyle} onClick={handleRun} disabled={isRunning}>
             {isRunning ? "Running…" : "Run pipeline"}
@@ -492,7 +498,7 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
         {!isSidebarCollapsed && (
           <button
             type="button"
-            aria-label="Resize palette sidebar"
+            aria-label="Resize canvas sidebar"
             style={dividerStyle}
             onPointerDown={handleSidebarDividerPointerDown}
             onKeyDown={handleSidebarDividerKeyDown}
@@ -503,77 +509,81 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
 
         {!isSidebarCollapsed && (
           <aside style={sidebarStyle}>
-            <div style={sidebarSectionHeaderStyle}>
-              <h3 style={sectionTitleResetStyle}>Palette</h3>
-              <span style={countBadgeStyle}>{paletteNodes.length}</span>
+            <div style={sidebarSelectedSectionStyle}>
+              <h3 style={sectionTitleStyle}>Selected</h3>
+              {selected === null ? (
+                <p style={mutedStyle}>Click a node.</p>
+              ) : selectedManifest !== null && selectedManifest.configFields.length > 0 ? (
+                <NodeConfigEditor
+                  manifest={selectedManifest}
+                  values={configDraft}
+                  isDirty={isConfigDirty}
+                  isSubmitting={isConfigSubmitting}
+                  isDisabled={isConfigBlocked}
+                  error={configError}
+                  warnings={configWarnings}
+                  status={configStatus}
+                  onChange={(key, value) => {
+                    setConfigDraft((current) => ({ ...current, [key]: value }));
+                  }}
+                  onSubmit={handleApplySelectedConfig}
+                />
+              ) : (
+                <pre style={preStyle}>{JSON.stringify(selected, null, 2)}</pre>
+              )}
             </div>
-            {paletteError !== null ? (
-              <p style={mutedStyle}>{paletteError}</p>
-            ) : paletteNodes.length === 0 ? (
-              <p style={mutedStyle}>Loading node registry…</p>
-            ) : (
-              <div style={paletteStyle}>
-                {groupPalette(paletteNodes).map(([tag, nodes]) => (
-                  <section key={tag}>
-                    <div style={paletteGroupTitleStyle}>{tag}</div>
-                    <div style={paletteGroupListStyle}>
-                      {nodes.map((manifest) => (
-                        <button
-                          key={manifest.id}
-                          type="button"
-                          style={paletteItemStyle}
-                          onClick={() => {
-                            handleAddNode(manifest);
-                          }}
-                        >
-                          <div style={paletteItemHeaderStyle}>
-                            <span style={{ fontWeight: 600 }}>{manifest.name}</span>
-                            <span style={tagBadgeStyle}>{manifest.tag}</span>
-                          </div>
-                          <div style={paletteItemMetaStyle}>{manifest.id}</div>
-                          {manifest.description !== "" && (
-                            <div style={paletteItemDescriptionStyle}>{manifest.description}</div>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-                ))}
+            <div style={sidebarScrollSectionStyle}>
+              <div style={sidebarSectionHeaderStyle}>
+                <h3 style={sectionTitleResetStyle}>Palette</h3>
+                <span style={countBadgeStyle}>{paletteNodes.length}</span>
               </div>
-            )}
-            <h3 style={sectionTitleStyle}>Selected</h3>
-            {selected === null ? (
-              <p style={mutedStyle}>Click a node.</p>
-            ) : selectedManifest !== null && selectedManifest.configFields.length > 0 ? (
-              <NodeConfigEditor
-                manifest={selectedManifest}
-                values={configDraft}
-                isDirty={isConfigDirty}
-                isSubmitting={isConfigSubmitting}
-                isDisabled={isConfigBlocked}
-                error={configError}
-                warnings={configWarnings}
-                status={configStatus}
-                onChange={(key, value) => {
-                  setConfigDraft((current) => ({ ...current, [key]: value }));
-                }}
-                onSubmit={handleApplySelectedConfig}
-              />
-            ) : (
-              <pre style={preStyle}>{JSON.stringify(selected, null, 2)}</pre>
-            )}
-            <h3 style={sectionTitleStyle}>Execution ({events.length})</h3>
-            {events.length === 0 ? (
-              <p style={mutedStyle}>Click Run to dispatch this pipeline.</p>
-            ) : (
-              <ul style={eventListStyle}>
-                {events.map((event, idx) => (
-                  <li key={`${event.type}-${String(idx)}`} style={eventItemStyle}>
-                    {renderEvent(event)}
-                  </li>
-                ))}
-              </ul>
-            )}
+              {paletteError !== null ? (
+                <p style={mutedStyle}>{paletteError}</p>
+              ) : paletteNodes.length === 0 ? (
+                <p style={mutedStyle}>Loading node registry…</p>
+              ) : (
+                <div style={paletteStyle}>
+                  {groupPalette(paletteNodes).map(([tag, nodes]) => (
+                    <section key={tag}>
+                      <div style={paletteGroupTitleStyle}>{tag}</div>
+                      <div style={paletteGroupListStyle}>
+                        {nodes.map((manifest) => (
+                          <button
+                            key={manifest.id}
+                            type="button"
+                            style={paletteItemStyle}
+                            onClick={() => {
+                              handleAddNode(manifest);
+                            }}
+                          >
+                            <div style={paletteItemHeaderStyle}>
+                              <span style={{ fontWeight: 600 }}>{manifest.name}</span>
+                              <span style={tagBadgeStyle}>{manifest.tag}</span>
+                            </div>
+                            <div style={paletteItemMetaStyle}>{manifest.id}</div>
+                            {manifest.description !== "" && (
+                              <div style={paletteItemDescriptionStyle}>{manifest.description}</div>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              )}
+              <h3 style={sectionTitleStyle}>Execution ({events.length})</h3>
+              {events.length === 0 ? (
+                <p style={mutedStyle}>Click Run to dispatch this pipeline.</p>
+              ) : (
+                <ul style={eventListStyle}>
+                  {events.map((event, idx) => (
+                    <li key={`${event.type}-${String(idx)}`} style={eventItemStyle}>
+                      {renderEvent(event)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </aside>
         )}
       </div>
@@ -714,11 +724,29 @@ const bodyStyle = { display: "grid", flex: 1, minHeight: 0 } as const;
 const canvasStyle = { position: "relative", minWidth: 0 } as const;
 
 const sidebarStyle = {
+  display: "flex",
+  flexDirection: "column",
   minWidth: 0,
-  padding: 10,
-  overflow: "auto",
+  minHeight: 0,
   fontSize: 11,
   background: "var(--jp-layout-color1, #ffffff)",
+  borderLeft: "1px solid var(--jp-border-color2, #d1d5db)",
+} as const;
+
+const sidebarSelectedSectionStyle = {
+  flexShrink: 0,
+  maxHeight: "42%",
+  minHeight: 112,
+  overflow: "auto",
+  padding: 10,
+  borderBottom: "1px solid var(--jp-border-color2, #d1d5db)",
+} as const;
+
+const sidebarScrollSectionStyle = {
+  flex: 1,
+  minHeight: 0,
+  overflow: "auto",
+  padding: 10,
 } as const;
 
 const dividerStyle = {

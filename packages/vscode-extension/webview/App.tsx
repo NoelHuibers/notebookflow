@@ -437,6 +437,12 @@ export function App(): ReactElement {
   }, [collapseSidebar, isSidebarCollapsed, openSidebar]);
 
   useEffect(() => {
+    if (selected !== null) {
+      openSidebar();
+    }
+  }, [selected, openSidebar]);
+
+  useEffect(() => {
     if (!isSidebarCollapsed) {
       lastOpenSidebarWidthRef.current = sidebarWidth;
     }
@@ -596,7 +602,7 @@ export function App(): ReactElement {
             onClick={toggleSidebar}
             className="rounded border border-border bg-background px-3 py-1 disabled:opacity-50"
           >
-            {isSidebarCollapsed ? "Show palette" : "Hide palette"}
+            {isSidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
           </button>
           <button
             type="button"
@@ -624,7 +630,7 @@ export function App(): ReactElement {
         {!isSidebarCollapsed && (
           <button
             type="button"
-            aria-label="Resize palette sidebar"
+            aria-label="Resize canvas sidebar"
             onPointerDown={handleSidebarDividerPointerDown}
             onKeyDown={handleSidebarDividerKeyDown}
             className="group flex w-[10px] cursor-col-resize items-center justify-center border-0 bg-muted/70 p-0"
@@ -634,105 +640,109 @@ export function App(): ReactElement {
         )}
 
         {!isSidebarCollapsed && (
-          <aside className="min-h-0 overflow-auto border-l bg-card p-3 text-xs">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Palette
+          <aside className="flex min-h-0 flex-col overflow-hidden border-l bg-card text-xs">
+            <div className="max-h-[min(280px,42%)] min-h-[7rem] shrink-0 overflow-auto border-b p-3">
+              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Selected
               </h2>
-              <span className="rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
-                {paletteNodes.length}
-              </span>
+              {selected === null ? (
+                <p className="text-muted-foreground">Click a node to inspect.</p>
+              ) : selectedManifest !== null && selectedManifest.configFields.length > 0 ? (
+                <NodeConfigEditor
+                  manifest={selectedManifest}
+                  values={configDraft}
+                  isDirty={isConfigDirty}
+                  isSubmitting={isConfigSubmitting}
+                  isDisabled={isConfigBlocked}
+                  error={configError}
+                  warnings={configWarnings}
+                  status={configStatus}
+                  onChange={(key, value) => {
+                    setConfigDraft((current) => ({ ...current, [key]: value }));
+                  }}
+                  onSubmit={handleApplySelectedConfig}
+                />
+              ) : (
+                <pre className="overflow-auto rounded border bg-background p-2 font-mono text-[11px]">
+                  {JSON.stringify(selected, null, 2)}
+                </pre>
+              )}
             </div>
-            {paletteError !== null ? (
-              <p className="text-muted-foreground">{paletteError}</p>
-            ) : paletteNodes.length === 0 ? (
-              <p className="text-muted-foreground">Loading node registry…</p>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {groupPalette(paletteNodes).map(([tag, nodes]) => (
-                  <section key={tag} className="flex flex-col gap-2">
-                    <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      {tag}
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      {nodes.map((manifest) => (
-                        <button
-                          key={manifest.id}
-                          type="button"
-                          onClick={() => {
-                            handleAddNode(manifest);
-                          }}
-                          className="rounded border bg-background px-3 py-2 text-left transition-colors hover:bg-muted"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-sm font-medium">{manifest.name}</span>
-                            <span className="rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
-                              {manifest.tag}
-                            </span>
-                          </div>
-                          <div className="mt-1 font-mono text-[10px] text-muted-foreground">
-                            {manifest.id}
-                          </div>
-                          {manifest.description !== "" && (
-                            <p className="mt-2 whitespace-pre-wrap text-[11px] text-muted-foreground">
-                              {manifest.description}
-                            </p>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-                ))}
+
+            <div className="min-h-0 flex-1 overflow-auto p-3">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Palette
+                </h2>
+                <span className="rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                  {paletteNodes.length}
+                </span>
               </div>
-            )}
+              {paletteError !== null ? (
+                <p className="text-muted-foreground">{paletteError}</p>
+              ) : paletteNodes.length === 0 ? (
+                <p className="text-muted-foreground">Loading node registry…</p>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {groupPalette(paletteNodes).map(([tag, nodes]) => (
+                    <section key={tag} className="flex flex-col gap-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        {tag}
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        {nodes.map((manifest) => (
+                          <button
+                            key={manifest.id}
+                            type="button"
+                            onClick={() => {
+                              handleAddNode(manifest);
+                            }}
+                            className="rounded border bg-background px-3 py-2 text-left transition-colors hover:bg-muted"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-sm font-medium">{manifest.name}</span>
+                              <span className="rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                                {manifest.tag}
+                              </span>
+                            </div>
+                            <div className="mt-1 font-mono text-[10px] text-muted-foreground">
+                              {manifest.id}
+                            </div>
+                            {manifest.description !== "" && (
+                              <p className="mt-2 whitespace-pre-wrap text-[11px] text-muted-foreground">
+                                {manifest.description}
+                              </p>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              )}
 
-            <h2 className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Selected
-            </h2>
-            {selected === null ? (
-              <p className="text-muted-foreground">Click a node to inspect.</p>
-            ) : selectedManifest !== null && selectedManifest.configFields.length > 0 ? (
-              <NodeConfigEditor
-                manifest={selectedManifest}
-                values={configDraft}
-                isDirty={isConfigDirty}
-                isSubmitting={isConfigSubmitting}
-                isDisabled={isConfigBlocked}
-                error={configError}
-                warnings={configWarnings}
-                status={configStatus}
-                onChange={(key, value) => {
-                  setConfigDraft((current) => ({ ...current, [key]: value }));
-                }}
-                onSubmit={handleApplySelectedConfig}
-              />
-            ) : (
-              <pre className="overflow-auto rounded border bg-background p-2 font-mono text-[11px]">
-                {JSON.stringify(selected, null, 2)}
-              </pre>
-            )}
-
-            <h2 className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Execution events ({events.length})
-            </h2>
-            {events.length === 0 ? (
-              <p className="text-muted-foreground">
-                {engineUrl === null
-                  ? "Start the engine to run pipelines."
-                  : "Click Run to dispatch this pipeline."}
-              </p>
-            ) : (
-              <ul className="flex flex-col gap-1">
-                {events.map((event, idx) => (
-                  <li
-                    key={`${event.type}-${String(idx)}`}
-                    className="rounded border bg-background p-2 font-mono text-[11px]"
-                  >
-                    {renderEvent(event)}
-                  </li>
-                ))}
-              </ul>
-            )}
+              <h2 className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Execution events ({events.length})
+              </h2>
+              {events.length === 0 ? (
+                <p className="text-muted-foreground">
+                  {engineUrl === null
+                    ? "Start the engine to run pipelines."
+                    : "Click Run to dispatch this pipeline."}
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-1">
+                  {events.map((event, idx) => (
+                    <li
+                      key={`${event.type}-${String(idx)}`}
+                      className="rounded border bg-background p-2 font-mono text-[11px]"
+                    >
+                      {renderEvent(event)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </aside>
         )}
       </div>

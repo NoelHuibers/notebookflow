@@ -36,8 +36,11 @@ export const en = {
   },
   panels: {
     showCode: "Show code",
-    addNode: "Add node",
-    addNodeTitle: "Add a node — opens the palette (Alt+A)",
+    sidebar: "Sidebar",
+    showSidebar: "Show sidebar",
+    hideSidebar: "Hide sidebar",
+    showSidebarTitle: "Show sidebar — selected node and palette (Alt+A)",
+    hideSidebarTitle: "Hide sidebar",
     expandInspector: "Expand inspector",
     collapseInspector: "Collapse inspector",
     inspector: "Inspector",
@@ -53,6 +56,7 @@ export const en = {
     deleted: "(deleted)",
     resizeNotebookCanvas: "Resize notebook and canvas panes",
     resizeEditorInspector: "Resize editor and inspector panes",
+    resizeCanvasSidebar: "Resize canvas and sidebar",
   },
   save: {
     pickerDescription: "Jupyter notebook",
@@ -119,8 +123,11 @@ export const de: typeof en = {
   },
   panels: {
     showCode: "Code anzeigen",
-    addNode: "Knoten hinzufügen",
-    addNodeTitle: "Einen Knoten hinzufügen — öffnet die Palette (Alt+A)",
+    sidebar: "Seitenleiste",
+    showSidebar: "Seitenleiste anzeigen",
+    hideSidebar: "Seitenleiste ausblenden",
+    showSidebarTitle: "Seitenleiste anzeigen — Auswahl und Palette (Alt+A)",
+    hideSidebarTitle: "Seitenleiste ausblenden",
     expandInspector: "Inspector ausklappen",
     collapseInspector: "Inspector einklappen",
     inspector: "Inspector",
@@ -136,6 +143,7 @@ export const de: typeof en = {
     deleted: "(gelöscht)",
     resizeNotebookCanvas: "Notebook- und Canvas-Bereiche anpassen",
     resizeEditorInspector: "Editor- und Inspector-Bereiche anpassen",
+    resizeCanvasSidebar: "Canvas- und Seitenleisten-Bereich anpassen",
   },
   save: {
     pickerDescription: "Jupyter-Notebook",

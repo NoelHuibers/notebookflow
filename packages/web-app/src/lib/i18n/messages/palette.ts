@@ -1,4 +1,4 @@
-// `palette` namespace — the right-side node palette drawer (PaletteDrawer.tsx).
+// `palette` namespace — node palette section in the canvas sidebar.
 export const en = {
   title: "Palette",
   close: "Close palette",
