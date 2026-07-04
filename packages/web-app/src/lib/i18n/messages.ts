@@ -8,6 +8,7 @@
 
 import * as app from "./messages/app";
 import * as ask from "./messages/ask";
+import * as canvas from "./messages/canvas";
 import * as cells from "./messages/cells";
 import * as cloud from "./messages/cloud";
 import * as compose from "./messages/compose";
@@ -51,6 +52,7 @@ export const en = {
     body: "That page doesn't exist or has moved.",
   },
   app: app.en,
+  canvas: canvas.en,
   landing: landing.en,
   settings: settings.en,
   shortcuts: shortcuts.en,
@@ -98,6 +100,7 @@ export const de: Messages = {
     body: "Diese Seite existiert nicht oder wurde verschoben.",
   },
   app: app.de,
+  canvas: canvas.de,
   landing: landing.de,
   settings: settings.de,
   shortcuts: shortcuts.de,

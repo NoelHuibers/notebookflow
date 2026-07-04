@@ -1,5 +1,7 @@
 import type { CSSProperties, ReactElement } from "react";
 
+import type { NodeConfigLabels } from "../labels";
+import { mergeNodeConfigLabels } from "../labels";
 import type { NodeManifestDef } from "../node-config";
 
 export interface NodeConfigEditorProps {
@@ -13,6 +15,8 @@ export interface NodeConfigEditorProps {
   status?: string | null;
   onChange: (key: string, value: string) => void;
   onSubmit: () => void;
+  /** Host-provided translations for this panel (rendered outside <Canvas>). */
+  labels?: Partial<NodeConfigLabels>;
 }
 
 const PANEL_BG = "var(--notebookflow-config-bg, var(--card, #ffffff))";
@@ -36,18 +40,18 @@ export function NodeConfigEditor(props: NodeConfigEditorProps): ReactElement {
     status = null,
     onChange,
     onSubmit,
+    labels,
   } = props;
 
-  const buttonLabel = manifest.generationMode === "llm" ? "Generate node" : "Apply config";
+  const l = mergeNodeConfigLabels(labels);
+  const buttonLabel = manifest.generationMode === "llm" ? l.generateNode : l.applyConfig;
 
   return (
     <section style={styles.panel}>
       <div style={styles.headerRow}>
         <div>
-          <div style={styles.title}>Config</div>
-          <div style={styles.subtitle}>
-            Managed separately from the node's input and output ports.
-          </div>
+          <div style={styles.title}>{l.title}</div>
+          <div style={styles.subtitle}>{l.subtitle}</div>
         </div>
         <span style={styles.modeBadge}>{manifest.generationMode}</span>
       </div>
@@ -125,7 +129,7 @@ export function NodeConfigEditor(props: NodeConfigEditorProps): ReactElement {
             ...(isDisabled || isSubmitting ? styles.submitButtonDisabled : {}),
           }}
         >
-          {isSubmitting ? "Updating…" : isDirty ? buttonLabel : "Up to date"}
+          {isSubmitting ? l.updating : isDirty ? buttonLabel : l.upToDate}
         </button>
         {status !== null && <div style={styles.status}>{status}</div>}
         {error !== null && <div style={styles.error}>{error}</div>}

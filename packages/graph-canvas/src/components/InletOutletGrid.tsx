@@ -12,6 +12,7 @@ import type { CSSProperties, ReactElement, ReactNode } from "react";
 import { useState } from "react";
 import { Handle, Position } from "reactflow";
 
+import { useCanvasLabels } from "../labels";
 import type { NodeTag } from "../types";
 import { PortComboboxFloating } from "./PortComboboxFloating";
 import {
@@ -141,6 +142,7 @@ function SidePortGrid(props: InletOutletGridProps): ReactElement | null {
     onOutputsChange,
   } = props;
 
+  const labels = useCanvasLabels();
   const [editing, setEditing] = useState<EditingTarget | null>(null);
 
   if (!showInlets && !showOutlets) {
@@ -172,10 +174,14 @@ function SidePortGrid(props: InletOutletGridProps): ReactElement | null {
     <div style={sideGridStyles.grid}>
       <div style={{ ...sideGridStyles.headerRow, gridTemplateColumns: gridColumns }}>
         {showInlets && (
-          <span style={{ ...sideGridStyles.headerCell, textAlign: "left" }}>Input</span>
+          <span style={{ ...sideGridStyles.headerCell, textAlign: "left" }}>
+            {labels.portInput}
+          </span>
         )}
         {showOutlets && (
-          <span style={{ ...sideGridStyles.headerCell, textAlign: "right" }}>Output</span>
+          <span style={{ ...sideGridStyles.headerCell, textAlign: "right" }}>
+            {labels.portOutput}
+          </span>
         )}
       </div>
       {Array.from({ length: rowCount }, (_, rowIdx) => {
@@ -207,8 +213,8 @@ function SidePortGrid(props: InletOutletGridProps): ReactElement | null {
                       <button
                         type="button"
                         className="nodrag nopan"
-                        aria-label="Add input"
-                        title="Add input"
+                        aria-label={labels.addInput}
+                        title={labels.addInput}
                         onClick={(event) => {
                           setEditing({ kind: "input", index: -1, anchorEl: event.currentTarget });
                         }}
@@ -256,8 +262,8 @@ function SidePortGrid(props: InletOutletGridProps): ReactElement | null {
                     <button
                       type="button"
                       className="nodrag nopan"
-                      aria-label="Add output"
-                      title="Add output"
+                      aria-label={labels.addOutput}
+                      title={labels.addOutput}
                       onClick={(event) => {
                         setEditing({ kind: "output", index: -1, anchorEl: event.currentTarget });
                       }}
@@ -363,6 +369,7 @@ function StackedPortSection(props: InletOutletGridProps): ReactElement | null {
     onOutputsChange,
   } = props;
 
+  const labels = useCanvasLabels();
   const [editing, setEditing] = useState<EditingTarget | null>(null);
   const isTop = edge === "top";
   const isBottom = edge === "bottom";
@@ -434,8 +441,8 @@ function StackedPortSection(props: InletOutletGridProps): ReactElement | null {
                     <button
                       type="button"
                       className="nodrag nopan"
-                      aria-label="Add input"
-                      title="Add input"
+                      aria-label={labels.addInput}
+                      title={labels.addInput}
                       onClick={(event) => {
                         setEditing({ kind: "input", index: -1, anchorEl: event.currentTarget });
                       }}
@@ -518,8 +525,8 @@ function StackedPortSection(props: InletOutletGridProps): ReactElement | null {
                   <button
                     type="button"
                     className="nodrag nopan"
-                    aria-label="Add output"
-                    title="Add output"
+                    aria-label={labels.addOutput}
+                    title={labels.addOutput}
                     onClick={(event) => {
                       setEditing({ kind: "output", index: -1, anchorEl: event.currentTarget });
                     }}

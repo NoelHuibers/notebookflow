@@ -9,6 +9,7 @@ import { Plus, X } from "lucide-react";
 import type { CSSProperties, ReactElement } from "react";
 import { useState } from "react";
 
+import { useCanvasLabels } from "../labels";
 import { PortComboboxFloating } from "./PortComboboxFloating";
 import { isValidPort, type PortKind, portChipStyles } from "./portEditorShared";
 
@@ -28,6 +29,7 @@ interface EditingTarget {
 
 export function PortEditor(props: PortEditorProps): ReactElement {
   const { kind, ports, suggestions, onChange } = props;
+  const labels = useCanvasLabels();
   const [editing, setEditing] = useState<EditingTarget | null>(null);
   const label = kind === "input" ? "in" : "out";
 
@@ -72,7 +74,7 @@ export function PortEditor(props: PortEditorProps): ReactElement {
             <button
               type="button"
               className="nodrag nopan"
-              title="Click to edit"
+              title={labels.portClickToEdit}
               onClick={(event) => {
                 setEditing({ index: idx, anchorEl: event.currentTarget });
               }}

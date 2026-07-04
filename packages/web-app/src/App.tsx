@@ -11,6 +11,7 @@
  */
 
 import type {
+  CanvasLabels,
   GraphModel,
   NodeManifestDef,
   NodeModel,
@@ -22,6 +23,7 @@ import {
   addManifestNode,
   Canvas,
   configValuesEqual,
+  defaultCanvasLabels,
   hasMissingRequiredConfig,
   readNotebookflowMetadata,
   resolveNodeConfig,
@@ -155,6 +157,15 @@ function makeFileId(): string {
 
 export function App(): ReactElement {
   const { t } = useI18n();
+  // Translate the shared graph-canvas labels from the `canvas` namespace. Keys
+  // mirror graph-canvas's CanvasLabels, so iterate the defaults and look each up.
+  const canvasLabels = useMemo<CanvasLabels>(() => {
+    const out = {} as CanvasLabels;
+    for (const key of Object.keys(defaultCanvasLabels) as (keyof CanvasLabels)[]) {
+      out[key] = t(`canvas.${key}`);
+    }
+    return out;
+  }, [t]);
   const [notebook, setNotebook] = useState<LoadedNotebook>(() => bootstrapFromFixture());
   // Multi-file workspace. The active file's live content is `notebook`; other
   // open files freeze into snapshotsRef until switched back to.
@@ -2194,6 +2205,7 @@ export function App(): ReactElement {
                       onToggleMinimap={() => {
                         setShowMinimap((on) => !on);
                       }}
+                      labels={canvasLabels}
                     />
                   </div>
                   {!isSidebarCollapsed && (
