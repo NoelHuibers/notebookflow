@@ -23,6 +23,12 @@ export {
   setPaletteDragData,
 } from "./components/paletteDragData";
 export { Wire } from "./components/Wire";
+export {
+  type CanvasLabels,
+  defaultCanvasLabels,
+  defaultNodeConfigLabels,
+  type NodeConfigLabels,
+} from "./labels";
 export { type RenderManifestTemplateParams, renderManifestTemplate } from "./manifestTemplate";
 export type {
   NodeConfigFieldDef,

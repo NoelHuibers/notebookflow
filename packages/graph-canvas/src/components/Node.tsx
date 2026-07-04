@@ -17,6 +17,7 @@ import type { ChangeEvent, CSSProperties, KeyboardEvent, ReactElement } from "re
 import { useEffect, useRef, useState } from "react";
 import type { NodeProps } from "reactflow";
 
+import { useCanvasLabels } from "../labels";
 import type { NodeModel, NodeTag, RuntimeState } from "../types";
 import {
   InletOutletGrid,
@@ -119,6 +120,22 @@ interface NotebookNodeStyles {
 
 export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
   const { data, selected } = props;
+  const labels = useCanvasLabels();
+  const tagLabels = {
+    input: labels.tagInput,
+    transform: labels.tagTransform,
+    output: labels.tagOutput,
+    ai: labels.tagAi,
+    io: labels.tagIo,
+  };
+  const statusLabels = {
+    idle: labels.statusIdle,
+    queued: labels.statusQueued,
+    running: labels.statusRunning,
+    ok: labels.statusOk,
+    error: labels.statusError,
+    skipped: labels.statusSkipped,
+  };
   const [isEditing, setIsEditing] = useState(false);
   const [draftName, setDraftName] = useState(data.name);
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -255,7 +272,9 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
     }
   };
 
-  const runtime = RUNTIME_BADGES[data.runtimeState ?? "idle"];
+  const runtimeState = data.runtimeState ?? "idle";
+  const runtime = RUNTIME_BADGES[runtimeState];
+  const statusLabel = statusLabels[runtimeState];
   const durationLabel = formatDuration(data.runtimeDurationMs);
 
   const header = (
@@ -263,8 +282,8 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
       <div style={styles.titleRow}>
         <span
           role="img"
-          aria-label={`Status: ${runtime.label}`}
-          title={`Status: ${runtime.label}`}
+          aria-label={`Status: ${statusLabel}`}
+          title={`Status: ${statusLabel}`}
           style={{
             display: "inline-block",
             width: 8,
@@ -283,7 +302,7 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
         {isEditing ? (
           <input
             ref={renameInputRef}
-            aria-label="Node name"
+            aria-label={labels.nodeNameAria}
             className="nodrag nopan"
             value={draftName}
             onChange={handleDraftChange}
@@ -297,7 +316,7 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
               type="button"
               className="nodrag nopan"
               onDoubleClick={openRename}
-              title="Double-click to rename"
+              title={labels.renameHint}
               style={styles.renameButton}
             >
               {data.name}
@@ -306,8 +325,8 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
               type="button"
               className="nodrag nopan"
               onClick={openRename}
-              aria-label="Rename node"
-              title="Rename node"
+              aria-label={labels.renameNode}
+              title={labels.renameNode}
               style={styles.renameAction}
             >
               <Pencil aria-hidden="true" size={12} strokeWidth={2} />
@@ -315,7 +334,7 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
           </>
         )}
       </div>
-      <span style={styles.tagChip}>{data.tag}</span>
+      <span style={styles.tagChip}>{tagLabels[data.tag]}</span>
     </div>
   );
 
@@ -323,7 +342,7 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
     <div style={styles.meta}>
       {metaLabel !== null && (
         <div
-          title="Input file · output rows"
+          title={labels.nodeMetaTitle}
           style={{ fontSize: 10, color: NODE_MUTED, fontVariantNumeric: "tabular-nums" }}
         >
           {metaLabel}

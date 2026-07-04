@@ -29,6 +29,8 @@ import {
   useUpdateNodeInternals,
 } from "reactflow";
 
+import type { CanvasLabels } from "../labels";
+import { CanvasLabelsProvider, mergeCanvasLabels, useCanvasLabels } from "../labels";
 import type { GraphModel, NodeModel, NodeTag, RunSummary, RuntimeState, WireModel } from "../types";
 import type { PortPlacement } from "./InletOutletGrid";
 import type { InsertSlotData } from "./InsertSlotNode";
@@ -209,6 +211,8 @@ export interface CanvasProps {
   showMinimap?: boolean;
   /** Toggle the minimap from the canvas control cluster. */
   onToggleMinimap?: () => void;
+  /** Host-provided translations for canvas-internal strings. */
+  labels?: Partial<CanvasLabels>;
 }
 
 export function Canvas(props: CanvasProps): ReactElement {
@@ -240,7 +244,10 @@ function CanvasInner(props: CanvasProps): ReactElement {
     onPaneDrop,
     showMinimap,
     onToggleMinimap,
+    labels,
   } = props;
+
+  const mergedLabels = mergeCanvasLabels(labels);
 
   const [layout, setLayout] = useState<CanvasLayout>("manual");
   const [paletteDragActive, setPaletteDragActive] = useState(false);
@@ -440,78 +447,81 @@ function CanvasInner(props: CanvasProps): ReactElement {
   );
 
   return (
-    <InsertDropContext.Provider value={insertDropContextValue}>
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: drop target for the palette drag-and-drop flow; keyboard equivalent is the palette's click-to-add */}
-      <div
-        style={{ width: "100%", height: "100%" }}
-        onDragEnter={handleWrapperDragEnter}
-        onDragLeave={handleWrapperDragLeave}
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
-      >
-        <style>{`.notebookflow-canvas .react-flow__handle { border: none; outline: none; box-shadow: none; }`}</style>
-        <ReactFlow
-          nodes={nodes}
-          edges={rfEdges}
-          onNodesChange={onNodesChange}
-          nodeTypes={NODE_TYPES}
-          edgeTypes={EDGE_TYPES}
-          defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
-          className="notebookflow-canvas"
-          style={FLOW_STYLE}
-          onConnect={handleConnect}
-          isValidConnection={isValidConnection}
-          onNodeClick={handleNodeClick}
-          onPaneClick={handlePaneClick}
-          onEdgesDelete={handleEdgesDelete}
-          nodesDraggable={false}
-          fitView
-          proOptions={{ hideAttribution: true }}
+    <CanvasLabelsProvider value={mergedLabels}>
+      <InsertDropContext.Provider value={insertDropContextValue}>
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: drop target for the palette drag-and-drop flow; keyboard equivalent is the palette's click-to-add */}
+        <div
+          style={{ width: "100%", height: "100%" }}
+          onDragEnter={handleWrapperDragEnter}
+          onDragLeave={handleWrapperDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
         >
-          <MeasuredGroupLayout portPlacement={portPlacement} />
-          <Background />
-          <Controls>
-            <ControlButton
-              onClick={onToggleMinimap}
-              title={showMinimap === true ? "Hide minimap (M)" : "Show minimap (M)"}
-              aria-label="Toggle minimap"
-            >
-              <MapIcon size={14} />
-            </ControlButton>
-            <ControlButton
-              onClick={() => {
-                setLayout((current) => (current === "manual" ? "dagre" : "manual"));
-              }}
-              title={`Layout: ${layout} — click to switch to ${
-                layout === "manual" ? "horizontal" : "vertical"
-              }`}
-              aria-label="Toggle layout"
-            >
-              <Network size={14} />
-            </ControlButton>
-          </Controls>
-          {showMinimap === true && (
-            <MiniMap
-              nodeColor={miniMapNodeColor}
-              nodeStrokeWidth={2}
-              pannable
-              zoomable
-              position="bottom-right"
-              ariaLabel="Canvas minimap"
-              className="!rounded-md !border !bg-card"
-            />
-          )}
-          <Panel position="top-left">
-            <CanvasBreadcrumbs graph={graph} />
-          </Panel>
-          {runSummary !== undefined && runSummary !== null && (
-            <Panel position="bottom-center">
-              <RunSummaryOverlay summary={runSummary} />
+          <style>{`.notebookflow-canvas .react-flow__handle { border: none; outline: none; box-shadow: none; }`}</style>
+          <ReactFlow
+            nodes={nodes}
+            edges={rfEdges}
+            onNodesChange={onNodesChange}
+            nodeTypes={NODE_TYPES}
+            edgeTypes={EDGE_TYPES}
+            defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
+            className="notebookflow-canvas"
+            style={FLOW_STYLE}
+            onConnect={handleConnect}
+            isValidConnection={isValidConnection}
+            onNodeClick={handleNodeClick}
+            onPaneClick={handlePaneClick}
+            onEdgesDelete={handleEdgesDelete}
+            nodesDraggable={false}
+            fitView
+            proOptions={{ hideAttribution: true }}
+          >
+            <MeasuredGroupLayout portPlacement={portPlacement} />
+            <Background />
+            <Controls>
+              <ControlButton
+                onClick={onToggleMinimap}
+                title={showMinimap === true ? mergedLabels.minimapHide : mergedLabels.minimapShow}
+                aria-label={mergedLabels.minimapToggle}
+              >
+                <MapIcon size={14} />
+              </ControlButton>
+              <ControlButton
+                onClick={() => {
+                  setLayout((current) => (current === "manual" ? "dagre" : "manual"));
+                }}
+                title={mergedLabels.layoutSwitchTo.replace(
+                  "{target}",
+                  layout === "manual" ? mergedLabels.layoutHorizontal : mergedLabels.layoutVertical,
+                )}
+                aria-label={mergedLabels.layoutToggle}
+              >
+                <Network size={14} />
+              </ControlButton>
+            </Controls>
+            {showMinimap === true && (
+              <MiniMap
+                nodeColor={miniMapNodeColor}
+                nodeStrokeWidth={2}
+                pannable
+                zoomable
+                position="bottom-right"
+                ariaLabel={mergedLabels.minimapAria}
+                className="!rounded-md !border !bg-card"
+              />
+            )}
+            <Panel position="top-left">
+              <CanvasBreadcrumbs graph={graph} />
             </Panel>
-          )}
-        </ReactFlow>
-      </div>
-    </InsertDropContext.Provider>
+            {runSummary !== undefined && runSummary !== null && (
+              <Panel position="bottom-center">
+                <RunSummaryOverlay summary={runSummary} />
+              </Panel>
+            )}
+          </ReactFlow>
+        </div>
+      </InsertDropContext.Provider>
+    </CanvasLabelsProvider>
   );
 }
 
@@ -868,6 +878,7 @@ const RUN_SUMMARY_CHIP_STYLE = {
 } as const;
 
 function RunSummaryOverlay({ summary }: { summary: RunSummary }): ReactElement {
+  const labels = useCanvasLabels();
   const { totalNodes, ok, error, skipped, totalDurationMs } = summary;
   const overallStatus = error > 0 ? "error" : skipped > 0 ? "partial" : ok > 0 ? "ok" : "empty";
   const overallColor =
@@ -880,14 +891,14 @@ function RunSummaryOverlay({ summary }: { summary: RunSummary }): ReactElement {
           : "#9ca3af";
   const overallLabel =
     overallStatus === "ok"
-      ? "completed"
+      ? labels.statusCompleted
       : overallStatus === "partial"
-        ? "partial"
+        ? labels.statusPartial
         : overallStatus === "error"
-          ? "failed"
-          : "no nodes";
+          ? labels.statusFailed
+          : labels.statusNoNodes;
   return (
-    <div role="img" aria-label="Last run summary" style={RUN_SUMMARY_STYLE}>
+    <div role="img" aria-label={labels.runSummaryAria} style={RUN_SUMMARY_STYLE}>
       <span style={RUN_SUMMARY_CHIP_STYLE}>
         <span
           style={{
@@ -901,7 +912,10 @@ function RunSummaryOverlay({ summary }: { summary: RunSummary }): ReactElement {
         {overallLabel}
       </span>
       <span style={RUN_SUMMARY_CHIP_STYLE}>
-        {totalNodes === 1 ? "1 node" : `${String(totalNodes)} nodes`}
+        {(totalNodes === 1 ? labels.nodeCountOne : labels.nodeCountOther).replace(
+          "{count}",
+          String(totalNodes),
+        )}
       </span>
       {ok > 0 && (
         <span style={{ ...RUN_SUMMARY_CHIP_STYLE, color: "#10b981" }}>✓ {String(ok)}</span>
@@ -933,16 +947,24 @@ function formatRunDuration(ms: number): string {
 }
 
 function CanvasBreadcrumbs({ graph }: { graph: GraphModel }): ReactElement {
+  const labels = useCanvasLabels();
   const nodeCount = Object.keys(graph.nodes).length;
   const groupCount = Object.keys(graph.groups).length;
   // useStore reads from React Flow's internal store; transform = [tx, ty, zoom]
   const zoom = useStore((state) => state.transform[2]);
   const zoomPct = `${String(Math.round(zoom * 100))}%`;
   return (
-    <div role="img" aria-label="Canvas summary" style={BREADCRUMBS_STYLE}>
-      <span>{nodeCount === 1 ? "1 node" : `${String(nodeCount)} nodes`}</span>
-      {groupCount > 1 && <span>· {String(groupCount)} notebooks</span>}
-      <span title="Use ⌘/Ctrl + wheel to zoom">· {zoomPct}</span>
+    <div role="img" aria-label={labels.canvasSummaryAria} style={BREADCRUMBS_STYLE}>
+      <span>
+        {(nodeCount === 1 ? labels.nodeCountOne : labels.nodeCountOther).replace(
+          "{count}",
+          String(nodeCount),
+        )}
+      </span>
+      {groupCount > 1 && (
+        <span>· {labels.notebookCountOther.replace("{count}", String(groupCount))}</span>
+      )}
+      <span title={labels.zoomHint}>· {zoomPct}</span>
     </div>
   );
 }

@@ -1,7 +1,7 @@
-import type { NodeManifestDef, NodeModel } from "@notebookflow/graph-canvas";
+import type { NodeConfigLabels, NodeManifestDef, NodeModel } from "@notebookflow/graph-canvas";
 import { NodeConfigEditor, setPaletteDragData } from "@notebookflow/graph-canvas";
 import type { ReactElement } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { CollapsibleSidebarSection } from "@/components/CollapsibleSidebarSection";
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +36,17 @@ interface CanvasSidebarProps {
 /** Right sidebar — selected node inspector above the node palette. */
 export function CanvasSidebar(props: CanvasSidebarProps): ReactElement {
   const { t } = useI18n();
+  const nodeConfigLabels = useMemo<NodeConfigLabels>(
+    () => ({
+      title: t("canvas.configTitle"),
+      subtitle: t("canvas.configSubtitle"),
+      generateNode: t("canvas.configGenerate"),
+      applyConfig: t("canvas.configApply"),
+      updating: t("canvas.configUpdating"),
+      upToDate: t("canvas.configUpToDate"),
+    }),
+    [t],
+  );
   const {
     selected,
     selectedManifest,
@@ -99,6 +110,7 @@ export function CanvasSidebar(props: CanvasSidebarProps): ReactElement {
             status={configStatus}
             onChange={onConfigChange}
             onSubmit={onApplyConfig}
+            labels={nodeConfigLabels}
           />
         ) : (
           <pre className="overflow-x-auto rounded-md border bg-background p-2 font-mono text-[11px]">

@@ -11,6 +11,7 @@
 import type { CSSProperties, ReactElement } from "react";
 import type { NodeProps } from "reactflow";
 
+import { useCanvasLabels } from "../labels";
 import type { NodeGroupModel } from "../types";
 
 export interface NodeGroupData extends NodeGroupModel {
@@ -37,6 +38,7 @@ interface NodeGroupStyles {
 
 export function NodeGroup(props: NodeProps<NodeGroupData>): ReactElement {
   const { data, selected } = props;
+  const labels = useCanvasLabels();
   const styles = groupStyles(selected, data.collapsed);
 
   const handleToggle = (event: React.MouseEvent<HTMLButtonElement>): void => {
@@ -53,7 +55,7 @@ export function NodeGroup(props: NodeProps<NodeGroupData>): ReactElement {
         <button
           type="button"
           onClick={handleToggle}
-          aria-label={data.collapsed ? "Expand notebook" : "Collapse notebook"}
+          aria-label={data.collapsed ? labels.expandNotebook : labels.collapseNotebook}
           className="nodrag nopan"
           style={styles.toggleButton}
         >
