@@ -121,6 +121,11 @@ import { deleteProviderKey, getProviderKey, saveProviderKey } from "@/lib/provid
 import type { UserSettings } from "@/lib/settings";
 import { applyTheme, readUserSettings, SETTINGS_STORAGE_KEY } from "@/lib/settings";
 import { clamp, cn, isTypingTarget } from "@/lib/utils";
+import {
+  applyPatchToSnapshot,
+  resolveWorkspacePatchTarget,
+  type WorkspacePatchLookup,
+} from "@/lib/workspacePatches";
 import { downloadWorkspaceZip, type WorkspaceFile } from "@/lib/workspaceZip";
 import type { DragState, FileSnapshot, LoadedNotebook, OpenFileMeta } from "@/types/workspace";
 
@@ -174,11 +179,24 @@ export function App(): ReactElement {
     { id: initialFileIdRef.current, name: notebook.name },
   ]);
   const [activeFileId, setActiveFileId] = useState<string>(() => initialFileIdRef.current);
+  const [workspaceRevision, setWorkspaceRevision] = useState(0);
   // Files list and code cells collapse independently — close files without
   // closing code, and vice-versa.
   const [isFilesCollapsed, setIsFilesCollapsed] = useState(() => readPanelLayout().filesCollapsed);
   const [isCellsCollapsed, setIsCellsCollapsed] = useState(() => readPanelLayout().cellsCollapsed);
   const snapshotsRef = useRef<Map<string, FileSnapshot>>(new Map());
+  const workspacePatchLookupRef = useRef<WorkspacePatchLookup>({
+    openFiles,
+    activeFileId,
+    activeNotebookName: notebook.name,
+    snapshots: snapshotsRef.current,
+  });
+  workspacePatchLookupRef.current = {
+    openFiles,
+    activeFileId,
+    activeNotebookName: notebook.name,
+    snapshots: snapshotsRef.current,
+  };
   const [graph, setGraph] = useState<GraphModel>(EMPTY_GRAPH);
   const [selected, setSelected] = useState<NodeModel | null>(null);
   const [patches, setPatches] = useState<CellPatch[]>([]);
@@ -366,6 +384,7 @@ export function App(): ReactElement {
   // file is live; inactive files come from their frozen snapshots. Drives both
   // the workspace ingest and the composed pipeline's per-node source lookup.
   const cellsByPath = useMemo<Map<string, NotebookCell[]>>(() => {
+    void workspaceRevision;
     const map = new Map<string, NotebookCell[]>();
     for (const file of openFiles) {
       if (file.id === activeFileId) {
@@ -379,7 +398,7 @@ export function App(): ReactElement {
     }
     return map;
     // A rename of the active file flows through openFiles, so it's covered here.
-  }, [openFiles, activeFileId, notebook.cells]);
+  }, [openFiles, activeFileId, notebook.cells, workspaceRevision]);
 
   // Identity of the open-file set; changes only when a file is opened/closed,
   // not on edits or switches.
@@ -394,7 +413,19 @@ export function App(): ReactElement {
       onGraphUpdate: setGraph,
       onCellPatch: (patch: CellPatch): Promise<void> => {
         setPatches((prev) => [...prev, patch]);
-        setNotebook((prev) => applyCellPatch(prev, patch));
+        const target = resolveWorkspacePatchTarget(
+          workspacePatchLookupRef.current,
+          patch.notebookPath,
+        );
+        if (target.kind === "active") {
+          setNotebook((prev) => applyCellPatch(prev, patch));
+        } else if (target.kind === "snapshot") {
+          snapshotsRef.current.set(
+            target.fileId,
+            applyPatchToSnapshot(target.snapshot, target.name, patch),
+          );
+          setWorkspaceRevision((revision) => revision + 1);
+        }
         return Promise.resolve();
       },
     });
