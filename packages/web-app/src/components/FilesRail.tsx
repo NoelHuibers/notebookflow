@@ -1,4 +1,4 @@
-import { Database, Files, PanelLeftClose, Plus, Upload, X } from "lucide-react";
+import { Database, FilePlus, Files, PanelLeftClose, Plus, Upload, X } from "lucide-react";
 import type { ReactElement } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ interface FilesRailProps {
   dataFiles: DataFile[];
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
+  onCreate: () => void;
   onOpen: () => void;
   onUploadData: () => void;
   onDeleteData: (name: string) => void;
@@ -44,6 +45,7 @@ export function FilesRail({
   dataFiles,
   onSelect,
   onClose,
+  onCreate,
   onOpen,
   onUploadData,
   onDeleteData,
@@ -76,11 +78,21 @@ export function FilesRail({
             variant="ghost"
             size="sm"
             className="h-7 w-7 px-0"
-            title={t("files.openNotebook")}
-            aria-label={t("files.openNotebook")}
+            title={t("files.createNotebook")}
+            aria-label={t("files.createNotebook")}
+            onClick={onCreate}
+          >
+            <FilePlus className="size-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 px-0"
+            title={t("files.importNotebook")}
+            aria-label={t("files.importNotebook")}
             onClick={onOpen}
           >
-            <Plus className="size-3.5" />
+            <Upload className="size-3.5" />
           </Button>
           <Button
             variant="ghost"

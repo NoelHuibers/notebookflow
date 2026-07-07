@@ -37,6 +37,7 @@ import {
   Command,
   Download,
   ExternalLink,
+  FilePlus,
   Keyboard,
   MoreHorizontal,
   PanelBottom,
@@ -49,6 +50,7 @@ import {
   Save,
   Settings as SettingsIcon,
   Sparkles,
+  Upload,
   Wand2,
   Zap,
 } from "lucide-react";
@@ -158,6 +160,36 @@ function makeFileId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `file-${String(Math.floor(performance.now() * 1000))}`;
+}
+
+function uniqueUntitledNotebookName(files: OpenFileMeta[]): string {
+  const used = new Set(files.map((file) => file.name));
+  if (!used.has("Untitled.ipynb")) {
+    return "Untitled.ipynb";
+  }
+  let suffix = 2;
+  let candidate = `Untitled ${String(suffix)}.ipynb`;
+  while (used.has(candidate)) {
+    suffix += 1;
+    candidate = `Untitled ${String(suffix)}.ipynb`;
+  }
+  return candidate;
+}
+
+function createBlankNotebook(name: string): LoadedNotebook {
+  const cells: NotebookCell[] = [{ cellType: "code", source: "" }];
+  return {
+    name,
+    cells,
+    doc: {
+      cells: cells.map((cell) => toIpynbCell(cell)),
+      metadata: {
+        kernelspec: { display_name: "Python 3", language: "python", name: "python3" },
+      },
+      nbformat: 4,
+      nbformat_minor: 5,
+    },
+  };
 }
 
 export function App(): ReactElement {
@@ -570,6 +602,20 @@ export function App(): ReactElement {
     },
     [openFiles, snapshotActive, switchToFile, resetTransient, t],
   );
+
+  const handleCreateNotebook = useCallback((): void => {
+    snapshotActive();
+    const next = createBlankNotebook(uniqueUntitledNotebookName(openFiles));
+    const id = makeFileId();
+    setOpenFiles((prev) => [...prev, { id, name: next.name }]);
+    setActiveFileId(id);
+    setNotebook(next);
+    setBaselineSources(next.cells.map((cell) => cell.source));
+    fileHandleRef.current = null;
+    resetTransient();
+    setFocusedCellIndex(0);
+    setError(null);
+  }, [openFiles, snapshotActive, resetTransient]);
 
   const closeFile = useCallback(
     (id: string): void => {
@@ -2090,6 +2136,7 @@ export function App(): ReactElement {
             dataFiles={dataFiles}
             onSelect={switchToFile}
             onClose={closeFile}
+            onCreate={handleCreateNotebook}
             onOpen={triggerOpenFile}
             onUploadData={triggerUploadData}
             onDeleteData={handleDeleteData}
@@ -2193,30 +2240,52 @@ export function App(): ReactElement {
                         <PanelRightClose className="size-3.5" />
                       )}
                     </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="absolute right-3 bottom-3 z-10 h-7 w-7 px-0 shadow-sm"
-                      onClick={() => {
-                        setIsInspectorCollapsed((open) => !open);
-                      }}
-                      title={
-                        isInspectorCollapsed
-                          ? t("app.panels.expandInspector")
-                          : t("app.panels.collapseInspector")
-                      }
-                      aria-label={
-                        isInspectorCollapsed
-                          ? t("app.panels.expandInspector")
-                          : t("app.panels.collapseInspector")
-                      }
-                    >
-                      {isInspectorCollapsed ? (
-                        <PanelBottom className="size-3.5" />
-                      ) : (
-                        <PanelBottomClose className="size-3.5" />
-                      )}
-                    </Button>
+                    <div className="absolute right-3 bottom-3 z-10 flex items-center gap-1.5">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 w-7 px-0 shadow-sm"
+                        onClick={handleCreateNotebook}
+                        title={t("files.createNotebookButton")}
+                        aria-label={t("files.createNotebookButton")}
+                      >
+                        <FilePlus className="size-3.5" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 w-7 px-0 shadow-sm"
+                        onClick={triggerOpenFile}
+                        title={t("files.openNotebookButton")}
+                        aria-label={t("files.openNotebookButton")}
+                      >
+                        <Upload className="size-3.5" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 w-7 px-0 shadow-sm"
+                        onClick={() => {
+                          setIsInspectorCollapsed((open) => !open);
+                        }}
+                        title={
+                          isInspectorCollapsed
+                            ? t("app.panels.expandInspector")
+                            : t("app.panels.collapseInspector")
+                        }
+                        aria-label={
+                          isInspectorCollapsed
+                            ? t("app.panels.expandInspector")
+                            : t("app.panels.collapseInspector")
+                        }
+                      >
+                        {isInspectorCollapsed ? (
+                          <PanelBottom className="size-3.5" />
+                        ) : (
+                          <PanelBottomClose className="size-3.5" />
+                        )}
+                      </Button>
+                    </div>
                     <Canvas
                       graph={graph}
                       onNodeRename={handleRename}

@@ -7,6 +7,8 @@ export const en = {
   showFiles: "Show files",
   files: "Files",
   openNotebook: "Open notebook",
+  createNotebook: "New notebook",
+  importNotebook: "Import notebook",
   hideFiles: "Hide files",
   unsavedChanges: "Unsaved changes",
   closeFile: "Close {{name}}",
@@ -19,7 +21,8 @@ export const en = {
   deleteFile: "Delete {{name}}",
 
   // FileDropZone
-  openNotebookButton: "Open notebook",
+  createNotebookButton: "New notebook",
+  openNotebookButton: "Import notebook",
   dropTitle: "Drop your .ipynb",
   dropSubtitle: "Parses cells and renders the canvas",
 };
@@ -29,6 +32,8 @@ export const de: typeof en = {
   showFiles: "Dateien anzeigen",
   files: "Dateien",
   openNotebook: "Notebook öffnen",
+  createNotebook: "Neues Notebook",
+  importNotebook: "Notebook importieren",
   hideFiles: "Dateien ausblenden",
   unsavedChanges: "Nicht gespeicherte Änderungen",
   closeFile: "{{name}} schließen",
@@ -41,7 +46,8 @@ export const de: typeof en = {
   deleteFile: "{{name}} löschen",
 
   // FileDropZone
-  openNotebookButton: "Notebook öffnen",
+  createNotebookButton: "Neues Notebook",
+  openNotebookButton: "Notebook importieren",
   dropTitle: "Lege deine .ipynb-Datei ab",
   dropSubtitle: "Liest Zellen ein und rendert die Canvas",
 };
