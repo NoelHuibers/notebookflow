@@ -15,6 +15,7 @@ import { useCanvasLabels } from "../labels";
 import type { NodeGroupModel } from "../types";
 
 export interface NodeGroupData extends NodeGroupModel {
+  active?: boolean;
   onToggle?: (groupId: string) => void;
 }
 
@@ -39,7 +40,7 @@ interface NodeGroupStyles {
 export function NodeGroup(props: NodeProps<NodeGroupData>): ReactElement {
   const { data, selected } = props;
   const labels = useCanvasLabels();
-  const styles = groupStyles(selected, data.collapsed);
+  const styles = groupStyles(selected, data.active === true, data.collapsed);
 
   const handleToggle = (event: React.MouseEvent<HTMLButtonElement>): void => {
     // Don't let the click bubble to React Flow's pane / node click handler.
@@ -70,13 +71,19 @@ export function NodeGroup(props: NodeProps<NodeGroupData>): ReactElement {
   );
 }
 
-function groupStyles(selected: boolean, collapsed: boolean): NodeGroupStyles {
+function groupStyles(selected: boolean, active: boolean, collapsed: boolean): NodeGroupStyles {
+  const highlighted = active || selected;
+  const borderColor = active
+    ? "var(--notebookflow-group-active-border, var(--primary, #0d9488))"
+    : selected
+      ? "var(--notebookflow-group-selected-border, var(--foreground, #111827))"
+      : GROUP_BORDER;
   return {
     wrapper: {
       width: "100%",
       height: "100%",
       borderRadius: 10,
-      border: `1.5px ${selected ? "solid" : "dashed"} ${selected ? "var(--notebookflow-group-selected-border, var(--foreground, #111827))" : GROUP_BORDER}`,
+      border: `1.5px ${highlighted ? "solid" : "dashed"} ${borderColor}`,
       // Collapsed groups become an opaque header chip; expanded groups stay
       // translucent so the canvas grid + child nodes inside remain visible.
       background: collapsed ? GROUP_HEADER_BG : GROUP_TRANSLUCENT_BG,
@@ -84,7 +91,7 @@ function groupStyles(selected: boolean, collapsed: boolean): NodeGroupStyles {
       fontFamily: GROUP_FONT_FAMILY,
       fontSize: 12,
       lineHeight: 1.3,
-      boxShadow: selected ? "0 0 0 2px rgba(99, 102, 241, 0.18)" : "none",
+      boxShadow: active ? "none" : selected ? "0 0 0 2px rgba(99, 102, 241, 0.18)" : "none",
       boxSizing: "border-box",
       overflow: "hidden",
     },
@@ -95,7 +102,7 @@ function groupStyles(selected: boolean, collapsed: boolean): NodeGroupStyles {
       height: NODE_GROUP_HEADER_HEIGHT,
       padding: "0 10px",
       background: GROUP_HEADER_BG,
-      borderBottom: collapsed ? "none" : `1px solid ${GROUP_BORDER}`,
+      borderBottom: collapsed ? "none" : `1px solid ${borderColor}`,
       boxSizing: "border-box",
     },
     toggleButton: {

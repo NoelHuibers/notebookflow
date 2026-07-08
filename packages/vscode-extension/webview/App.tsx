@@ -628,6 +628,8 @@ export function App(): ReactElement {
         <main className="relative min-h-0 min-w-0">
           <Canvas
             graph={graph}
+            selectedNodeId={selected?.id ?? null}
+            activeGroupId={notebookPath === "" ? null : notebookPath}
             onNodeRename={handleRename}
             onNodeSelect={setSelected}
             onInputsChange={handleInputsChange}

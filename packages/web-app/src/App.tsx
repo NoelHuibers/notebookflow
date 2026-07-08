@@ -192,6 +192,19 @@ function createBlankNotebook(name: string): LoadedNotebook {
   };
 }
 
+function findNodeForCellIndex(
+  graph: GraphModel,
+  groupId: string,
+  cellIndex: number,
+): NodeModel | null {
+  for (const node of Object.values(graph.nodes)) {
+    if (node.groupId === groupId && node.cellIndices.includes(cellIndex)) {
+      return node;
+    }
+  }
+  return null;
+}
+
 export function App(): ReactElement {
   const { t } = useI18n();
   // Translate the shared graph-canvas labels from the `canvas` namespace. Keys
@@ -242,6 +255,10 @@ export function App(): ReactElement {
   const [timingByNode, setTimingByNode] = useState<Record<string, number>>({});
   const [runSummary, setRunSummary] = useState<RunSummary | null>(null);
   const [focusedCellIndex, setFocusedCellIndex] = useState<number | null>(null);
+  const [cellNavigationTarget, setCellNavigationTarget] = useState<{
+    index: number;
+    revision: number;
+  } | null>(null);
   const [cellClipboard, setCellClipboard] = useState<NotebookCell | null>(null);
   const [isAddCellMenuOpen, setIsAddCellMenuOpen] = useState(false);
   const [baselineSources, setBaselineSources] = useState<string[]>(() =>
@@ -494,6 +511,19 @@ export function App(): ReactElement {
     setSelected((current) => (current === null ? null : (graph.nodes[current.id] ?? null)));
   }, [graph]);
 
+  const selectedCellIndexForActiveNotebook = useMemo(() => {
+    if (selected === null || selected.groupId !== notebook.name) {
+      return null;
+    }
+    return selected.cellIndices[0] ?? null;
+  }, [notebook.name, selected]);
+
+  useEffect(() => {
+    if (selectedCellIndexForActiveNotebook !== null) {
+      setFocusedCellIndex(selectedCellIndexForActiveNotebook);
+    }
+  }, [selectedCellIndexForActiveNotebook]);
+
   // Persist panel collapse state so reloads keep the user's layout.
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -541,6 +571,7 @@ export function App(): ReactElement {
     setRunSummary(null);
     setStreamingCellIndex(null);
     setFocusedCellIndex(null);
+    setCellNavigationTarget(null);
     setExplanation(null);
     setSaveStatus("idle");
   }, []);
@@ -701,6 +732,44 @@ export function App(): ReactElement {
   const handleCellsChange = useCallback((next: NotebookCell[]): void => {
     setNotebook((prev) => ({ ...prev, cells: next }));
   }, []);
+
+  const handleFocusCell = useCallback(
+    (index: number): void => {
+      setFocusedCellIndex(index);
+      setSelected(findNodeForCellIndex(graph, notebook.name, index));
+    },
+    [graph, notebook.name],
+  );
+
+  const handleNodeSelect = useCallback(
+    (node: NodeModel | null): void => {
+      if (node === null) {
+        setSelected(null);
+        return;
+      }
+
+      const targetFile =
+        node.groupId === notebook.name
+          ? null
+          : openFiles.find((file) => file.name === node.groupId);
+      if (targetFile !== null && targetFile !== undefined) {
+        switchToFile(targetFile.id);
+      }
+
+      setSelected(node);
+      const cellIndex = node.cellIndices[0] ?? null;
+      const canNavigateToCell = node.groupId === notebook.name || targetFile !== undefined;
+      if (cellIndex !== null && canNavigateToCell) {
+        setIsCellsCollapsed(false);
+        setFocusedCellIndex(cellIndex);
+        setCellNavigationTarget((current) => ({
+          index: cellIndex,
+          revision: (current?.revision ?? 0) + 1,
+        }));
+      }
+    },
+    [notebook.name, openFiles, switchToFile],
+  );
 
   const handleAddCell = useCallback((kind: CellKind): void => {
     const fresh: NotebookCell = { cellType: kind, source: "" };
@@ -2194,9 +2263,10 @@ export function App(): ReactElement {
                         cells={notebook.cells}
                         onCellsChange={handleCellsChange}
                         outputsByCell={outputsByCell}
-                        scrollToCellIndex={selected?.cellIndices[0] ?? null}
+                        scrollToCellIndex={cellNavigationTarget?.index ?? null}
+                        scrollToCellRevision={cellNavigationTarget?.revision ?? 0}
                         focusedCellIndex={focusedCellIndex}
-                        onFocusCell={setFocusedCellIndex}
+                        onFocusCell={handleFocusCell}
                         streamingCellIndex={streamingCellIndex}
                       />
                     </ScrollArea>
@@ -2288,8 +2358,10 @@ export function App(): ReactElement {
                     </div>
                     <Canvas
                       graph={graph}
+                      selectedNodeId={selected?.id ?? null}
+                      activeGroupId={notebook.name}
                       onNodeRename={handleRename}
-                      onNodeSelect={setSelected}
+                      onNodeSelect={handleNodeSelect}
                       onInputsChange={handleInputsChange}
                       onOutputsChange={handleOutputsChange}
                       onWireCreate={handleWireCreate}

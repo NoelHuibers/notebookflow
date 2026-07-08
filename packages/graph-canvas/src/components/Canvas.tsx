@@ -116,12 +116,12 @@ const EDGE_TYPES = {
 const COLUMN_WIDTH = 320;
 const COLUMN_GAP = 32;
 const GROUP_Y = 0;
-const NODE_X_INSET = 16;
-const GROUP_INNER_TOP_PADDING = 16;
-const GROUP_INNER_BOTTOM_PADDING = 24;
+const NODE_X_INSET = 24;
+const GROUP_INNER_TOP_PADDING = 24;
+const GROUP_INNER_BOTTOM_PADDING = 32;
 const COLLAPSED_GROUP_HEIGHT = NODE_GROUP_HEADER_HEIGHT;
 
-const GROUP_INNER_RIGHT_PADDING = 16;
+const GROUP_INNER_RIGHT_PADDING = 24;
 
 const GROUP_LAYOUT: GroupLayoutConstants = {
   columnWidth: COLUMN_WIDTH,
@@ -155,6 +155,28 @@ const FLOW_STYLE = {
   lineHeight: 1.4,
 } as const;
 
+const CANVAS_STYLE_OVERRIDES = `
+.notebookflow-canvas .react-flow__handle {
+  border: none;
+  outline: none;
+  box-shadow: none;
+}
+.notebookflow-canvas .react-flow__node-group {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.notebookflow-canvas .react-flow__node-group:focus,
+.notebookflow-canvas .react-flow__node-group:focus-visible,
+.notebookflow-canvas .react-flow__node-group.selected {
+  outline: none;
+  box-shadow: none;
+}
+`;
+
 /** Wires render above nodes — RF paints nodes after edges in DOM, so edges need a higher z-index. */
 const WIRE_LAYER_Z_INDEX = 2000;
 
@@ -164,6 +186,10 @@ const DEFAULT_EDGE_OPTIONS = {
 
 export interface CanvasProps {
   graph: GraphModel;
+  /** When provided, the host controls which notebook node is visibly selected. */
+  selectedNodeId?: string | null;
+  /** Notebook group id to emphasize as the active/visible notebook. */
+  activeGroupId?: string | null;
   onNodeRename?: (nodeId: string, nextName: string) => void;
   onWireCreate?: (wire: Omit<WireModel, "id">) => void;
   onWireDelete?: (wireId: string) => void;
@@ -228,6 +254,8 @@ export function Canvas(props: CanvasProps): ReactElement {
 function CanvasInner(props: CanvasProps): ReactElement {
   const {
     graph,
+    selectedNodeId,
+    activeGroupId,
     onNodeRename,
     onWireCreate,
     onWireDelete,
@@ -273,6 +301,8 @@ function CanvasInner(props: CanvasProps): ReactElement {
   const baseNodes = useMemo<Node[]>(() => {
     return buildNodes(graph, {
       onNodeRename,
+      selectedNodeId,
+      activeGroupId,
       onGroupToggle,
       onInputsChange,
       onOutputsChange,
@@ -286,6 +316,8 @@ function CanvasInner(props: CanvasProps): ReactElement {
   }, [
     graph,
     onNodeRename,
+    selectedNodeId,
+    activeGroupId,
     onGroupToggle,
     onInputsChange,
     onOutputsChange,
@@ -457,7 +489,7 @@ function CanvasInner(props: CanvasProps): ReactElement {
           onDragOver={handleDragOver}
           onDrop={handleDrop}
         >
-          <style>{`.notebookflow-canvas .react-flow__handle { border: none; outline: none; box-shadow: none; }`}</style>
+          <style>{CANVAS_STYLE_OVERRIDES}</style>
           <ReactFlow
             nodes={nodes}
             edges={rfEdges}
@@ -611,6 +643,8 @@ function buildNodes(
   graph: GraphModel,
   callbacks: {
     onNodeRename: CanvasProps["onNodeRename"];
+    selectedNodeId: CanvasProps["selectedNodeId"];
+    activeGroupId: CanvasProps["activeGroupId"];
     onGroupToggle: CanvasProps["onGroupToggle"];
     onInputsChange: CanvasProps["onInputsChange"];
     onOutputsChange: CanvasProps["onOutputsChange"];
@@ -624,6 +658,8 @@ function buildNodes(
 ): Node[] {
   const {
     onNodeRename: onRename,
+    selectedNodeId,
+    activeGroupId,
     onGroupToggle,
     onInputsChange,
     onOutputsChange,
@@ -657,7 +693,10 @@ function buildNodes(
 
     const groupX = horizontalCells ? 0 : nextGroupX;
     const groupY = horizontalCells ? nextGroupY : GROUP_Y;
-    const groupData: NodeGroupData = { ...group };
+    const groupData: NodeGroupData = {
+      ...group,
+      ...(activeGroupId === undefined ? {} : { active: activeGroupId === group.id }),
+    };
     if (onGroupToggle !== undefined) {
       groupData.onToggle = onGroupToggle;
     }
@@ -725,8 +764,18 @@ function buildNodes(
       position: { x: groupX, y: groupY },
       data: groupData,
       draggable: false,
-      selectable: true,
-      style: { width: groupWidth, height: groupHeight },
+      selectable: false,
+      focusable: false,
+      style: {
+        width: groupWidth,
+        height: groupHeight,
+        padding: 0,
+        border: "none",
+        borderRadius: 0,
+        background: "transparent",
+        color: "inherit",
+        textAlign: "left",
+      },
     });
 
     if (horizontalCells) {
@@ -792,6 +841,7 @@ function buildNodes(
         data: nodeData,
         draggable: false,
         selectable: true,
+        ...(selectedNodeId === undefined ? {} : { selected: selectedNodeId === node.id }),
       });
 
       const afterCellIndex = node.cellIndices[0] ?? 0;

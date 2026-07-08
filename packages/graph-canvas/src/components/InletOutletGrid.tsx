@@ -237,6 +237,7 @@ function SidePortGrid(props: InletOutletGridProps): ReactElement | null {
                     />
                     {editable && onInputsChange !== undefined ? (
                       <PortChip
+                        kind="input"
                         value={inlet}
                         dimmed={editing?.kind === "input" && editing.index === rowIdx}
                         onEdit={(anchorEl) => {
@@ -247,7 +248,9 @@ function SidePortGrid(props: InletOutletGridProps): ReactElement | null {
                         }}
                       />
                     ) : (
-                      <span style={portChipStyles.readOnlyPort}>{inlet}</span>
+                      <span style={portChipStyles.readOnlyPort} title={inlet}>
+                        <InputPortLabel value={inlet} />
+                      </span>
                     )}
                   </>
                 ) : (
@@ -278,6 +281,7 @@ function SidePortGrid(props: InletOutletGridProps): ReactElement | null {
                   <>
                     {editable && onOutputsChange !== undefined ? (
                       <PortChip
+                        kind="output"
                         value={outlet}
                         dimmed={editing?.kind === "output" && editing.index === rowIdx}
                         onEdit={(anchorEl) => {
@@ -456,6 +460,7 @@ function StackedPortSection(props: InletOutletGridProps): ReactElement | null {
                   )
                 ) : editable && onInputsChange !== undefined ? (
                   <PortChip
+                    kind="input"
                     value={col.port}
                     dimmed={editing?.kind === "input" && editing.index === col.index}
                     onEdit={(anchorEl) => {
@@ -467,7 +472,7 @@ function StackedPortSection(props: InletOutletGridProps): ReactElement | null {
                   />
                 ) : (
                   <span style={portChipStyles.readOnlyPort} title={col.port}>
-                    {col.port}
+                    <InputPortLabel value={col.port} />
                   </span>
                 )}
               </StackedPortCell>
@@ -539,6 +544,7 @@ function StackedPortSection(props: InletOutletGridProps): ReactElement | null {
                 )
               ) : editable && onOutputsChange !== undefined ? (
                 <PortChip
+                  kind="output"
                   value={col.port}
                   dimmed={editing?.kind === "output" && editing.index === col.index}
                   onEdit={(anchorEl) => {
@@ -670,6 +676,7 @@ function createPortEditorActions(
 }
 
 interface PortChipProps {
+  kind: PortKind;
   value: string;
   dimmed: boolean;
   onEdit: (anchorEl: HTMLElement) => void;
@@ -677,12 +684,14 @@ interface PortChipProps {
 }
 
 function PortChip(props: PortChipProps): ReactElement {
-  const { value, dimmed, onEdit, onRemove } = props;
-  return <SidePortLabel value={value} dimmed={dimmed} onEdit={onEdit} onRemove={onRemove} />;
+  const { kind, value, dimmed, onEdit, onRemove } = props;
+  return (
+    <SidePortLabel kind={kind} value={value} dimmed={dimmed} onEdit={onEdit} onRemove={onRemove} />
+  );
 }
 
 function SidePortLabel(props: PortChipProps): ReactElement {
-  const { value, dimmed, onEdit, onRemove } = props;
+  const { kind, value, dimmed, onEdit, onRemove } = props;
   return (
     <span style={{ ...portChipStyles.sidesChip, opacity: dimmed ? 0.4 : 1 }}>
       <span style={portChipStyles.sidesChipLabelRegion}>
@@ -695,7 +704,7 @@ function SidePortLabel(props: PortChipProps): ReactElement {
           }}
           style={portChipStyles.chipLabel}
         >
-          {value}
+          {kind === "input" ? <InputPortLabel value={value} /> : value}
         </button>
       </span>
       <span style={portChipStyles.sidesChipRemoveRegion}>
@@ -710,6 +719,19 @@ function SidePortLabel(props: PortChipProps): ReactElement {
           <X aria-hidden="true" size={10} strokeWidth={2.5} />
         </button>
       </span>
+    </span>
+  );
+}
+
+function InputPortLabel({ value }: { value: string }): ReactElement {
+  const dotIdx = value.lastIndexOf(".");
+  if (dotIdx <= 0 || dotIdx === value.length - 1) {
+    return <span style={inputRefLabelStyles.label}>{value}</span>;
+  }
+  return (
+    <span style={inputRefLabelStyles.label}>
+      <span style={inputRefLabelStyles.prefix}>{value.slice(0, dotIdx + 1)}</span>
+      <span style={inputRefLabelStyles.variable}>{value.slice(dotIdx + 1)}</span>
     </span>
   );
 }
@@ -743,6 +765,32 @@ function stackedHandleStyle(color: string, edge: "top" | "bottom"): CSSPropertie
     boxSizing: "border-box",
   };
 }
+
+const inputRefLabelStyles = {
+  label: {
+    display: "inline-flex",
+    minWidth: 0,
+    maxWidth: "100%",
+    overflow: "hidden",
+    direction: "ltr",
+    textAlign: "left",
+    whiteSpace: "nowrap",
+  },
+  prefix: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    color: NODE_MUTED,
+    flexShrink: 1,
+  },
+  variable: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    color: "inherit",
+    flexShrink: 0,
+  },
+} satisfies Record<string, CSSProperties>;
 
 const sideGridStyles = {
   grid: {

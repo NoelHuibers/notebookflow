@@ -27,6 +27,8 @@ export interface CellListProps {
    * the canvas selection-to-cells handoff.
    */
   scrollToCellIndex?: number | null;
+  /** Monotonic trigger for re-scrolling the same cell after repeated selection. */
+  scrollToCellRevision?: number;
   /** Currently focused cell index (driven by the toolbar). */
   focusedCellIndex?: number | null;
   /** Notify the parent when a cell wrapper is clicked. */
@@ -44,6 +46,7 @@ export function CellList({
   onCellsChange,
   outputsByCell,
   scrollToCellIndex,
+  scrollToCellRevision,
   focusedCellIndex,
   onFocusCell,
   streamingCellIndex,
@@ -99,6 +102,7 @@ export function CellList({
   // than a ref map so adding/removing cells doesn't require ref bookkeeping.
   const containerRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
+    void scrollToCellRevision;
     if (scrollToCellIndex === undefined || scrollToCellIndex === null || scrollToCellIndex < 0) {
       return;
     }
@@ -112,7 +116,7 @@ export function CellList({
     if (target !== null) {
       target.scrollIntoView({ block: "start", behavior: "smooth" });
     }
-  }, [scrollToCellIndex]);
+  }, [scrollToCellIndex, scrollToCellRevision]);
 
   return (
     <div ref={containerRef} className="flex flex-col gap-3 p-4">

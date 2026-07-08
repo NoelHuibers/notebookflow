@@ -114,8 +114,10 @@ export function FilesRail({
               <li key={file.id}>
                 <div
                   className={cn(
-                    "group flex items-center gap-1.5 rounded px-2 py-1 text-[12px]",
-                    isActive ? "bg-background font-medium" : "hover:bg-muted/60",
+                    "group flex items-center gap-1.5 rounded border px-2 py-1 text-[12px]",
+                    isActive
+                      ? "border-primary/60 font-medium text-foreground"
+                      : "border-transparent hover:bg-muted/60",
                   )}
                 >
                   <button
@@ -124,6 +126,7 @@ export function FilesRail({
                       onSelect(file.id);
                     }}
                     className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                    aria-current={isActive ? "page" : undefined}
                     title={file.name}
                   >
                     {isActive && activeDirty && (

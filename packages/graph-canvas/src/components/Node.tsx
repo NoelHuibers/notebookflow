@@ -78,16 +78,9 @@ const TAG_HEADER_BG: Record<NodeTag, string> = {
   io: "#f97316",
 };
 
-const TAG_RING: Record<NodeTag, string> = {
-  input: "rgba(59, 130, 246, 0.28)",
-  transform: "rgba(16, 185, 129, 0.28)",
-  output: "rgba(239, 68, 68, 0.28)",
-  ai: "rgba(168, 85, 247, 0.28)",
-  io: "rgba(249, 115, 22, 0.28)",
-};
-
 const NODE_BORDER_WIDTH = 2;
 const NODE_OUTER_RADIUS = 8;
+const NODE_SELECTION_OUTLINE = "var(--notebookflow-node-selected-outline, var(--primary, #0d9488))";
 
 const NODE_BACKGROUND = "var(--notebookflow-node-bg, var(--card, #ffffff))";
 const NODE_FOREGROUND = "var(--notebookflow-node-fg, var(--card-foreground, #111827))";
@@ -447,21 +440,18 @@ function nodeStyles(
 ): NotebookNodeStyles {
   const tagColor = TAG_HEADER_BG[tag];
   const clip = NODE_CLIP_RADIUS;
-  const wrapperBorder = selected
-    ? "var(--notebookflow-node-selected-border, var(--foreground, #111827))"
-    : tagColor;
   const sharedWrapper: CSSProperties = {
     minWidth,
     borderRadius: NODE_OUTER_RADIUS,
-    border: `${String(NODE_BORDER_WIDTH)}px solid ${wrapperBorder}`,
+    border: `${String(NODE_BORDER_WIDTH)}px solid ${tagColor}`,
     background: tagColor,
     color: NODE_FOREGROUND,
     fontFamily: NODE_FONT_FAMILY,
     fontSize: 14,
     lineHeight: 1.4,
-    boxShadow: selected
-      ? `0 0 0 2px ${TAG_RING[tag]}, 0 1px 2px rgba(15, 23, 42, 0.14)`
-      : "0 1px 2px rgba(15, 23, 42, 0.14)",
+    outline: selected ? `2px solid ${NODE_SELECTION_OUTLINE}` : "none",
+    outlineOffset: selected ? 3 : 0,
+    boxShadow: "0 1px 2px rgba(15, 23, 42, 0.14)",
     overflow: "visible",
     boxSizing: "border-box",
   };
@@ -675,15 +665,15 @@ function nodeStyles(
     wrapper: {
       minWidth,
       borderRadius: NODE_OUTER_RADIUS,
-      border: `${String(NODE_BORDER_WIDTH)}px solid ${wrapperBorder}`,
+      border: `${String(NODE_BORDER_WIDTH)}px solid ${tagColor}`,
       background: tagColor,
       color: NODE_FOREGROUND,
       fontFamily: NODE_FONT_FAMILY,
       fontSize: 14,
       lineHeight: 1.4,
-      boxShadow: selected
-        ? `0 0 0 2px ${TAG_RING[tag]}, 0 1px 2px rgba(15, 23, 42, 0.14)`
-        : "0 1px 2px rgba(15, 23, 42, 0.14)",
+      outline: selected ? `2px solid ${NODE_SELECTION_OUTLINE}` : "none",
+      outlineOffset: selected ? 3 : 0,
+      boxShadow: "0 1px 2px rgba(15, 23, 42, 0.14)",
       // Visible so an open port dropdown can float past the node edges.
       overflow: "visible",
       boxSizing: "border-box",

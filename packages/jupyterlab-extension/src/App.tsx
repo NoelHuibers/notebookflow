@@ -465,6 +465,8 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
         <main style={canvasStyle}>
           <Canvas
             graph={graph}
+            selectedNodeId={selected?.id ?? null}
+            activeGroupId={bridge.notebookPath}
             onNodeRename={handleRename}
             onNodeSelect={setSelected}
             onInputsChange={handleInputsChange}
