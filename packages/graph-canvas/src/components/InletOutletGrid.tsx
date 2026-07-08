@@ -13,6 +13,7 @@ import { useState } from "react";
 import { Handle, Position } from "reactflow";
 
 import { useCanvasLabels } from "../labels";
+import { formatInputBinding, formatRef, parseInputBinding, parseRef } from "../sync/MarkerParser";
 import type { NodeTag } from "../types";
 import { PortComboboxFloating } from "./PortComboboxFloating";
 import {
@@ -322,7 +323,7 @@ function SidePortGrid(props: InletOutletGridProps): ReactElement | null {
             editing.index === -1
               ? ""
               : editing.kind === "input"
-                ? (inputs[editing.index] ?? "")
+                ? inputEditorValue(inputs[editing.index])
                 : (outputs[editing.index] ?? "")
           }
           suggestions={editing.kind === "input" ? inputSuggestions : outputSuggestions}
@@ -484,7 +485,7 @@ function StackedPortSection(props: InletOutletGridProps): ReactElement | null {
             key={editing.index === -1 ? "add-input" : `edit-input-${String(editing.index)}`}
             anchorEl={editing.anchorEl}
             kind="input"
-            initialValue={editing.index === -1 ? "" : (inputs[editing.index] ?? "")}
+            initialValue={editing.index === -1 ? "" : inputEditorValue(inputs[editing.index])}
             suggestions={inputSuggestions}
             onCommit={(value) => {
               commit("input", editing.index, value);
@@ -618,17 +619,21 @@ function createPortEditorActions(
       if (onInputsChange === undefined) {
         return;
       }
+      const normalized = normalizeInputPortValue(trimmed, index === -1 ? undefined : inputs[index]);
+      if (normalized === null) {
+        return;
+      }
       const next = inputs.slice();
       if (index === -1) {
-        if (next.includes(trimmed)) {
+        if (next.includes(normalized)) {
           return;
         }
-        next.push(trimmed);
+        next.push(normalized);
       } else {
-        if (next.some((p, i) => p === trimmed && i !== index)) {
+        if (next.some((p, i) => p === normalized && i !== index)) {
           next.splice(index, 1);
         } else {
-          next[index] = trimmed;
+          next[index] = normalized;
         }
       }
       onInputsChange(next);
@@ -673,6 +678,31 @@ function createPortEditorActions(
   };
 
   return { commit, remove };
+}
+
+function normalizeInputPortValue(value: string, previousValue: string | undefined): string | null {
+  const binding = parseInputBinding(value);
+  if (binding !== null) {
+    return formatInputBinding(binding);
+  }
+  const source = parseRef(value);
+  if (source === null) {
+    return null;
+  }
+  const previousBinding =
+    previousValue === undefined ? null : parseInputBinding(previousValue.trim());
+  return formatInputBinding({
+    localName: previousBinding?.localName ?? source.portName,
+    source,
+  });
+}
+
+function inputEditorValue(value: string | undefined): string {
+  if (value === undefined) {
+    return "";
+  }
+  const binding = parseInputBinding(value.trim());
+  return binding === null ? value : formatRef(binding.source);
 }
 
 interface PortChipProps {
@@ -724,6 +754,10 @@ function SidePortLabel(props: PortChipProps): ReactElement {
 }
 
 function InputPortLabel({ value }: { value: string }): ReactElement {
+  const binding = parseInputBinding(value);
+  if (binding !== null) {
+    return <span style={inputRefLabelStyles.label}>{binding.localName}</span>;
+  }
   const dotIdx = value.lastIndexOf(".");
   if (dotIdx <= 0 || dotIdx === value.length - 1) {
     return <span style={inputRefLabelStyles.label}>{value}</span>;

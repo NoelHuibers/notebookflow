@@ -228,21 +228,21 @@ class PipelineAuthor:
         nodes = structured["nodes"]
         edges = structured["edges"]
         catalog = {m.id: m for m in self._registry.all()}
-        # Build an in-port lookup so every node knows which upstream node feeds it.
+        # Build an in-binding lookup so every node knows which upstream node feeds it.
         incoming: dict[str, list[str]] = {n["name"]: [] for n in nodes}
         for edge in edges:
-            target_name = edge["to"].split(".", 1)[0]
-            incoming.setdefault(target_name, []).append(edge["from"])
+            target_name, _, local_name = edge["to"].partition(".")
+            if not target_name or not local_name:
+                continue
+            incoming.setdefault(target_name, []).append(f"{local_name}<-{edge['from']}")
 
         cell_sources: list[str] = []
         for node in nodes:
             manifest = catalog[node["manifest_id"]]
             marker_inputs = incoming.get(node["name"], [])
-            # Template port-name vars (the actual Python identifiers bound in
-            # the cell namespace) are the last segment of each marker ref --
-            # e.g. "Parse CSV.df" -> "df". The marker itself keeps the full
-            # name.port form because the SyncEngine routes by that.
-            input_vars = [ref.rsplit(".", 1)[1] for ref in marker_inputs if "." in ref] or [
+            # Template input vars are the explicit left-hand binding names:
+            # `df<-Parse CSV.raw_df` injects the upstream value as `df`.
+            input_vars = [binding.split("<-", 1)[0].strip() for binding in marker_inputs] or [
                 p.name for p in manifest.inputs
             ]
             output_vars = [p.name for p in manifest.outputs]
@@ -412,12 +412,12 @@ def _heuristic_edges(
 def _marker_for(
     name: str,
     manifest: NodeManifest,
-    input_vars: list[str],
+    input_bindings: list[str],
     output_vars: list[str],
 ) -> str:
     parts = [f"# @node: {name}  [{manifest.tag}]"]
-    if input_vars:
-        parts.append(f"in={','.join(input_vars)}")
+    if input_bindings:
+        parts.append(f"in={','.join(input_bindings)}")
     if output_vars:
         parts.append(f"out={','.join(output_vars)}")
     return "  ".join(parts)

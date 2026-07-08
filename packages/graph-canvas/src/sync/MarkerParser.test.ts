@@ -3,7 +3,14 @@ import { describe, expect, it } from "vitest";
 import type { NodeTag } from "../types";
 import twoNode from "./fixtures/two-node.ipynb.json";
 import type { NotebookCell } from "./MarkerParser";
-import { defaultAliasForPath, formatRef, MarkerParser, parseRef } from "./MarkerParser";
+import {
+  defaultAliasForPath,
+  formatInputBinding,
+  formatRef,
+  MarkerParser,
+  parseInputBinding,
+  parseRef,
+} from "./MarkerParser";
 
 interface IpynbCell {
   cell_type: string;
@@ -42,33 +49,33 @@ describe("MarkerParser.parseLine", () => {
   });
 
   it("parses a marker with in= and out=", () => {
-    const m = MarkerParser.parseLine("# @node: Filter [transform] in=load_csv.df  out=df");
+    const m = MarkerParser.parseLine("# @node: Filter [transform] in=df<-load_csv.df  out=df");
     expect(m).toEqual({
       name: "Filter",
       tag: "transform",
-      inputs: ["load_csv.df"],
+      inputs: ["df<-load_csv.df"],
       outputs: ["df"],
     });
   });
 
   it("handles in= and out= in flipped order", () => {
-    const m = MarkerParser.parseLine("# @node: Foo [transform] out=df  in=a.x,b.y");
+    const m = MarkerParser.parseLine("# @node: Foo [transform] out=df  in=x<-a.x,y<-b.y");
     expect(m).toEqual({
       name: "Foo",
       tag: "transform",
-      inputs: ["a.x", "b.y"],
+      inputs: ["x<-a.x", "y<-b.y"],
       outputs: ["df"],
     });
   });
 
   it("tolerates whitespace around commas inside in=", () => {
-    const m = MarkerParser.parseLine("# @node: Foo [transform] in=a.x , b.y");
-    expect(m?.inputs).toEqual(["a.x", "b.y"]);
+    const m = MarkerParser.parseLine("# @node: Foo [transform] in=x<-a.x , y<-b.y");
+    expect(m?.inputs).toEqual(["x<-a.x", "y<-b.y"]);
   });
 
   it("preserves spaces inside node names in input refs", () => {
-    const m = MarkerParser.parseLine("# @node: Filter [transform] in=Load CSV.df");
-    expect(m?.inputs).toEqual(["Load CSV.df"]);
+    const m = MarkerParser.parseLine("# @node: Filter [transform] in=df<-Load CSV.df");
+    expect(m?.inputs).toEqual(["df<-Load CSV.df"]);
   });
 
   it("returns null for a blank line", () => {
@@ -92,11 +99,15 @@ describe("MarkerParser.parseLine", () => {
   });
 
   it("throws on uppercase port name in input ref", () => {
-    expect(() => MarkerParser.parseLine("# @node: Foo [transform] in=Bad.PORT")).toThrow();
+    expect(() => MarkerParser.parseLine("# @node: Foo [transform] in=port<-Bad.PORT")).toThrow();
   });
 
-  it("throws on input ref missing the dot", () => {
+  it("throws on input binding missing the arrow", () => {
     expect(() => MarkerParser.parseLine("# @node: Foo [transform] in=load_csv")).toThrow();
+  });
+
+  it("throws on input binding source missing the dot", () => {
+    expect(() => MarkerParser.parseLine("# @node: Foo [transform] in=df<-load_csv")).toThrow();
   });
 
   it("throws on unrecognized trailing content", () => {
@@ -116,16 +127,16 @@ describe("MarkerParser.formatMarker", () => {
       MarkerParser.formatMarker({
         name: "Filter",
         tag: "transform",
-        inputs: ["load_csv.df"],
+        inputs: ["df<-load_csv.df"],
         outputs: ["df"],
       }),
-    ).toBe("# @node: Filter  [transform]  in=load_csv.df  out=df");
+    ).toBe("# @node: Filter  [transform]  in=df<-load_csv.df  out=df");
   });
 
   it("omits empty in= and out= sections", () => {
     expect(
-      MarkerParser.formatMarker({ name: "Sink", tag: "output", inputs: ["a.x"], outputs: [] }),
-    ).toBe("# @node: Sink  [output]  in=a.x");
+      MarkerParser.formatMarker({ name: "Sink", tag: "output", inputs: ["x<-a.x"], outputs: [] }),
+    ).toBe("# @node: Sink  [output]  in=x<-a.x");
     expect(
       MarkerParser.formatMarker({ name: "Source", tag: "input", inputs: [], outputs: ["df"] }),
     ).toBe("# @node: Source  [input]  out=df");
@@ -135,15 +146,20 @@ describe("MarkerParser.formatMarker", () => {
 describe("MarkerParser round-trip", () => {
   const examples = [
     { name: "Load CSV", tag: "input" as const, inputs: [], outputs: [] },
-    { name: "Filter", tag: "transform" as const, inputs: ["a.x"], outputs: ["df"] },
+    { name: "Filter", tag: "transform" as const, inputs: ["x<-a.x"], outputs: ["df"] },
     {
       name: "Merge two",
       tag: "transform" as const,
-      inputs: ["a.x", "b.y"],
+      inputs: ["x<-a.x", "y<-b.y"],
       outputs: ["merged"],
     },
-    { name: "Sink", tag: "output" as const, inputs: ["pipeline.result"], outputs: [] },
-    { name: "AI step", tag: "ai" as const, inputs: ["prompt.text"], outputs: ["completion"] },
+    { name: "Sink", tag: "output" as const, inputs: ["result<-pipeline.result"], outputs: [] },
+    {
+      name: "AI step",
+      tag: "ai" as const,
+      inputs: ["text<-prompt.text"],
+      outputs: ["completion"],
+    },
   ];
 
   it.each(examples)("parseLine(formatMarker($name)) preserves the marker", (m) => {
@@ -170,7 +186,7 @@ describe("MarkerParser.parseNotebook", () => {
     expect(result.markers[1]).toEqual({
       name: "Filter",
       tag: "transform",
-      inputs: ["Load CSV.df"],
+      inputs: ["df<-Load CSV.df"],
       outputs: ["clean_df"],
       notebookPath: "nb/demo.ipynb",
       cellIndex: 2,
@@ -210,7 +226,7 @@ describe("MarkerParser — multi-line marker form (#51)", () => {
         cellType: "code",
         source: [
           "# @node: LLM Generate",
-          "# @inputs: clean.out",
+          "# @inputs: clean<-Cleaner.out",
           "# @outputs: summary_md",
           "# @tag: ai",
           "summary_md = generate(clean)",
@@ -223,18 +239,23 @@ describe("MarkerParser — multi-line marker form (#51)", () => {
     expect(result.markers[0]).toMatchObject({
       name: "LLM Generate",
       tag: "ai",
-      inputs: ["clean.out"],
+      inputs: ["clean<-Cleaner.out"],
       outputs: ["summary_md"],
     });
   });
 
   it("accepts @in/@out aliases and comma-separated refs", () => {
-    const lines = ["# @node: Merge [transform]", "# @in: A.x, B.y", "# @out: merged", "z = 1"];
+    const lines = [
+      "# @node: Merge [transform]",
+      "# @in: x<-A.x, y<-B.y",
+      "# @out: merged",
+      "z = 1",
+    ];
     const marker = MarkerParser.parseMarkerBlock(lines);
     expect(marker).toMatchObject({
       name: "Merge",
       tag: "transform",
-      inputs: ["A.x", "B.y"],
+      inputs: ["x<-A.x", "y<-B.y"],
       outputs: ["merged"],
     });
   });
@@ -245,7 +266,7 @@ describe("MarkerParser — multi-line marker form (#51)", () => {
   });
 
   it("throws when no tag is given in either form", () => {
-    expect(() => MarkerParser.parseMarkerBlock(["# @node: N", "# @inputs: a.b"])).toThrow();
+    expect(() => MarkerParser.parseMarkerBlock(["# @node: N", "# @inputs: b<-a.b"])).toThrow();
   });
 
   it("ignores continuation lines that are not part of the leading block", () => {
@@ -259,7 +280,7 @@ describe("MarkerParser — multi-line marker form (#51)", () => {
 
 describe("MarkerParser.isContinuationLine", () => {
   it("recognises continuation comments only", () => {
-    expect(MarkerParser.isContinuationLine("# @inputs: a.b")).toBe(true);
+    expect(MarkerParser.isContinuationLine("# @inputs: b<-a.b")).toBe(true);
     expect(MarkerParser.isContinuationLine("# @out: df")).toBe(true);
     expect(MarkerParser.isContinuationLine("# @tag: ai")).toBe(true);
     expect(MarkerParser.isContinuationLine("# @node: N [input]")).toBe(false);
@@ -297,17 +318,58 @@ describe("MarkerParser — notebook alias (#18)", () => {
   });
 
   it("parses an alias-qualified input ref and round-trips it", () => {
-    const body = MarkerParser.parseLine("# @node: Filter  [transform]  in=orders:Load CSV.df");
-    expect(body?.inputs).toEqual(["orders:Load CSV.df"]);
+    const body = MarkerParser.parseLine("# @node: Filter  [transform]  in=df<-orders:Load CSV.df");
+    expect(body?.inputs).toEqual(["df<-orders:Load CSV.df"]);
   });
 
   it("keeps local and qualified refs distinct in one marker", () => {
-    const body = MarkerParser.parseLine("# @node: Join  [transform]  in=Local.a,other:Remote.b");
-    expect(body?.inputs).toEqual(["Local.a", "other:Remote.b"]);
+    const body = MarkerParser.parseLine(
+      "# @node: Join  [transform]  in=a<-Local.a,b<-other:Remote.b",
+    );
+    expect(body?.inputs).toEqual(["a<-Local.a", "b<-other:Remote.b"]);
   });
 
   it("rejects a ref with an invalid alias", () => {
-    expect(() => MarkerParser.parseLine("# @node: X  [transform]  in=Bad Alias:Node.p")).toThrow();
+    expect(() =>
+      MarkerParser.parseLine("# @node: X  [transform]  in=p<-Bad Alias:Node.p"),
+    ).toThrow();
+  });
+});
+
+describe("parseInputBinding / formatInputBinding helpers", () => {
+  it("parses a local input binding", () => {
+    expect(parseInputBinding("df<-Load CSV.raw_df")).toEqual({
+      localName: "df",
+      source: {
+        alias: null,
+        nodeName: "Load CSV",
+        portName: "raw_df",
+      },
+    });
+  });
+
+  it("parses a qualified input binding", () => {
+    expect(parseInputBinding("df<-orders:Load CSV.raw_df")).toEqual({
+      localName: "df",
+      source: {
+        alias: "orders",
+        nodeName: "Load CSV",
+        portName: "raw_df",
+      },
+    });
+  });
+
+  it("returns null for a bare source ref", () => {
+    expect(parseInputBinding("Load CSV.df")).toBeNull();
+  });
+
+  it("round-trips through formatInputBinding", () => {
+    expect(
+      formatInputBinding({
+        localName: "df",
+        source: { alias: "a", nodeName: "N", portName: "p" },
+      }),
+    ).toBe("df<-a:N.p");
   });
 });
 

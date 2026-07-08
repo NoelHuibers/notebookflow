@@ -17,7 +17,13 @@
 import { INLET_DROP_HANDLE_ID } from "../components/portEditorShared";
 import type { GraphModel, NodeModel, NodeTag } from "../types";
 import type { NotebookCell, ParseResult } from "./MarkerParser";
-import { formatRef, MarkerParser, parseRef } from "./MarkerParser";
+import {
+  formatInputBinding,
+  formatRef,
+  MarkerParser,
+  parseInputBinding,
+  parseRef,
+} from "./MarkerParser";
 
 export type SyncDirection = "cell-to-graph" | "graph-to-cell";
 
@@ -198,8 +204,15 @@ export class SyncEngine {
       if (other.id === nodeId) {
         continue;
       }
-      const newInputs = other.inputs.map((ref) =>
-        rewriteRefForRename(ref, node.groupId, other.groupId, sourceAlias, oldName, nextName),
+      const newInputs = other.inputs.map((binding) =>
+        rewriteBindingForRename(
+          binding,
+          node.groupId,
+          other.groupId,
+          sourceAlias,
+          oldName,
+          nextName,
+        ),
       );
       if (arraysEqual(newInputs, other.inputs)) {
         continue;
@@ -226,7 +239,7 @@ export class SyncEngine {
     }
   }
 
-  /** Graph→cell: persist a newly drawn wire by appending an in= ref to the target's marker. */
+  /** Graph→cell: persist a newly drawn wire by adding an in= binding to the target marker. */
   async createWire(
     sourceNodeId: string,
     sourcePort: string,
@@ -252,14 +265,26 @@ export class SyncEngine {
         ? `${source.name}.${sourcePort}`
         : `${sourceAlias}:${source.name}.${sourcePort}`;
     const routedRef = await this.routeInputRef(target, refStr, timestamp);
-    if (target.inputs.includes(routedRef)) {
+    const nextBinding =
+      targetPort === INLET_DROP_HANDLE_ID || !target.inputs.includes(targetPort)
+        ? bindingForSourceRef(routedRef)
+        : replaceBindingSourceRef(targetPort, routedRef);
+    if (nextBinding === null) {
       return;
     }
-
+    if (target.inputs.some((existing) => existing !== targetPort && existing === nextBinding)) {
+      return;
+    }
+    if (
+      (targetPort === INLET_DROP_HANDLE_ID || !target.inputs.includes(targetPort)) &&
+      target.inputs.includes(nextBinding)
+    ) {
+      return;
+    }
     const newInputs =
       targetPort === INLET_DROP_HANDLE_ID || !target.inputs.includes(targetPort)
-        ? [...target.inputs, routedRef]
-        : target.inputs.map((existing) => (existing === targetPort ? routedRef : existing));
+        ? [...target.inputs, nextBinding]
+        : target.inputs.map((existing) => (existing === targetPort ? nextBinding : existing));
     if (arraysEqual(newInputs, target.inputs)) {
       return;
     }
@@ -285,7 +310,7 @@ export class SyncEngine {
     this.opts.onGraphUpdate(this.getGraph());
   }
 
-  /** Graph→cell: replace a node's declared input refs and rewrite its marker. */
+  /** Graph→cell: replace a node's declared input bindings and rewrite its marker. */
   async setNodeInputs(nodeId: string, nextInputs: string[], timestamp: number): Promise<void> {
     const node = this.graph.nodes[nodeId];
     if (node === undefined) {
@@ -293,8 +318,16 @@ export class SyncEngine {
     }
     const normalized = normalizeInputs(nextInputs);
     const routed: string[] = [];
-    for (const ref of normalized) {
-      routed.push(await this.routeInputRef(node, ref, timestamp));
+    for (const binding of normalized) {
+      const sourceRef = sourceRefOfBinding(binding);
+      if (sourceRef === null) {
+        continue;
+      }
+      const routedRef = await this.routeInputRef(node, sourceRef, timestamp);
+      const routedBinding = replaceBindingSourceRef(binding, routedRef);
+      if (routedBinding !== null) {
+        routed.push(routedBinding);
+      }
     }
     await this.applyPorts(node, routed, node.outputs, timestamp);
   }
@@ -602,7 +635,7 @@ export class SyncEngine {
   }
 
   /**
-   * Resolve the input ref a target should declare. When an upstream node sits
+   * Resolve the source ref a target binding should declare. When an upstream node sits
    * earlier in the same notebook and a wire path already connects them through
    * intermediate cells, wire the port through those intermediates. Otherwise
    * link the target directly to the origin.
@@ -693,7 +726,7 @@ export class SyncEngine {
     portName: string,
     timestamp: number,
   ): Promise<void> {
-    const normalizedUpstream = normalizeInputs([upstreamRef])[0];
+    const normalizedUpstream = normalizeInputs([`${portName}<-${upstreamRef}`])[0];
     if (normalizedUpstream === undefined) {
       return;
     }
@@ -725,24 +758,28 @@ export class SyncEngine {
   }
 
   /**
-   * Rebuild every wire from the nodes' current input refs, resolving each
-   * ref alias-scoped and keeping only wires to a declared output port.
+   * Rebuild every wire from the nodes' current input bindings, resolving each
+   * source ref alias-scoped and keeping only wires to a declared output port.
    */
   private recomputeAllWires(): void {
     this.graph.wires = {};
     for (const target of Object.values(this.graph.nodes)) {
-      for (const ref of target.inputs) {
-        const resolved = this.resolveRef(ref, target.groupId);
+      for (const binding of target.inputs) {
+        const sourceRef = sourceRefOfBinding(binding);
+        if (sourceRef === null) {
+          continue;
+        }
+        const resolved = this.resolveRef(sourceRef, target.groupId);
         if (resolved === null || !resolved.source.outputs.includes(resolved.portName)) {
           continue;
         }
-        const wireId = makeWireId(resolved.source.id, resolved.portName, target.id, ref);
+        const wireId = makeWireId(resolved.source.id, resolved.portName, target.id, binding);
         this.graph.wires[wireId] = {
           id: wireId,
           sourceNodeId: resolved.source.id,
           sourcePort: resolved.portName,
           targetNodeId: target.id,
-          targetPort: ref,
+          targetPort: binding,
         };
       }
     }
@@ -792,6 +829,55 @@ function rewriteRefForRename(
   return formatRef({ ...parsed, nodeName: newName });
 }
 
+function rewriteBindingForRename(
+  binding: string,
+  renamedGroupId: string,
+  refOwnerGroupId: string,
+  renamedGroupAlias: string | null,
+  oldName: string,
+  newName: string,
+): string {
+  const parsed = parseInputBinding(binding);
+  if (parsed === null) {
+    return binding;
+  }
+  const rewritten = rewriteRefForRename(
+    formatRef(parsed.source),
+    renamedGroupId,
+    refOwnerGroupId,
+    renamedGroupAlias,
+    oldName,
+    newName,
+  );
+  const source = parseRef(rewritten);
+  if (source === null) {
+    return binding;
+  }
+  return formatInputBinding({ localName: parsed.localName, source });
+}
+
+function sourceRefOfBinding(binding: string): string | null {
+  const parsed = parseInputBinding(binding);
+  return parsed === null ? null : formatRef(parsed.source);
+}
+
+function bindingForSourceRef(sourceRef: string): string | null {
+  const source = parseRef(sourceRef);
+  if (source === null) {
+    return null;
+  }
+  return formatInputBinding({ localName: source.portName, source });
+}
+
+function replaceBindingSourceRef(binding: string, sourceRef: string): string | null {
+  const existing = parseInputBinding(binding);
+  const source = parseRef(sourceRef);
+  if (existing === null || source === null) {
+    return null;
+  }
+  return formatInputBinding({ localName: existing.localName, source });
+}
+
 function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
   if (a.length !== b.length) {
     return false;
@@ -808,14 +894,12 @@ function normalizeInputs(inputs: string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
   for (const raw of inputs) {
-    const ref = raw.trim();
-    // parseRef accepts both local `Node.port` and qualified `alias:Node.port`,
-    // and validates the alias / name / port charsets.
-    const parsed = parseRef(ref);
+    const binding = raw.trim();
+    const parsed = parseInputBinding(binding);
     if (parsed === null) {
-      throw new Error(`SyncEngine: invalid input ref ${JSON.stringify(ref)}`);
+      throw new Error(`SyncEngine: invalid input binding ${JSON.stringify(binding)}`);
     }
-    const normalized = formatRef(parsed);
+    const normalized = formatInputBinding(parsed);
     if (!seen.has(normalized)) {
       seen.add(normalized);
       result.push(normalized);

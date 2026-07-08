@@ -2,7 +2,7 @@
  * Autocomplete pools for the port editor on canvas nodes.
  */
 
-import { parseRef } from "../sync/MarkerParser";
+import { parseInputBinding } from "../sync/MarkerParser";
 import type { GraphModel, NodeModel } from "../types";
 
 /** Valid output port name per the marker grammar (lowercase identifier). */
@@ -27,9 +27,9 @@ export function collectPortNames(
     addPortName(names, output);
   }
   for (const ref of node.inputs) {
-    const parsed = parseRef(ref);
+    const parsed = parseInputBinding(ref);
     if (parsed !== null) {
-      addPortName(names, parsed.portName);
+      addPortName(names, parsed.localName);
     }
   }
   for (const name of variablesByNode[node.id] ?? []) {

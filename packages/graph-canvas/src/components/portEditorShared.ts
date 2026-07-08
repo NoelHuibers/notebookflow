@@ -1,5 +1,7 @@
 import type { CSSProperties } from "react";
 
+import { parseInputBinding, parseRef } from "../sync/MarkerParser";
+
 export const NODE_MUTED = "var(--notebookflow-node-muted, var(--muted-foreground, #6b7280))";
 export const NODE_BORDER = "var(--notebookflow-node-border, var(--border, #d1d5db))";
 export const NODE_BACKGROUND = "var(--notebookflow-node-bg, var(--card, #ffffff))";
@@ -46,13 +48,7 @@ export function isValidPort(kind: PortKind, value: string): boolean {
   if (kind === "output") {
     return PORT_RE.test(trimmed);
   }
-  const dotIdx = trimmed.lastIndexOf(".");
-  if (dotIdx === -1) {
-    return false;
-  }
-  const nodeName = trimmed.slice(0, dotIdx).trim();
-  const portName = trimmed.slice(dotIdx + 1).trim();
-  return NAME_RE.test(nodeName) && PORT_RE.test(portName);
+  return parseInputBinding(trimmed) !== null || parseRef(trimmed) !== null;
 }
 
 interface PortChipStyles {

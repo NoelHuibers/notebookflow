@@ -1,7 +1,7 @@
 """Pipeline executor.
 
 Walks a DAG in topological order, runs each node's source via ``exec()``
-in an isolated namespace (declared inputs plus names the cell defines),
+in an isolated namespace (declared input bindings plus names the cell defines),
 and mirrors each output port's value into the DataBus for downstream
 inspection and persistence.
 
@@ -136,14 +136,21 @@ def _make_display(outputs: list[NbOutput]) -> Callable[..., None]:
     return display
 
 
-def _parse_ref(ref: str, own_alias: str) -> tuple[str, str, str] | None:
-    """Split an ``in=`` ref into (alias, node_name, port).
+def _parse_input_binding(binding: str, own_alias: str) -> tuple[str, str, str, str] | None:
+    """Split an ``in=`` binding into (local_name, alias, node_name, port).
 
-    ``alias:Node.port`` -> (alias, "Node", "port"); a local ``Node.port`` ->
-    (own_alias, "Node", "port"). Node names may contain dots but not colons,
-    so the alias is everything before the first ``:`` and the port is
-    everything after the last ``.``. Returns None when there is no port.
+    ``local<-alias:Node.port`` -> ("local", alias, "Node", "port"); a local
+    source ref ``local<-Node.port`` uses ``own_alias``. Node names may contain
+    dots but not colons, so the alias is everything before the first ``:`` and
+    the port is everything after the last ``.``. Returns None when malformed.
     """
+    if "<-" not in binding:
+        return None
+    local_name, ref = binding.split("<-", 1)
+    local_name = local_name.strip()
+    ref = ref.strip()
+    if not local_name or not ref:
+        return None
     if ":" in ref:
         alias, rest = ref.split(":", 1)
     else:
@@ -151,7 +158,7 @@ def _parse_ref(ref: str, own_alias: str) -> tuple[str, str, str] | None:
     if "." not in rest:
         return None
     name, port = rest.rsplit(".", 1)
-    return alias, name, port
+    return local_name, alias, name, port
 
 
 def _introspect_outputs(namespace: dict[str, Any], ports: list[str]) -> dict[str, Any]:
@@ -303,18 +310,18 @@ class Executor:
     def _gather_inputs(
         self, node: DAGNode, id_index: dict[tuple[str, str], str]
     ) -> dict[str, Any]:
-        """Resolve marker ``in=`` refs to actual values via the DataBus.
+        """Resolve marker ``in=`` bindings to actual values via the DataBus.
 
-        A local ``Node.port`` ref resolves within the node's own notebook
-        (its alias); a qualified ``alias:Node.port`` ref resolves within the
-        notebook declaring that alias.
+        A local source ref resolves within the node's own notebook (its alias);
+        a qualified source ref resolves within the notebook declaring that alias.
+        Values are injected under the binding's left-hand local variable.
         """
         result: dict[str, Any] = {}
-        for ref in node.inputs:
-            parsed = _parse_ref(ref, node.alias)
+        for binding in node.inputs:
+            parsed = _parse_input_binding(binding, node.alias)
             if parsed is None:
                 continue
-            up_alias, up_name, port = parsed
+            local_name, up_alias, up_name, port = parsed
             up_id = id_index.get((up_alias, up_name))
             if up_id is None:
                 continue
@@ -322,7 +329,7 @@ class Executor:
                 payload = self._bus.get(up_id, port)
             except KeyError:
                 continue
-            result[port] = payload.value
+            result[local_name] = payload.value
         return result
 
     @property

@@ -83,9 +83,12 @@ Flowco (UIST 2025) proved that a dataflow graph is a better authoring model than
 # @node: Load CSV  [input]
 import pandas as pd
 df = pd.read_csv("data.csv")
+
+# @node: Filter  [transform]  in=df<-Load CSV.df  out=clean_df
+clean_df = df.dropna()
 ```
 
-The marker defines node name, tag (`input` / `transform` / `output` / `ai` / `io`), inputs, and outputs.
+The marker defines node name, tag (`input` / `transform` / `output` / `ai` / `io`), inputs, and outputs. Inputs use `local_var<-Node.output`, so rewiring a node changes only the right-hand source while the cell body keeps using the stable local variable.
 
 **Level 2 — Notebook = NodeGroup.** A full `.ipynb` file is a group of nodes. On the canvas it renders as a collapsible container. Collapsed = one rectangle. Expanded = shows internal cell-group nodes.
 

@@ -7,13 +7,13 @@
  * Single-line (canonical — what we EMIT):
  *
  *   # @node: <name>  [<tag>]                       — minimal form
- *   # @node: <name>  [<tag>]  in=a.x,b.y  out=df   — with declared refs/ports
+ *   # @node: <name>  [<tag>]  in=x<-A.y  out=df    — with declared bindings/ports
  *
  * Multi-line (also ACCEPTED — the tag may move to `# @tag:`, and refs/ports to
  * their own continuation comment lines immediately following `# @node:`):
  *
  *   # @node: <name>
- *   # @inputs: a.x, b.y        (alias: # @in:)
+ *   # @inputs: x<-A.y          (alias: # @in:)
  *   # @outputs: df             (alias: # @out:)
  *   # @tag: <tag>
  *
@@ -29,8 +29,8 @@
  * Charset rules:
  *   - <name>      : [A-Za-z0-9 _-]+ trimmed; terminates at the first '['.
  *   - <tag>       : one of input | transform | output | ai | io.
- *   - in= refs    : comma-separated refs, each `nodeName.portName` (local) or
- *                   `alias:nodeName.portName` (cross-notebook, see #18).
+ *   - in= bindings: comma-separated `localName<-nodeName.portName` entries.
+ *                   Source refs may be qualified as `localName<-alias:nodeName.portName`.
  *   - out= names  : comma-separated bare portName entries.
  *   - portName    : [a-z][a-z0-9_]*.
  *   - alias       : [a-z][a-z0-9_-]*.
@@ -60,11 +60,17 @@ export interface ParseResult {
   alias: string;
 }
 
-/** A parsed `in=` reference: local (alias === null) or alias-qualified. */
+/** A parsed source reference: local (alias === null) or alias-qualified. */
 export interface ParsedRef {
   alias: string | null;
   nodeName: string;
   portName: string;
+}
+
+/** A parsed input binding: inject source ref value into the local variable. */
+export interface ParsedInputBinding {
+  localName: string;
+  source: ParsedRef;
 }
 
 export interface NotebookCell {
@@ -85,7 +91,7 @@ const NAME_RE = /^[A-Za-z0-9 _-]+$/;
 const PORT_RE = /^[a-z][a-z0-9_]*$/;
 const ALIAS_RE = /^[a-z][a-z0-9_-]*$/;
 const MARKER_PREFIX_RE = /^#\s+@node:/;
-// Continuation comment lines for the multi-line form, e.g. `# @inputs: a.x`.
+// Continuation comment lines for the multi-line form, e.g. `# @inputs: x<-A.y`.
 const CONTINUATION_RE = /^#\s+@(inputs|in|outputs|out|tag)\s*:\s*(.*)$/;
 const NOTEBOOK_PREFIX_RE = /^#\s+@notebook:/;
 const NOTEBOOK_RE = /^#\s+@notebook:\s*(\S+)\s*$/;
@@ -393,19 +399,19 @@ function parseInputRefs(value: string): string[] {
     return [];
   }
   return value.split(",").map((raw) => {
-    const ref = raw.trim();
-    if (ref === "") {
-      throw new MarkerParseError("Empty input ref");
+    const binding = raw.trim();
+    if (binding === "") {
+      throw new MarkerParseError("Empty input binding");
     }
-    // Re-serialise via parseRef so the stored string is normalised and any
-    // structural error is surfaced here at parse time.
-    const parsed = parseRefOrThrow(ref);
-    return formatRef(parsed);
+    // Re-serialise so the stored string is normalised and structural errors
+    // surface here at parse time.
+    const parsed = parseInputBindingOrThrow(binding);
+    return formatInputBinding(parsed);
   });
 }
 
 /**
- * Split an `in=` reference into its alias (or null), node name, and port.
+ * Split a source reference into its alias (or null), node name, and port.
  * Cross-notebook refs are `alias:NodeName.port`; local refs are
  * `NodeName.port`. Returns null when the ref is structurally invalid — the
  * SyncEngine treats that as an unresolved wire rather than throwing.
@@ -422,6 +428,23 @@ export function parseRef(ref: string): ParsedRef | null {
 export function formatRef(ref: ParsedRef): string {
   const local = `${ref.nodeName}.${ref.portName}`;
   return ref.alias === null ? local : `${ref.alias}:${local}`;
+}
+
+/**
+ * Split an `in=` binding into its local Python variable and upstream source ref.
+ * The notebook marker grammar requires the explicit `local<-source.ref` form.
+ */
+export function parseInputBinding(binding: string): ParsedInputBinding | null {
+  try {
+    return parseInputBindingOrThrow(binding);
+  } catch {
+    return null;
+  }
+}
+
+/** Serialise a parsed input binding to canonical `local<-alias:Node.port` form. */
+export function formatInputBinding(binding: ParsedInputBinding): string {
+  return `${binding.localName}<-${formatRef(binding.source)}`;
 }
 
 /** Derive a notebook alias from its path: the lowercased, sanitised stem. */
@@ -458,6 +481,24 @@ function parseRefOrThrow(ref: string): ParsedRef {
     throw new MarkerParseError(`Invalid portName in ref: ${JSON.stringify(portName)}`);
   }
   return { alias, nodeName, portName };
+}
+
+function parseInputBindingOrThrow(binding: string): ParsedInputBinding {
+  const arrowIdx = binding.indexOf("<-");
+  if (arrowIdx === -1) {
+    throw new MarkerParseError(
+      `Input binding ${JSON.stringify(binding)} must be localName<-nodeName.portName`,
+    );
+  }
+  const localName = binding.slice(0, arrowIdx).trim();
+  const sourceRef = binding.slice(arrowIdx + 2).trim();
+  if (!PORT_RE.test(localName)) {
+    throw new MarkerParseError(`Invalid local input name: ${JSON.stringify(localName)}`);
+  }
+  if (sourceRef === "") {
+    throw new MarkerParseError(`Input binding ${JSON.stringify(binding)} is missing a source ref`);
+  }
+  return { localName, source: parseRefOrThrow(sourceRef) };
 }
 
 function parsePortNames(value: string): string[] {

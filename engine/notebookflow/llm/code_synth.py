@@ -186,13 +186,13 @@ class CodeSynth:
 def _input_vars(manifest: NodeManifest, refs: list[str]) -> list[str]:
     names: list[str] = []
     seen: set[str] = set()
-    for ref in refs:
-        if "." not in ref:
+    for binding in refs:
+        if "<-" not in binding:
             continue
-        port = ref.rsplit(".", 1)[1].strip()
-        if port != "" and port not in seen:
-            seen.add(port)
-            names.append(port)
+        local_name = binding.split("<-", 1)[0].strip()
+        if local_name != "" and local_name not in seen:
+            seen.add(local_name)
+            names.append(local_name)
     if names:
         return names
     return [port.name for port in manifest.inputs]

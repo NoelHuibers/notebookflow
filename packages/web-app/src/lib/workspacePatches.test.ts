@@ -74,13 +74,13 @@ describe("workspace patch routing", () => {
       notebookPath: "b.ipynb",
       cellIndex: 0,
       operation: "replace",
-      newSource: "# @node: Use  [transform]  in=a:Load.df\n",
+      newSource: "# @node: Use  [transform]  in=df<-a:Load.df\n",
     };
 
     const patched = applyPatchToSnapshot(original, "b.ipynb", patch);
 
-    expect(patched.cells[0]?.source).toContain("in=a:Load.df");
-    expect(original.cells[0]?.source).not.toContain("in=a:Load.df");
+    expect(patched.cells[0]?.source).toContain("in=df<-a:Load.df");
+    expect(original.cells[0]?.source).not.toContain("in=df<-a:Load.df");
     expect(patched.baseline).toEqual(original.baseline);
     expect(patched.fileHandle).toBe(original.fileHandle);
   });

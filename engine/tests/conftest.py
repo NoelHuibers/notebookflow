@@ -26,10 +26,10 @@ def linear_dag() -> DAG:
     """A → B → C linear pipeline with no cell sources attached."""
     dag = DAG()
     dag.add_node(DAGNode(id="a", name="A", tag="input", outputs=["df"]))
-    dag.add_node(DAGNode(id="b", name="B", tag="transform", inputs=["A.df"], outputs=["clean"]))
-    dag.add_node(DAGNode(id="c", name="C", tag="output", inputs=["B.clean"]))
-    dag.add_edge(DAGEdge("a", "df", "b", "A.df"))
-    dag.add_edge(DAGEdge("b", "clean", "c", "B.clean"))
+    dag.add_node(DAGNode(id="b", name="B", tag="transform", inputs=["df<-A.df"], outputs=["clean"]))
+    dag.add_node(DAGNode(id="c", name="C", tag="output", inputs=["clean<-B.clean"]))
+    dag.add_edge(DAGEdge("a", "df", "b", "df<-A.df"))
+    dag.add_edge(DAGEdge("b", "clean", "c", "clean<-B.clean"))
     return dag
 
 
@@ -51,7 +51,7 @@ def runnable_dag() -> DAG:
             id="b",
             name="B",
             tag="transform",
-            inputs=["A.df"],
+            inputs=["df<-A.df"],
             outputs=["clean"],
             source="clean = [x for x in df if x % 2 == 1]\n",
         )
@@ -61,11 +61,11 @@ def runnable_dag() -> DAG:
             id="c",
             name="C",
             tag="output",
-            inputs=["B.clean"],
+            inputs=["clean<-B.clean"],
             outputs=["total"],
             source="total = sum(clean)\n",
         )
     )
-    dag.add_edge(DAGEdge("a", "df", "b", "A.df"))
-    dag.add_edge(DAGEdge("b", "clean", "c", "B.clean"))
+    dag.add_edge(DAGEdge("a", "df", "b", "df<-A.df"))
+    dag.add_edge(DAGEdge("b", "clean", "c", "clean<-B.clean"))
     return dag

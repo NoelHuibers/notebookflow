@@ -74,14 +74,14 @@ describe("SyncEngine.ingestNotebook", () => {
     expect(loadCsv?.outputs).toEqual(["df"]);
 
     const filter = graph.nodes[`${TWO_NODE_PATH}::2`];
-    expect(filter?.inputs).toEqual(["Load CSV.df"]);
+    expect(filter?.inputs).toEqual(["df<-Load CSV.df"]);
 
     const wires = Object.values(graph.wires);
     expect(wires[0]).toMatchObject({
       sourceNodeId: `${TWO_NODE_PATH}::1`,
       sourcePort: "df",
       targetNodeId: `${TWO_NODE_PATH}::2`,
-      targetPort: "Load CSV.df",
+      targetPort: "df<-Load CSV.df",
     });
 
     expect(adapter.patches).toHaveLength(0);
@@ -123,7 +123,10 @@ describe("SyncEngine.ingestNotebook", () => {
 
     // Reingest B alone with a new ref pointing to a non-existent node.
     const stale: NotebookCell[] = [
-      { cellType: "code", source: "# @node: Filter  [transform]  in=Missing.df  out=clean_df\n" },
+      {
+        cellType: "code",
+        source: "# @node: Filter  [transform]  in=df<-Missing.df  out=clean_df\n",
+      },
     ];
     await engine.ingestNotebook(B_PATH, stale, 200);
     expect(Object.keys(engine.getGraph().wires)).toHaveLength(0);
@@ -150,7 +153,7 @@ describe("SyncEngine — cross-notebook aliasing (#18)", () => {
       sourceNodeId: `${A_PATH}::0`,
       sourcePort: "df",
       targetNodeId: `${B_PATH}::0`,
-      targetPort: "a:Load CSV.df",
+      targetPort: "df<-a:Load CSV.df",
     });
   });
 
@@ -160,7 +163,7 @@ describe("SyncEngine — cross-notebook aliasing (#18)", () => {
     await engine.ingestNotebook(A_PATH, toNotebookCells(crossA), 100);
     // B uses a bare `Load CSV.df` (no alias) — resolves locally in B only.
     const bareB: NotebookCell[] = [
-      { cellType: "code", source: "# @node: Filter  [transform]  in=Load CSV.df  out=clean\n" },
+      { cellType: "code", source: "# @node: Filter  [transform]  in=df<-Load CSV.df  out=clean\n" },
     ];
     await engine.ingestNotebook(B_PATH, bareB, 100);
     expect(Object.keys(engine.getGraph().wires)).toHaveLength(0);
@@ -174,7 +177,7 @@ describe("SyncEngine — cross-notebook aliasing (#18)", () => {
       { cellType: "code", source: "# @node: Load  [input]  out=df\n" },
     ];
     const bCells: NotebookCell[] = [
-      { cellType: "code", source: "# @node: Use  [transform]  in=upstream:Load.df  out=r\n" },
+      { cellType: "code", source: "# @node: Use  [transform]  in=df<-upstream:Load.df  out=r\n" },
     ];
     await engine.ingestNotebook(A_PATH, aCells, 100);
     expect(engine.getGraph().groups[A_PATH]?.alias).toBe("upstream");
@@ -225,7 +228,7 @@ describe("SyncEngine.renameNode", () => {
     expect(patch?.notebookPath).toBe(TWO_NODE_PATH);
     expect(patch?.cellIndex).toBe(2);
     expect(patch?.newSource).toMatch(
-      /^# @node: Cleaner {2}\[transform] {2}in=Load CSV\.df {2}out=clean_df\nclean_df = df\.dropna\(\)/,
+      /^# @node: Cleaner {2}\[transform] {2}in=df<-Load CSV\.df {2}out=clean_df\nclean_df = df\.dropna\(\)/,
     );
     expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::2`]?.name).toBe("Cleaner");
   });
@@ -243,11 +246,11 @@ describe("SyncEngine.renameNode", () => {
     expect(adapter.patches.map((p) => p.cellIndex).sort()).toEqual([1, 2]);
 
     const filter = engine.getGraph().nodes[`${TWO_NODE_PATH}::2`];
-    expect(filter?.inputs).toEqual(["Loader.df"]);
+    expect(filter?.inputs).toEqual(["df<-Loader.df"]);
 
     const wires = Object.values(engine.getGraph().wires);
     expect(wires).toHaveLength(1);
-    expect(wires[0]?.targetPort).toBe("Loader.df");
+    expect(wires[0]?.targetPort).toBe("df<-Loader.df");
   });
 
   it("cascades a rename to cross-notebook qualified refs", async () => {
@@ -265,10 +268,10 @@ describe("SyncEngine.renameNode", () => {
     // Both A's cell and B's referencing cell get patched.
     expect(adapter.patches.map((p) => p.notebookPath).sort()).toEqual([A_PATH, B_PATH]);
     const bPatch = adapter.patches.find((p) => p.notebookPath === B_PATH);
-    expect(bPatch?.newSource).toContain("in=a:Loader.df");
+    expect(bPatch?.newSource).toContain("in=df<-a:Loader.df");
 
     // B's ref now points at the renamed node, so the cross-notebook wire survives.
-    expect(engine.getGraph().nodes[`${B_PATH}::0`]?.inputs).toEqual(["a:Loader.df"]);
+    expect(engine.getGraph().nodes[`${B_PATH}::0`]?.inputs).toEqual(["df<-a:Loader.df"]);
     expect(Object.keys(engine.getGraph().wires)).toHaveLength(1);
   });
 
@@ -301,12 +304,12 @@ describe("SyncEngine.createWire", () => {
 
     expect(adapter.patches).toHaveLength(1);
     expect(adapter.patches[0]?.cellIndex).toBe(1);
-    expect(adapter.patches[0]?.newSource).toContain("in=Source.df");
+    expect(adapter.patches[0]?.newSource).toContain("in=df<-Source.df");
 
     const wires = Object.values(engine.getGraph().wires);
     expect(wires).toHaveLength(1);
-    expect(wires[0]?.targetPort).toBe("Source.df");
-    expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::1`]?.inputs).toEqual(["Source.df"]);
+    expect(wires[0]?.targetPort).toBe("df<-Source.df");
+    expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::1`]?.inputs).toEqual(["df<-Source.df"]);
   });
 
   it("adds a missing output port on the upstream node when an input ref is declared", async () => {
@@ -324,8 +327,37 @@ describe("SyncEngine.createWire", () => {
     expect(adapter.patches[0]?.cellIndex).toBe(0);
     expect(adapter.patches[0]?.newSource).toContain("out=df");
     expect(adapter.patches[1]?.cellIndex).toBe(1);
-    expect(adapter.patches[1]?.newSource).toContain("in=Source.df");
+    expect(adapter.patches[1]?.newSource).toContain("in=df<-Source.df");
     expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::0`]?.outputs).toEqual(["df"]);
+  });
+
+  it("replacing an existing input preserves its local variable name", async () => {
+    const adapter = recordingAdapter();
+    const engine = new SyncEngine(adapter.options);
+    const cells: NotebookCell[] = [
+      { cellType: "code", source: "# @node: Orders  [input]  out=raw_df\n" },
+      { cellType: "code", source: "# @node: Customers  [input]  out=cleaned\n" },
+      {
+        cellType: "code",
+        source: "# @node: Filter  [transform]  in=df<-Orders.raw_df  out=clean_df\nclean_df = df\n",
+      },
+    ];
+    await engine.ingestNotebook(TWO_NODE_PATH, cells, 100);
+
+    await engine.createWire(
+      `${TWO_NODE_PATH}::1`,
+      "cleaned",
+      `${TWO_NODE_PATH}::2`,
+      "df<-Orders.raw_df",
+      200,
+    );
+
+    expect(adapter.patches).toHaveLength(1);
+    expect(adapter.patches[0]?.newSource).toContain("in=df<-Customers.cleaned");
+    expect(adapter.patches[0]?.newSource).toContain("clean_df = df");
+    expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::2`]?.inputs).toEqual([
+      "df<-Customers.cleaned",
+    ]);
   });
 
   it("is a no-op when the target already has that input ref", async () => {
@@ -481,14 +513,14 @@ describe("SyncEngine.setNodeInputs / setNodeOutputs", () => {
     await engine.ingestNotebook(TWO_NODE_PATH, cells, 100);
     expect(Object.keys(engine.getGraph().wires)).toHaveLength(0);
 
-    await engine.setNodeInputs(`${TWO_NODE_PATH}::1`, ["Source.df"], 200);
+    await engine.setNodeInputs(`${TWO_NODE_PATH}::1`, ["df<-Source.df"], 200);
 
     expect(adapter.patches[0]?.cellIndex).toBe(1);
-    expect(adapter.patches[0]?.newSource).toContain("in=Source.df");
+    expect(adapter.patches[0]?.newSource).toContain("in=df<-Source.df");
     const wires = Object.values(engine.getGraph().wires);
     expect(wires).toHaveLength(1);
-    expect(wires[0]?.targetPort).toBe("Source.df");
-    expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::1`]?.inputs).toEqual(["Source.df"]);
+    expect(wires[0]?.targetPort).toBe("df<-Source.df");
+    expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::1`]?.inputs).toEqual(["df<-Source.df"]);
   });
 
   it("drops a downstream wire when the referenced output is removed", async () => {
@@ -515,12 +547,12 @@ describe("SyncEngine.setNodeInputs / setNodeOutputs", () => {
     ];
     await engine.ingestNotebook(TWO_NODE_PATH, cells, 100);
 
-    await engine.setNodeInputs(`${TWO_NODE_PATH}::2`, ["Cell1.n"], 200);
+    await engine.setNodeInputs(`${TWO_NODE_PATH}::2`, ["n<-Cell1.n"], 200);
 
     expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::0`]?.outputs).toEqual(["n"]);
     expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::1`]?.inputs).toEqual([]);
     expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::1`]?.outputs).toEqual([]);
-    expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::2`]?.inputs).toEqual(["Cell1.n"]);
+    expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::2`]?.inputs).toEqual(["n<-Cell1.n"]);
     expect(Object.keys(engine.getGraph().wires)).toHaveLength(1);
   });
 
@@ -529,14 +561,14 @@ describe("SyncEngine.setNodeInputs / setNodeOutputs", () => {
     const engine = new SyncEngine(adapter.options);
     const cells: NotebookCell[] = [
       { cellType: "code", source: "# @node: Cell1  [input]  out=n\n" },
-      { cellType: "code", source: "# @node: Cell2  [transform]  in=Cell1.n  out=n\n" },
-      { cellType: "code", source: "# @node: Cell3  [transform]  in=Cell2.n\n" },
+      { cellType: "code", source: "# @node: Cell2  [transform]  in=n<-Cell1.n  out=n\n" },
+      { cellType: "code", source: "# @node: Cell3  [transform]  in=n<-Cell2.n\n" },
     ];
     await engine.ingestNotebook(TWO_NODE_PATH, cells, 100);
 
-    await engine.setNodeInputs(`${TWO_NODE_PATH}::2`, ["Cell1.n"], 200);
+    await engine.setNodeInputs(`${TWO_NODE_PATH}::2`, ["n<-Cell1.n"], 200);
 
-    expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::2`]?.inputs).toEqual(["Cell2.n"]);
+    expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::2`]?.inputs).toEqual(["n<-Cell2.n"]);
     const wires = Object.values(engine.getGraph().wires);
     expect(wires).toHaveLength(2);
     expect(wires).toEqual(
@@ -562,13 +594,13 @@ describe("SyncEngine.setNodeInputs / setNodeOutputs", () => {
     ];
     await engine.ingestNotebook(TWO_NODE_PATH, cells, 100);
 
-    await engine.setNodeInputs(`${TWO_NODE_PATH}::1`, ["Source.df"], 200);
+    await engine.setNodeInputs(`${TWO_NODE_PATH}::1`, ["df<-Source.df"], 200);
 
     expect(adapter.patches).toHaveLength(2);
     expect(adapter.patches[0]?.cellIndex).toBe(0);
     expect(adapter.patches[0]?.newSource).toContain("out=df");
     expect(adapter.patches[1]?.cellIndex).toBe(1);
-    expect(adapter.patches[1]?.newSource).toContain("in=Source.df");
+    expect(adapter.patches[1]?.newSource).toContain("in=df<-Source.df");
     expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::0`]?.outputs).toEqual(["df"]);
     expect(Object.keys(engine.getGraph().wires)).toHaveLength(1);
   });
@@ -582,8 +614,8 @@ describe("SyncEngine.setNodeInputs / setNodeOutputs", () => {
     ];
     await engine.ingestNotebook(TWO_NODE_PATH, cells, 100);
 
-    await engine.setNodeInputs(`${TWO_NODE_PATH}::1`, ["Source.df", "Source.df"], 200);
-    expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::1`]?.inputs).toEqual(["Source.df"]);
+    await engine.setNodeInputs(`${TWO_NODE_PATH}::1`, ["df<-Source.df", "df<-Source.df"], 200);
+    expect(engine.getGraph().nodes[`${TWO_NODE_PATH}::1`]?.inputs).toEqual(["df<-Source.df"]);
 
     await expect(engine.setNodeInputs(`${TWO_NODE_PATH}::1`, ["nope"], 300)).rejects.toThrow();
     await expect(engine.setNodeOutputs(`${TWO_NODE_PATH}::1`, ["Bad Port"], 300)).rejects.toThrow();

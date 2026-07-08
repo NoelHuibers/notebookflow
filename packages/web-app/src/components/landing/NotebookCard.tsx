@@ -37,15 +37,15 @@ const CELLS: Cell[] = [
     ],
   },
   {
-    marker: "# @node: Filter  [transform]  in=Load Data.df  out=clean_df",
+    marker: "# @node: Filter  [transform]  in=df<-Load Data.df  out=clean_df",
     lines: [{ code: 'clean_df = df.dropna(subset=["revenue"])' }],
   },
   {
-    marker: "# @node: Summarize  [transform]  in=Filter.clean_df  out=by_region",
+    marker: "# @node: Summarize  [transform]  in=clean_df<-Filter.clean_df  out=by_region",
     lines: [{ code: 'by_region = clean_df.groupby("region").agg(…)' }],
   },
   {
-    marker: "# @node: Report  [output]  in=Summarize.by_region",
+    marker: "# @node: Report  [output]  in=by_region<-Summarize.by_region",
     lines: [{ code: "print(by_region.to_string(index=False))", kind: "fn" }],
   },
 ];

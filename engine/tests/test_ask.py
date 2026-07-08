@@ -16,9 +16,16 @@ _CREDS = CredentialContext(provider="openai", model="gpt-4o", api_key="sk-test")
 def _dag() -> DAG:
     dag = DAG()
     dag.add_node(DAGNode(id="n1", name="Load CSV", tag="input", inputs=[], outputs=["df"]))
-    dag.add_node(DAGNode(id="n2", name="Plot", tag="output", inputs=["df"], outputs=[]))
+    dag.add_node(
+        DAGNode(id="n2", name="Plot", tag="output", inputs=["df<-Load CSV.df"], outputs=[])
+    )
     dag.add_edge(
-        DAGEdge(source_node_id="n1", source_port="df", target_node_id="n2", target_port="df"),
+        DAGEdge(
+            source_node_id="n1",
+            source_port="df",
+            target_node_id="n2",
+            target_port="df<-Load CSV.df",
+        ),
     )
     return dag
 

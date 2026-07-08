@@ -163,5 +163,7 @@ def test_marker_for_skips_empty_input_and_output_segments() -> None:
     parse_csv = catalog["notebookflow.parse_csv"]
     marker = pa_module._marker_for("Load", parse_csv, [], ["df"])
     assert marker == "# @node: Load  [input]  out=df"
-    marker = pa_module._marker_for("Filter", catalog["notebookflow.filter_rows"], ["Load.df"], [])
-    assert marker == "# @node: Filter  [transform]  in=Load.df"
+    marker = pa_module._marker_for(
+        "Filter", catalog["notebookflow.filter_rows"], ["df<-Load.raw_df"], []
+    )
+    assert marker == "# @node: Filter  [transform]  in=df<-Load.raw_df"

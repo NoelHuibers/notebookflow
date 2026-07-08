@@ -44,7 +44,7 @@
       "metadata": {},
       "outputs": [],
       "source": [
-        "# @node: Clean  [transform]  in=Generate sales.sales  out=clean\n",
+        "# @node: Clean  [transform]  in=sales<-Generate sales.sales  out=clean\n",
         "clean = sales.dropna().copy()\n",
         "clean = clean[clean[\"revenue\"] > 0]\n",
         "print(f\"{len(clean)} rows after cleaning\")"
@@ -56,7 +56,7 @@
       "metadata": {},
       "outputs": [],
       "source": [
-        "# @node: Revenue by region  [transform]  in=Clean.clean  out=by_region\n",
+        "# @node: Revenue by region  [transform]  in=clean<-Clean.clean  out=by_region\n",
         "by_region = (\n",
         "    clean.groupby(\"region\", as_index=False)[\"revenue\"].sum()\n",
         "    .sort_values(\"revenue\", ascending=False)\n",
@@ -71,7 +71,7 @@
       "metadata": {},
       "outputs": [],
       "source": [
-        "# @node: Plot revenue  [output]  in=Revenue by region.by_region\n",
+        "# @node: Plot revenue  [output]  in=by_region<-Revenue by region.by_region\n",
         "import matplotlib\n",
         "\n",
         "matplotlib.use(\"Agg\")\n",

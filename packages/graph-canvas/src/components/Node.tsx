@@ -30,11 +30,11 @@ import { STACKED_PORT_COLUMN_MIN } from "./portEditorShared";
 
 export interface NotebookNodeData extends NodeModel {
   onRename?: (nodeId: string, nextName: string) => void;
-  /** Replace the node's declared input refs (nodeName.portName). */
+  /** Replace the node's declared input bindings (`local<-nodeName.portName`). */
   onInputsChange?: (nodeId: string, nextInputs: string[]) => void;
   /** Replace the node's declared output port names. */
   onOutputsChange?: (nodeId: string, nextOutputs: string[]) => void;
-  /** Autocomplete suggestions for input refs (upstream nodeName.portName). */
+  /** Autocomplete suggestions for source refs (upstream nodeName.portName). */
   inputSuggestions?: string[];
   /** Autocomplete suggestions for output port names. */
   outputSuggestions?: string[];

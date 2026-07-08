@@ -50,7 +50,7 @@ const transformNode: NodeModel = {
   name: "Transform",
   tag: "transform",
   cellIndices: [0],
-  inputs: ["Load.df"],
+  inputs: ["df<-Load.df"],
   outputs: ["clean"],
 };
 

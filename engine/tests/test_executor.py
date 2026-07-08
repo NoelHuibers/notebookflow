@@ -9,7 +9,7 @@ import pytest
 
 from notebookflow.core.dag import DAG, DAGEdge, DAGNode
 from notebookflow.core.databus import DataBus
-from notebookflow.core.executor import Executor, _introspect_outputs, _parse_ref
+from notebookflow.core.executor import Executor, _introspect_outputs, _parse_input_binding
 
 
 async def test_run_empty_pipeline_returns_no_results(bus: DataBus) -> None:
@@ -59,12 +59,12 @@ async def test_run_pipeline_with_dataframe_payload(bus: DataBus) -> None:
             id="b",
             name="B",
             tag="transform",
-            inputs=["A.df"],
+            inputs=["df<-A.df"],
             outputs=["doubled"],
             source="doubled = df.assign(x=df['x'] * 2)\n",
         )
     )
-    dag.add_edge(DAGEdge("a", "df", "b", "A.df"))
+    dag.add_edge(DAGEdge("a", "df", "b", "df<-A.df"))
 
     executor = Executor(dag, bus)
     results = await executor.run_pipeline()
@@ -83,7 +83,7 @@ async def test_run_pipeline_halts_on_error_and_skips_remainder(bus: DataBus) -> 
             id="b",
             name="B",
             tag="transform",
-            inputs=["A.x"],
+            inputs=["x<-A.x"],
             outputs=["y"],
             source="raise RuntimeError('boom')\n",
         )
@@ -93,12 +93,12 @@ async def test_run_pipeline_halts_on_error_and_skips_remainder(bus: DataBus) -> 
             id="c",
             name="C",
             tag="output",
-            inputs=["B.y"],
+            inputs=["y<-B.y"],
             source="print(y)\n",
         )
     )
-    dag.add_edge(DAGEdge("a", "x", "b", "A.x"))
-    dag.add_edge(DAGEdge("b", "y", "c", "B.y"))
+    dag.add_edge(DAGEdge("a", "x", "b", "x<-A.x"))
+    dag.add_edge(DAGEdge("b", "y", "c", "y<-B.y"))
 
     executor = Executor(dag, bus)
     results = await executor.run_pipeline()
@@ -280,11 +280,11 @@ async def test_run_pipeline_attaches_outputs_per_node(bus: DataBus) -> None:
             id="b",
             name="B",
             tag="output",
-            inputs=["A.x"],
+            inputs=["x<-A.x"],
             source="print(f'B={x}')\n",
         ),
     )
-    dag.add_edge(DAGEdge("a", "x", "b", "A.x"))
+    dag.add_edge(DAGEdge("a", "x", "b", "x<-A.x"))
     results = await Executor(dag, bus).run_pipeline()
     assert [r.status for r in results] == ["ok", "ok"]
     assert results[0].outputs[0]["text"] == "A\n"
@@ -360,20 +360,30 @@ async def test_run_node_metadata_empty_on_error(bus: DataBus) -> None:
     assert result.metadata == {}
 
 
-def test_parse_ref_local_uses_own_alias() -> None:
-    assert _parse_ref("Load CSV.df", "a") == ("a", "Load CSV", "df")
+def test_parse_input_binding_local_uses_own_alias() -> None:
+    assert _parse_input_binding("df<-Load CSV.raw_df", "a") == (
+        "df",
+        "a",
+        "Load CSV",
+        "raw_df",
+    )
 
 
-def test_parse_ref_qualified_uses_explicit_alias() -> None:
-    assert _parse_ref("other:Load CSV.df", "a") == ("other", "Load CSV", "df")
+def test_parse_input_binding_qualified_uses_explicit_alias() -> None:
+    assert _parse_input_binding("df<-other:Load CSV.raw_df", "a") == (
+        "df",
+        "other",
+        "Load CSV",
+        "raw_df",
+    )
 
 
-def test_parse_ref_without_port_returns_none() -> None:
-    assert _parse_ref("no_port_here", "a") is None
+def test_parse_input_binding_without_arrow_returns_none() -> None:
+    assert _parse_input_binding("Load CSV.df", "a") is None
 
 
 async def test_run_pipeline_resolves_cross_notebook_alias_ref(bus: DataBus) -> None:
-    # Two notebooks: alias "a" produces df; alias "b" consumes a:Load.df.
+    # Two notebooks: alias "a" produces raw_df; alias "b" consumes it as df.
     dag = DAG()
     dag.add_node(
         DAGNode(
@@ -381,8 +391,8 @@ async def test_run_pipeline_resolves_cross_notebook_alias_ref(bus: DataBus) -> N
             name="Load",
             tag="input",
             alias="a",
-            outputs=["df"],
-            source="import pandas as pd\ndf = pd.DataFrame({'x': [1, 2, 3]})\n",
+            outputs=["raw_df"],
+            source="import pandas as pd\nraw_df = pd.DataFrame({'x': [1, 2, 3]})\n",
         )
     )
     dag.add_node(
@@ -391,12 +401,12 @@ async def test_run_pipeline_resolves_cross_notebook_alias_ref(bus: DataBus) -> N
             name="Use",
             tag="transform",
             alias="b",
-            inputs=["a:Load.df"],
+            inputs=["df<-a:Load.raw_df"],
             outputs=["rows"],
             source="rows = len(df)\n",
         )
     )
-    dag.add_edge(DAGEdge("a::0", "df", "b::0", "a:Load.df"))
+    dag.add_edge(DAGEdge("a::0", "raw_df", "b::0", "df<-a:Load.raw_df"))
 
     results = await Executor(dag, bus).run_pipeline()
     assert [r.status for r in results] == ["ok", "ok"]
@@ -419,12 +429,12 @@ async def test_cross_notebook_same_name_nodes_do_not_collide(bus: DataBus) -> No
             name="Sink",
             tag="output",
             alias="c",
-            inputs=["b:Load.v"],
+            inputs=["v<-b:Load.v"],
             outputs=["got"],
             source="got = v\n",
         )
     )
-    dag.add_edge(DAGEdge("b::0", "v", "c::0", "b:Load.v"))
+    dag.add_edge(DAGEdge("b::0", "v", "c::0", "v<-b:Load.v"))
 
     await Executor(dag, bus).run_pipeline()
     # c references b's Load (99), not a's (10).
@@ -469,7 +479,7 @@ async def test_sibling_cells_do_not_see_each_others_locals(bus: DataBus) -> None
             id="b",
             name="B",
             tag="transform",
-            inputs=["A.x"],
+            inputs=["x<-A.x"],
             outputs=["n"],
             source="foo = 'bar'\nn = x\n",
         )
@@ -479,13 +489,13 @@ async def test_sibling_cells_do_not_see_each_others_locals(bus: DataBus) -> None
             id="c",
             name="C",
             tag="transform",
-            inputs=["A.x"],
+            inputs=["x<-A.x"],
             outputs=["y"],
             source="y = foo\n",
         )
     )
-    dag.add_edge(DAGEdge("a", "x", "b", "A.x"))
-    dag.add_edge(DAGEdge("a", "x", "c", "A.x"))
+    dag.add_edge(DAGEdge("a", "x", "b", "x<-A.x"))
+    dag.add_edge(DAGEdge("a", "x", "c", "x<-A.x"))
 
     results = await Executor(dag, bus).run_pipeline()
     assert results[0].status == "ok"
@@ -507,7 +517,7 @@ async def test_fanout_branches_get_isolated_copies(bus: DataBus) -> None:
             id="mut",
             name="Mut",
             tag="transform",
-            inputs=["Src.rows"],
+            inputs=["rows<-Src.rows"],
             outputs=["n"],
             source="rows.append(99)\nn = len(rows)\n",
         )
@@ -517,13 +527,13 @@ async def test_fanout_branches_get_isolated_copies(bus: DataBus) -> None:
             id="pure",
             name="Pure",
             tag="transform",
-            inputs=["Src.rows"],
+            inputs=["rows<-Src.rows"],
             outputs=["n"],
             source="n = len(rows)\n",
         )
     )
-    dag.add_edge(DAGEdge("src", "rows", "mut", "Src.rows"))
-    dag.add_edge(DAGEdge("src", "rows", "pure", "Src.rows"))
+    dag.add_edge(DAGEdge("src", "rows", "mut", "rows<-Src.rows"))
+    dag.add_edge(DAGEdge("src", "rows", "pure", "rows<-Src.rows"))
 
     await Executor(dag, bus).run_pipeline()
     assert bus.get("mut", "n").value == 4  # mutated branch saw its append

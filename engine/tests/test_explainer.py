@@ -18,11 +18,11 @@ def _linear_dag() -> DAG:
     dag = DAG()
     dag.add_node(DAGNode(id="a", name="Load", tag="input", outputs=["df"]))
     dag.add_node(
-        DAGNode(id="b", name="Clean", tag="transform", inputs=["Load.df"], outputs=["clean"]),
+        DAGNode(id="b", name="Clean", tag="transform", inputs=["df<-Load.df"], outputs=["clean"]),
     )
-    dag.add_node(DAGNode(id="c", name="Plot", tag="output", inputs=["Clean.clean"]))
-    dag.add_edge(DAGEdge("a", "df", "b", "Load.df"))
-    dag.add_edge(DAGEdge("b", "clean", "c", "Clean.clean"))
+    dag.add_node(DAGNode(id="c", name="Plot", tag="output", inputs=["clean<-Clean.clean"]))
+    dag.add_edge(DAGEdge("a", "df", "b", "df<-Load.df"))
+    dag.add_edge(DAGEdge("b", "clean", "c", "clean<-Clean.clean"))
     return dag
 
 

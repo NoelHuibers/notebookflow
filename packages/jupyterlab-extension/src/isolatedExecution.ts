@@ -4,7 +4,7 @@
  * executor's per-node isolation.
  */
 
-import { parseRef } from "@notebookflow/graph-canvas/sync";
+import { parseInputBinding } from "@notebookflow/graph-canvas/sync";
 
 export const NOTEBOOKFLOW_BUS = "__notebookflow_bus__";
 
@@ -58,20 +58,20 @@ export function resolveInputBindings(
   idIndex: Map<string, string>,
 ): InputBinding[] {
   const bindings: InputBinding[] = [];
-  for (const ref of node.inputs) {
-    const parsed = parseRef(ref);
+  for (const binding of node.inputs) {
+    const parsed = parseInputBinding(binding);
     if (parsed === null) {
       continue;
     }
-    const refAlias = parsed.alias ?? node.alias ?? "";
-    const sourceNodeId = idIndex.get(`${refAlias}\0${parsed.nodeName}`);
+    const refAlias = parsed.source.alias ?? node.alias ?? "";
+    const sourceNodeId = idIndex.get(`${refAlias}\0${parsed.source.nodeName}`);
     if (sourceNodeId === undefined) {
       continue;
     }
     bindings.push({
-      localPort: parsed.portName,
+      localPort: parsed.localName,
       sourceNodeId,
-      sourcePort: parsed.portName,
+      sourcePort: parsed.source.portName,
     });
   }
   return bindings;

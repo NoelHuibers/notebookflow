@@ -36,7 +36,7 @@ function graph(nodes: Record<string, NodeModel>): GraphModel {
 describe("collectOutputSuggestions", () => {
   it("includes port names from declared inputs for passthrough cells", () => {
     const suggestions = collectOutputSuggestions(
-      node("nb::1", { name: "Middle", inputs: ["Cell1.n"], outputs: [] }),
+      node("nb::1", { name: "Middle", inputs: ["n<-Cell1.n"], outputs: [] }),
       {},
     );
     expect(suggestions).toEqual(["n"]);
@@ -44,7 +44,7 @@ describe("collectOutputSuggestions", () => {
 
   it("merges declared outputs, input ports, and analyzed variables", () => {
     const suggestions = collectOutputSuggestions(
-      node("nb::1", { name: "Middle", inputs: ["Cell1.n"], outputs: ["clean"] }),
+      node("nb::1", { name: "Middle", inputs: ["n<-Cell1.n"], outputs: ["clean"] }),
       { "nb::1": ["extra"] },
     );
     expect(suggestions).toEqual(["clean", "extra", "n"]);
@@ -81,7 +81,7 @@ describe("collectInputRefs", () => {
     const refs = collectInputRefs(
       graph({
         "nb::0": node("nb::0", { name: "Cell1", tag: "input", outputs: ["n"] }),
-        "nb::1": node("nb::1", { name: "Cell2", inputs: ["Cell1.n"], outputs: [] }),
+        "nb::1": node("nb::1", { name: "Cell2", inputs: ["n<-Cell1.n"], outputs: [] }),
         "nb::2": node("nb::2", { name: "Cell3" }),
       }),
       {},

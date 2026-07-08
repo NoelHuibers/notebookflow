@@ -92,14 +92,14 @@ function linearPipeline(): PipelineDef {
         id: "b",
         name: "B",
         tag: "transform",
-        inputs: ["A.df"],
+        inputs: ["df<-A.df"],
         outputs: ["clean"],
         source: "clean = df + 1\n",
         notebookPath: "",
         cellIndices: [1],
       },
     ],
-    edges: [{ sourceNodeId: "a", sourcePort: "df", targetNodeId: "b", targetPort: "A.df" }],
+    edges: [{ sourceNodeId: "a", sourcePort: "df", targetNodeId: "b", targetPort: "df<-A.df" }],
   };
 }
 
@@ -244,7 +244,7 @@ describe("KernelBridge", () => {
           id: "c",
           name: "C",
           tag: "output",
-          inputs: ["B.x"],
+          inputs: ["x<-B.x"],
           outputs: [],
           source: "code_c",
           notebookPath: "",
@@ -264,7 +264,7 @@ describe("KernelBridge", () => {
           id: "b",
           name: "B",
           tag: "transform",
-          inputs: ["A.x"],
+          inputs: ["x<-A.x"],
           outputs: ["x"],
           source: "code_b",
           notebookPath: "",
@@ -272,8 +272,8 @@ describe("KernelBridge", () => {
         },
       ],
       edges: [
-        { sourceNodeId: "a", sourcePort: "x", targetNodeId: "b", targetPort: "A.x" },
-        { sourceNodeId: "b", sourcePort: "x", targetNodeId: "c", targetPort: "B.x" },
+        { sourceNodeId: "a", sourcePort: "x", targetNodeId: "b", targetPort: "x<-A.x" },
+        { sourceNodeId: "b", sourcePort: "x", targetNodeId: "c", targetPort: "x<-B.x" },
       ],
     };
     await collectEvents(bridge, pipeline);

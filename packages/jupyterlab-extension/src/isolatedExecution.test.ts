@@ -23,13 +23,20 @@ describe("isolatedExecution", () => {
     expect(wrapped).toContain(`__nf_bus[${JSON.stringify(busKey("b", "clean"))}]`);
   });
 
-  it("resolves local and qualified input refs", () => {
+  it("resolves local and qualified input bindings", () => {
     const nodes = [
-      { id: "a::0", name: "Load", alias: "nb_a", inputs: [], outputs: ["df"], source: "" },
-      { id: "b::0", name: "Use", alias: "nb_b", inputs: ["nb_a:Load.df"], outputs: [], source: "" },
+      { id: "a::0", name: "Load", alias: "nb_a", inputs: [], outputs: ["raw_df"], source: "" },
+      {
+        id: "b::0",
+        name: "Use",
+        alias: "nb_b",
+        inputs: ["df<-nb_a:Load.raw_df"],
+        outputs: [],
+        source: "",
+      },
     ];
     const idIndex = buildIdIndex(nodes);
     const bindings = resolveInputBindings(nodes[1]!, idIndex);
-    expect(bindings).toEqual([{ localPort: "df", sourceNodeId: "a::0", sourcePort: "df" }]);
+    expect(bindings).toEqual([{ localPort: "df", sourceNodeId: "a::0", sourcePort: "raw_df" }]);
   });
 });

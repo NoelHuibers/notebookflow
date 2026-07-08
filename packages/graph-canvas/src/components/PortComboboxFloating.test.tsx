@@ -30,7 +30,10 @@ describe("PortComboboxFloating", () => {
     vi.restoreAllMocks();
   });
 
-  function mountCombobox(onCancel = vi.fn()): { onCancel: ReturnType<typeof vi.fn> } {
+  function mountCombobox(
+    onCancel = vi.fn(),
+    initialValue = "",
+  ): { onCancel: ReturnType<typeof vi.fn> } {
     const container = document.createElement("div");
     const anchor = document.createElement("button");
     anchor.textContent = "port";
@@ -57,7 +60,7 @@ describe("PortComboboxFloating", () => {
         <PortComboboxFloating
           anchorEl={anchor}
           kind="input"
-          initialValue=""
+          initialValue={initialValue}
           suggestions={["Load CSV.df"]}
           onCommit={vi.fn()}
           onCancel={onCancel}
@@ -67,6 +70,16 @@ describe("PortComboboxFloating", () => {
 
     return { onCancel };
   }
+
+  it("focuses and selects the text field once the floating editor mounts", () => {
+    mountCombobox(vi.fn(), "Load CSV.df");
+
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="Input source"]');
+    expect(input).not.toBeNull();
+    expect(document.activeElement).toBe(input);
+    expect(input?.selectionStart).toBe(0);
+    expect(input?.selectionEnd).toBe("Load CSV.df".length);
+  });
 
   it("dismisses on pointerdown outside the combobox and anchor", () => {
     const { onCancel } = mountCombobox();

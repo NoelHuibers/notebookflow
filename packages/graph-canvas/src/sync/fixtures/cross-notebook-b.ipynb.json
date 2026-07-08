@@ -6,7 +6,7 @@
       "metadata": {},
       "outputs": [],
       "source": [
-        "# @node: Filter  [transform]  in=a:Load CSV.df  out=clean_df\n",
+        "# @node: Filter  [transform]  in=df<-a:Load CSV.df  out=clean_df\n",
         "clean_df = df.dropna()\n"
       ]
     }

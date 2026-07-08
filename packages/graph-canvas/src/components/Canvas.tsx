@@ -195,7 +195,7 @@ export interface CanvasProps {
   onWireDelete?: (wireId: string) => void;
   onNodeSelect?: (node: NodeModel | null) => void;
   onGroupToggle?: (groupId: string) => void;
-  /** Replace a node's declared input refs (nodeName.portName). */
+  /** Replace a node's declared input bindings (`local<-nodeName.portName`). */
   onInputsChange?: (nodeId: string, nextInputs: string[]) => void;
   /** Replace a node's declared output port names. */
   onOutputsChange?: (nodeId: string, nextOutputs: string[]) => void;
@@ -220,7 +220,7 @@ export interface CanvasProps {
    * row count (post-run). Either field may be absent.
    */
   metaByNode?: Record<string, { filename?: string; rows?: number }>;
-  /** Per-node input refs that don't resolve to a wire (shown as unresolved). */
+  /** Per-node input bindings that don't resolve to a wire (shown as unresolved). */
   unresolvedByNode?: Record<string, string[]>;
   /**
    * Summary of the most recent pipeline run, rendered as a bottom-center

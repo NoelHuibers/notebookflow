@@ -48,7 +48,7 @@ describe("InletOutletGrid", () => {
       root.render(
         <InletOutletGrid
           tag="transform"
-          inputs={["Load CSV.df", "Other.x"]}
+          inputs={["df<-Load CSV.df", "x<-Other.x"]}
           outputs={[]}
           showInlets
           showOutlets={false}
@@ -61,8 +61,11 @@ describe("InletOutletGrid", () => {
       );
     });
 
-    expect(container.textContent).toContain("Load CSV.df");
-    expect(container.textContent).toContain("Other.x");
+    expect(container.textContent).toContain("df");
+    expect(container.textContent).toContain("x");
+    expect(container.textContent).not.toContain("Load CSV.df");
+    expect(container.querySelector('[title="df<-Load CSV.df"]')).not.toBeNull();
+    expect(container.querySelector('[title="x<-Other.x"]')).not.toBeNull();
     const rail = container.querySelector('[data-testid="handle-rail-top"]');
     expect(rail).not.toBeNull();
     const handles = rail?.querySelectorAll('[data-handle-type="target"]');
@@ -111,7 +114,7 @@ describe("InletOutletGrid", () => {
       root.render(
         <InletOutletGrid
           tag="transform"
-          inputs={["Load CSV.df"]}
+          inputs={["df<-Load CSV.df"]}
           outputs={["clean"]}
           showInlets
           showOutlets
@@ -125,13 +128,91 @@ describe("InletOutletGrid", () => {
 
     expect(container.textContent).toContain("Input");
     expect(container.textContent).toContain("Output");
-    expect(container.textContent).toContain("Load CSV.df");
+    expect(container.textContent).toContain("df");
+    expect(container.textContent).not.toContain("Load CSV.df");
+    expect(container.querySelector('[title="df<-Load CSV.df"]')).not.toBeNull();
     expect(container.textContent).toContain("clean");
 
-    const inletHandle = container.querySelector('[data-handle-id="Load CSV.df"]');
+    const inletHandle = container.querySelector('[data-handle-id="df<-Load CSV.df"]');
     const outletHandle = container.querySelector('[data-handle-id="clean"]');
     expect(inletHandle?.getAttribute("data-handle-type")).toBe("target");
     expect(outletHandle?.getAttribute("data-handle-type")).toBe("source");
+  });
+
+  it("shows the local name for editable input chips and keeps the full binding tooltip", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    document.body.appendChild(container);
+    mounts.push({ container, root });
+
+    act(() => {
+      root.render(
+        <InletOutletGrid
+          tag="transform"
+          inputs={["df<-Load CSV.df"]}
+          outputs={[]}
+          showInlets
+          showOutlets={false}
+          editable
+          inputSuggestions={[]}
+          outputSuggestions={[]}
+          onInputsChange={vi.fn()}
+          placement="sides"
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("df");
+    expect(container.textContent).not.toContain("Load CSV.df");
+    expect(container.querySelector('button[title="df<-Load CSV.df"]')).not.toBeNull();
+  });
+
+  it("edits only the source side of an existing input binding", () => {
+    const onInputsChange = vi.fn();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    document.body.appendChild(container);
+    mounts.push({ container, root });
+
+    act(() => {
+      root.render(
+        <InletOutletGrid
+          tag="transform"
+          inputs={["df<-Load CSV.df"]}
+          outputs={[]}
+          showInlets
+          showOutlets={false}
+          editable
+          inputSuggestions={["Load CSV.df", "Customers.cleaned"]}
+          outputSuggestions={[]}
+          onInputsChange={onInputsChange}
+          placement="sides"
+        />,
+      );
+    });
+
+    const chip = container.querySelector<HTMLButtonElement>('button[title="df<-Load CSV.df"]');
+    expect(chip).not.toBeNull();
+
+    act(() => {
+      chip?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="Input source"]');
+    expect(input).not.toBeNull();
+    expect(input?.value).toBe("Load CSV.df");
+
+    act(() => {
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      valueSetter?.call(input, "Customers.cleaned");
+      input?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    act(() => {
+      input?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+
+    expect(onInputsChange).toHaveBeenCalledWith(["df<-Customers.cleaned"]);
   });
 
   it("exposes a drop-target inlet handle when editable", () => {

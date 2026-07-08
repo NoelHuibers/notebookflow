@@ -38,7 +38,7 @@ export interface NodeMarker {
   name: string;
   /** Tag classifying the node's role. */
   tag: NodeTag;
-  /** Declared input port names. */
+  /** Declared input bindings, e.g. `df<-Load CSV.raw_df`. */
   inputs: string[];
   /** Declared output port names. */
   outputs: string[];
@@ -53,6 +53,7 @@ export interface NodeModel {
   id: string;
   name: string;
   tag: NodeTag;
+  /** Declared input bindings, e.g. `df<-Load CSV.raw_df`. */
   inputs: string[];
   outputs: string[];
   /** Notebook-native cell metadata carried by this node's first cell. */

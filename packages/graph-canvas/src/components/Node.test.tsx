@@ -296,18 +296,19 @@ describe("NotebookNode", () => {
             id: "node-1",
             name: "Filter",
             tag: "transform",
-            inputs: ["missing:Load.df"],
+            inputs: ["df<-missing:Load.df"],
             outputs: ["clean"],
             cellIndices: [0],
             groupId: "group-b",
-            unresolvedInputs: ["missing:Load.df"],
+            unresolvedInputs: ["df<-missing:Load.df"],
           }}
         />,
       );
     });
 
     expect(container.textContent).toContain("unresolved");
-    expect(container.textContent).toContain("missing:Load.df");
+    expect(container.textContent).toContain("df<-missing:Load.df");
+    expect(container.querySelector('[title="df<-missing:Load.df"]')).not.toBeNull();
   });
 
   it("opens inline rename from a title double click", () => {

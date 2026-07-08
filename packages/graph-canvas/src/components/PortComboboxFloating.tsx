@@ -31,6 +31,7 @@ export function PortComboboxFloating(props: PortComboboxFloatingProps): ReactEle
   const inputRef = useRef<HTMLInputElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const committedRef = useRef(false);
+  const focusedRef = useRef(false);
 
   const dismiss = (): void => {
     if (committedRef.current) {
@@ -54,10 +55,14 @@ export function PortComboboxFloating(props: PortComboboxFloatingProps): ReactEle
     };
   }, [anchorEl]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (position === null || focusedRef.current) {
+      return;
+    }
+    focusedRef.current = true;
     inputRef.current?.focus();
     inputRef.current?.select();
-  }, []);
+  }, [position]);
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent): void => {
@@ -94,7 +99,8 @@ export function PortComboboxFloating(props: PortComboboxFloatingProps): ReactEle
   }, [query, suggestions, initialValue]);
 
   const trimmed = query.trim();
-  const canCreate = isValidPort(kind, trimmed) && !suggestions.includes(trimmed);
+  const canCreate =
+    trimmed !== initialValue.trim() && isValidPort(kind, trimmed) && !suggestions.includes(trimmed);
   const options = canCreate ? [trimmed, ...filtered] : filtered;
 
   const finish = (value: string): void => {
@@ -144,7 +150,7 @@ export function PortComboboxFloating(props: PortComboboxFloatingProps): ReactEle
     >
       <input
         ref={inputRef}
-        aria-label={kind === "input" ? "Input ref" : "Output variable"}
+        aria-label={kind === "input" ? "Input source" : "Output variable"}
         className="nodrag nopan"
         value={query}
         placeholder={placeholder}
