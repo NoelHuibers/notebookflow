@@ -6,9 +6,9 @@ export const en = {
   // FilesRail
   showFiles: "Show files",
   files: "Files",
-  openNotebook: "Open notebook",
+  openNotebook: "Open notebook/workspace",
   createNotebook: "New notebook",
-  importNotebook: "Import notebook",
+  importNotebook: "Import notebook/workspace",
   hideFiles: "Hide files",
   unsavedChanges: "Unsaved changes",
   closeFile: "Close {{name}}",
@@ -22,18 +22,18 @@ export const en = {
 
   // FileDropZone
   createNotebookButton: "New notebook",
-  openNotebookButton: "Import notebook",
-  dropTitle: "Drop your .ipynb",
-  dropSubtitle: "Parses cells and renders the canvas",
+  openNotebookButton: "Import notebook/workspace",
+  dropTitle: "Drop your notebook or workspace",
+  dropSubtitle: "Parses cells and restores the canvas",
 };
 
 export const de: typeof en = {
   // FilesRail
   showFiles: "Dateien anzeigen",
   files: "Dateien",
-  openNotebook: "Notebook öffnen",
+  openNotebook: "Notebook/Workspace öffnen",
   createNotebook: "Neues Notebook",
-  importNotebook: "Notebook importieren",
+  importNotebook: "Notebook/Workspace importieren",
   hideFiles: "Dateien ausblenden",
   unsavedChanges: "Nicht gespeicherte Änderungen",
   closeFile: "{{name}} schließen",
@@ -47,7 +47,7 @@ export const de: typeof en = {
 
   // FileDropZone
   createNotebookButton: "Neues Notebook",
-  openNotebookButton: "Notebook importieren",
-  dropTitle: "Lege deine .ipynb-Datei ab",
-  dropSubtitle: "Liest Zellen ein und rendert die Canvas",
+  openNotebookButton: "Notebook/Workspace importieren",
+  dropTitle: "Lege dein Notebook oder deinen Workspace ab",
+  dropSubtitle: "Liest Zellen ein und stellt die Canvas wieder her",
 };

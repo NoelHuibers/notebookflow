@@ -184,7 +184,7 @@ const DEFAULT_EDGE_OPTIONS = {
   zIndex: WIRE_LAYER_Z_INDEX,
 } as const;
 
-type CanvasPosition = { x: number; y: number };
+export type CanvasGroupPosition = { x: number; y: number };
 
 export interface CanvasProps {
   graph: GraphModel;
@@ -197,6 +197,10 @@ export interface CanvasProps {
   onWireDelete?: (wireId: string) => void;
   onNodeSelect?: (node: NodeModel | null) => void;
   onGroupToggle?: (groupId: string) => void;
+  /** Notebook group positions keyed by group id (= notebook path/name). */
+  groupPositions?: Record<string, CanvasGroupPosition>;
+  /** Fired after a notebook group is repositioned by dragging its header. */
+  onGroupPositionChange?: (groupId: string, position: CanvasGroupPosition) => void;
   /** Replace a node's declared input bindings (`local<-nodeName.portName`). */
   onInputsChange?: (nodeId: string, nextInputs: string[]) => void;
   /** Replace a node's declared output port names. */
@@ -263,6 +267,8 @@ function CanvasInner(props: CanvasProps): ReactElement {
     onWireDelete,
     onNodeSelect,
     onGroupToggle,
+    groupPositions,
+    onGroupPositionChange,
     onInputsChange,
     onOutputsChange,
     variablesByNode,
@@ -282,15 +288,25 @@ function CanvasInner(props: CanvasProps): ReactElement {
   const [layout, setLayout] = useState<CanvasLayout>("manual");
   const [paletteDragActive, setPaletteDragActive] = useState(false);
   const [hoveredSlotId, setHoveredSlotId] = useState<string | null>(null);
-  const [manualGroupPositions, setManualGroupPositions] = useState<
-    ReadonlyMap<string, CanvasPosition>
+  const [uncontrolledGroupPositions, setUncontrolledGroupPositions] = useState<
+    ReadonlyMap<string, CanvasGroupPosition>
   >(() => new Map());
   const paletteDragDepthRef = useRef(0);
+  const controlledGroupPositions = useMemo<ReadonlyMap<string, CanvasGroupPosition> | null>(() => {
+    if (groupPositions === undefined) {
+      return null;
+    }
+    return new Map(Object.entries(groupPositions));
+  }, [groupPositions]);
+  const manualGroupPositions = controlledGroupPositions ?? uncontrolledGroupPositions;
 
   useEffect(() => {
-    setManualGroupPositions((current) => {
+    if (controlledGroupPositions !== null) {
+      return;
+    }
+    setUncontrolledGroupPositions((current) => {
       let changed = false;
-      const next = new Map<string, CanvasPosition>();
+      const next = new Map<string, CanvasGroupPosition>();
       for (const [groupId, position] of current) {
         if (graph.groups[groupId] !== undefined) {
           next.set(groupId, position);
@@ -300,7 +316,7 @@ function CanvasInner(props: CanvasProps): ReactElement {
       }
       return changed ? next : current;
     });
-  }, [graph.groups]);
+  }, [controlledGroupPositions, graph.groups]);
 
   useEffect(() => {
     const endPaletteDrag = (): void => {
@@ -419,22 +435,28 @@ function CanvasInner(props: CanvasProps): ReactElement {
     }
   }, [onNodeSelect]);
 
-  const handleNodeDragStop = useCallback((_event: unknown, node: Node): void => {
-    const groupId = groupIdForReactFlowNode(node);
-    if (groupId === null) {
-      return;
-    }
-    const nextPosition = { x: node.position.x, y: node.position.y };
-    setManualGroupPositions((current) => {
-      const previous = current.get(groupId);
-      if (previous?.x === nextPosition.x && previous.y === nextPosition.y) {
-        return current;
+  const handleNodeDragStop = useCallback(
+    (_event: unknown, node: Node): void => {
+      const groupId = groupIdForReactFlowNode(node);
+      if (groupId === null) {
+        return;
       }
-      const next = new Map(current);
-      next.set(groupId, nextPosition);
-      return next;
-    });
-  }, []);
+      const nextPosition = { x: node.position.x, y: node.position.y };
+      if (controlledGroupPositions === null) {
+        setUncontrolledGroupPositions((current) => {
+          const previous = current.get(groupId);
+          if (previous?.x === nextPosition.x && previous.y === nextPosition.y) {
+            return current;
+          }
+          const next = new Map(current);
+          next.set(groupId, nextPosition);
+          return next;
+        });
+      }
+      onGroupPositionChange?.(groupId, nextPosition);
+    },
+    [controlledGroupPositions, onGroupPositionChange],
+  );
 
   const handleEdgesDelete = useCallback(
     (edges: Edge[]): void => {
@@ -715,7 +737,7 @@ function buildNodes(
     metaByNode: CanvasProps["metaByNode"];
     unresolvedByNode: CanvasProps["unresolvedByNode"];
     portPlacement: PortPlacement;
-    manualGroupPositions: ReadonlyMap<string, CanvasPosition>;
+    manualGroupPositions: ReadonlyMap<string, CanvasGroupPosition>;
   },
 ): Node[] {
   const {

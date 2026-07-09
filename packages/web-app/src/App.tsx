@@ -1,16 +1,17 @@
 /**
  * Standalone web app — fully functional NotebookFlow client.
  *
- * - Drop / pick an `.ipynb` to load cells into the editor + canvas.
+ * - Drop / pick an `.ipynb` or workspace file to load cells into the editor + canvas.
  * - Edit cells inline (CodeMirror); the SyncEngine re-ingests after
  *   a 300 ms debounce so the canvas reflects marker edits live.
  * - Click Run to dispatch the current graph over WebSocket to the engine
  *   (default `ws://localhost:8765/ws`; production override via
  *   ``VITE_NOTEBOOKFLOW_ENGINE_URL``). Execution events stream in.
- * - Click Download to save the patched `.ipynb` back to disk.
+ * - Click Download to save the patched `.ipynb` or the full workspace back to disk.
  */
 
 import type {
+  CanvasGroupPosition,
   CanvasLabels,
   GraphModel,
   NodeManifestDef,
@@ -112,9 +113,11 @@ import {
   getNotebook,
   listNotebooks,
   type NotebookSummary,
+  type ParsedWorkspace,
   parseWorkspace,
   serializeWorkspace,
   updateNotebook,
+  type WorkspaceUiState,
 } from "@/lib/notebooksApi";
 import { sortPalette } from "@/lib/palette";
 import { PANEL_STORAGE_KEY, readPanelLayout } from "@/lib/panels";
@@ -128,7 +131,11 @@ import {
   resolveWorkspacePatchTarget,
   type WorkspacePatchLookup,
 } from "@/lib/workspacePatches";
-import { downloadWorkspaceZip, type WorkspaceFile } from "@/lib/workspaceZip";
+import {
+  downloadWorkspaceDocument,
+  downloadWorkspaceZip,
+  type WorkspaceFile,
+} from "@/lib/workspaceZip";
 import type {
   CellOutputsByCell,
   DragState,
@@ -262,6 +269,30 @@ function shiftOutputsAfterInsert(
   return next;
 }
 
+function isLikelyWorkspaceFilename(name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    lower.endsWith(".notebookflow.json") ||
+    lower.endsWith(".notebookflow") ||
+    lower.endsWith(".nfw")
+  );
+}
+
+function clampOptionalRatio(value: number | undefined, fallback: number): number {
+  return value === undefined ? fallback : clamp(value, 0, 100);
+}
+
+function clampSidebarWidthValue(value: number, host: HTMLElement | null): number {
+  if (host === null) {
+    return Math.max(MIN_SIDEBAR_WIDTH_PX, value);
+  }
+  const maxWidth = Math.max(
+    host.clientWidth - MIN_CANVAS_BODY_WIDTH_PX - DIVIDER_SIZE_PX,
+    MIN_SIDEBAR_WIDTH_PX,
+  );
+  return clamp(value, MIN_SIDEBAR_WIDTH_PX, maxWidth);
+}
+
 export function App(): ReactElement {
   const { t } = useI18n();
   const initialWorkspaceRef = useRef<InitialWorkspaceFile[] | null>(null);
@@ -327,6 +358,9 @@ export function App(): ReactElement {
   const [outputsByCell, setOutputsByCell] = useState<CellOutputsByCell>(() =>
     extractOutputsByCell(firstInitialFile.notebook.doc),
   );
+  const [canvasGroupPositionsByFileId, setCanvasGroupPositionsByFileId] = useState<
+    Record<string, CanvasGroupPosition>
+  >({});
   const [runtimeByNode, setRuntimeByNode] = useState<Record<string, RuntimeState>>({});
   // Post-run output row counts, keyed by node id. Merged with the static
   // filename map (derived from cell source) into the canvas meta line.
@@ -567,6 +601,41 @@ export function App(): ReactElement {
     replaceActiveOutputsByCell({});
   }, [replaceActiveOutputsByCell]);
 
+  const canvasGroupPositions = useMemo<Record<string, CanvasGroupPosition>>(() => {
+    const positions: Record<string, CanvasGroupPosition> = {};
+    for (const file of openFiles) {
+      const position = canvasGroupPositionsByFileId[file.id];
+      if (position === undefined) {
+        continue;
+      }
+      positions[file.id === activeFileId ? notebook.name : file.name] = position;
+    }
+    return positions;
+  }, [openFiles, activeFileId, notebook.name, canvasGroupPositionsByFileId]);
+
+  const handleGroupPositionChange = useCallback(
+    (groupId: string, position: CanvasGroupPosition) => {
+      const activeFile = openFilesRef.current.find(
+        (candidate) => candidate.id === activeFileIdRef.current,
+      );
+      const file =
+        groupId === notebook.name && activeFile !== undefined
+          ? activeFile
+          : openFilesRef.current.find((candidate) => candidate.name === groupId);
+      if (file === undefined) {
+        return;
+      }
+      setCanvasGroupPositionsByFileId((current) => {
+        const previous = current[file.id];
+        if (previous?.x === position.x && previous.y === position.y) {
+          return current;
+        }
+        return { ...current, [file.id]: position };
+      });
+    },
+    [notebook.name],
+  );
+
   // Cells of every open file, keyed by notebook path (= file name). The active
   // file is live; inactive files come from their frozen snapshots. Drives both
   // the workspace ingest and the composed pipeline's per-node source lookup.
@@ -714,6 +783,86 @@ export function App(): ReactElement {
     setSaveStatus("idle");
   }, []);
 
+  const applyWorkspaceUi = useCallback((ui: WorkspaceUiState | undefined): void => {
+    if (ui === undefined) {
+      return;
+    }
+    setNotebookRatio((current) => clampOptionalRatio(ui.notebookRatio, current));
+    setMainRatio((current) => clampOptionalRatio(ui.mainRatio, current));
+    if (typeof ui.sidebarWidth === "number") {
+      const nextSidebarWidth = clampSidebarWidthValue(
+        ui.sidebarWidth,
+        canvasBodyRef.current ?? canvasPaneRef.current,
+      );
+      setSidebarWidth(nextSidebarWidth);
+      lastOpenSidebarWidthRef.current = nextSidebarWidth;
+    }
+    if (typeof ui.filesCollapsed === "boolean") {
+      setIsFilesCollapsed(ui.filesCollapsed);
+    }
+    if (typeof ui.cellsCollapsed === "boolean") {
+      setIsCellsCollapsed(ui.cellsCollapsed);
+    }
+    if (typeof ui.inspectorCollapsed === "boolean") {
+      setIsInspectorCollapsed(ui.inspectorCollapsed);
+    }
+    if (typeof ui.sidebarCollapsed === "boolean") {
+      setIsSidebarCollapsed(ui.sidebarCollapsed);
+    }
+    if (typeof ui.showMinimap === "boolean") {
+      setShowMinimap(ui.showMinimap);
+    }
+  }, []);
+
+  const applyWorkspaceDocument = useCallback(
+    (workspace: ParsedWorkspace): void => {
+      const parsed = workspace.files.map((file) => ({
+        id: makeFileId(),
+        name: file.name,
+        ...parseNotebook(file.json),
+      }));
+      const first = parsed[0];
+      if (first === undefined) {
+        throw new Error(t("app.errors.workspaceEmpty"));
+      }
+      const active =
+        workspace.activeFileName === undefined
+          ? first
+          : (parsed.find((file) => file.name === workspace.activeFileName) ?? first);
+      snapshotsRef.current.clear();
+      for (const file of parsed) {
+        if (file.id === active.id) {
+          continue;
+        }
+        snapshotsRef.current.set(file.id, {
+          cells: file.cells,
+          doc: file.doc,
+          baseline: file.cells.map((cell) => cell.source),
+          fileHandle: null,
+          outputsByCell: extractOutputsByCell(file.doc),
+        });
+      }
+      const positionsByFileId: Record<string, CanvasGroupPosition> = {};
+      const savedPositions = workspace.layout?.groupPositions ?? {};
+      for (const file of parsed) {
+        const position = savedPositions[file.name];
+        if (position !== undefined) {
+          positionsByFileId[file.id] = position;
+        }
+      }
+      setCanvasGroupPositionsByFileId(positionsByFileId);
+      setOpenFiles(parsed.map((file) => ({ id: file.id, name: file.name })));
+      setActiveFileId(active.id);
+      setNotebook({ name: active.name, cells: active.cells, doc: active.doc });
+      setBaselineSources(active.cells.map((cell) => cell.source));
+      fileHandleRef.current = null;
+      replaceActiveOutputsByCell(extractOutputsByCell(active.doc));
+      resetTransient();
+      applyWorkspaceUi(workspace.ui);
+    },
+    [applyWorkspaceUi, replaceActiveOutputsByCell, resetTransient, t],
+  );
+
   // Freeze the active file's working state so it can be restored when the
   // user switches back to it.
   const snapshotActive = useCallback((): void => {
@@ -749,6 +898,18 @@ export function App(): ReactElement {
 
   const handleFile = useCallback(
     (text: string, name: string): void => {
+      if (isLikelyWorkspaceFilename(name)) {
+        try {
+          applyWorkspaceDocument(parseWorkspace(text));
+          setCloudId(null);
+          setError(null);
+          return;
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : t("app.errors.unknown");
+          setError(t("app.errors.loadFailed", { name, message }));
+          return;
+        }
+      }
       try {
         const parsed = parseNotebook(text);
         // Re-opening an already-open file just switches to it.
@@ -772,7 +933,15 @@ export function App(): ReactElement {
         setError(t("app.errors.loadFailed", { name, message }));
       }
     },
-    [openFiles, snapshotActive, switchToFile, resetTransient, replaceActiveOutputsByCell, t],
+    [
+      applyWorkspaceDocument,
+      openFiles,
+      snapshotActive,
+      switchToFile,
+      resetTransient,
+      replaceActiveOutputsByCell,
+      t,
+    ],
   );
 
   const handleCreateNotebook = useCallback((): void => {
@@ -803,6 +972,14 @@ export function App(): ReactElement {
         }
       }
       snapshotsRef.current.delete(id);
+      setCanvasGroupPositionsByFileId((current) => {
+        if (current[id] === undefined) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
       setOpenFiles((prev) => prev.filter((f) => f.id !== id));
     },
     [openFiles, activeFileId, switchToFile],
@@ -812,7 +989,7 @@ export function App(): ReactElement {
   const triggerOpenFile = useCallback((): void => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".ipynb,application/json";
+    input.accept = ".ipynb,.notebookflow.json,.notebookflow,.nfw,application/json";
     input.onchange = (): void => {
       const file = input.files?.[0];
       if (file === undefined) {
@@ -1608,10 +1785,56 @@ export function App(): ReactElement {
     });
   }, [openFiles, activeFileId, notebook, outputsByCell]);
 
+  const collectWorkspaceDocument = useCallback((): ParsedWorkspace => {
+    const groupPositions: Record<string, CanvasGroupPosition> = {};
+    for (const file of openFiles) {
+      const position = canvasGroupPositionsByFileId[file.id];
+      if (position !== undefined) {
+        groupPositions[file.id === activeFileId ? notebook.name : file.name] = position;
+      }
+    }
+    return {
+      files: collectWorkspaceFiles(),
+      activeFileName: notebook.name,
+      layout: {
+        groupPositions,
+      },
+      ui: {
+        notebookRatio,
+        mainRatio,
+        filesCollapsed: isFilesCollapsed,
+        cellsCollapsed: isCellsCollapsed,
+        inspectorCollapsed: isInspectorCollapsed,
+        sidebarCollapsed: isSidebarCollapsed,
+        sidebarWidth,
+        showMinimap,
+      },
+    };
+  }, [
+    openFiles,
+    activeFileId,
+    notebook.name,
+    canvasGroupPositionsByFileId,
+    collectWorkspaceFiles,
+    notebookRatio,
+    mainRatio,
+    isFilesCollapsed,
+    isCellsCollapsed,
+    isInspectorCollapsed,
+    isSidebarCollapsed,
+    sidebarWidth,
+    showMinimap,
+  ]);
+
   const handleDownloadAll = useCallback(async (): Promise<void> => {
     await downloadWorkspaceZip(collectWorkspaceFiles());
     setBaselineSources(notebook.cells.map((cell) => cell.source));
   }, [collectWorkspaceFiles, notebook.cells]);
+
+  const handleDownloadWorkspace = useCallback((): void => {
+    downloadWorkspaceDocument(serializeWorkspace(collectWorkspaceDocument()));
+    setBaselineSources(notebook.cells.map((cell) => cell.source));
+  }, [collectWorkspaceDocument, notebook.cells]);
 
   // --- Cloud notebooks (#60): save/open/delete the user's workspaces in Turso.
   const refreshCloudList = useCallback(async (): Promise<void> => {
@@ -1626,7 +1849,7 @@ export function App(): ReactElement {
     setCloudBusy(true);
     setCloudError(null);
     try {
-      const content = serializeWorkspace(collectWorkspaceFiles());
+      const content = serializeWorkspace(collectWorkspaceDocument());
       if (cloudId !== null) {
         await updateNotebook(cloudId, { name: notebook.name, content });
       } else {
@@ -1638,7 +1861,7 @@ export function App(): ReactElement {
     } finally {
       setCloudBusy(false);
     }
-  }, [collectWorkspaceFiles, cloudId, notebook.name, refreshCloudList, t]);
+  }, [collectWorkspaceDocument, cloudId, notebook.name, refreshCloudList, t]);
 
   const handleOpenFromCloud = useCallback(
     async (id: string): Promise<void> => {
@@ -1646,33 +1869,7 @@ export function App(): ReactElement {
       setCloudError(null);
       try {
         const record = await getNotebook(id);
-        const parsed = parseWorkspace(record.content).map((f) => ({
-          id: makeFileId(),
-          name: f.name,
-          ...parseNotebook(f.json),
-        }));
-        const first = parsed[0];
-        if (first === undefined) {
-          setCloudError(t("app.errors.cloudEmpty"));
-          return;
-        }
-        snapshotsRef.current.clear();
-        for (const p of parsed.slice(1)) {
-          snapshotsRef.current.set(p.id, {
-            cells: p.cells,
-            doc: p.doc,
-            baseline: p.cells.map((c) => c.source),
-            fileHandle: null,
-            outputsByCell: extractOutputsByCell(p.doc),
-          });
-        }
-        setOpenFiles(parsed.map((p) => ({ id: p.id, name: p.name })));
-        setActiveFileId(first.id);
-        setNotebook({ name: first.name, cells: first.cells, doc: first.doc });
-        setBaselineSources(first.cells.map((c) => c.source));
-        fileHandleRef.current = null;
-        replaceActiveOutputsByCell(extractOutputsByCell(first.doc));
-        resetTransient();
+        applyWorkspaceDocument(parseWorkspace(record.content));
         setCloudId(id);
         setIsCloudOpen(false);
       } catch (err) {
@@ -1681,7 +1878,7 @@ export function App(): ReactElement {
         setCloudBusy(false);
       }
     },
-    [resetTransient, replaceActiveOutputsByCell, t],
+    [applyWorkspaceDocument, t],
   );
 
   const handleDeleteFromCloud = useCallback(
@@ -1951,15 +2148,7 @@ export function App(): ReactElement {
   } | null>(null);
 
   const clampSidebarWidth = useCallback((value: number): number => {
-    const host = canvasBodyRef.current ?? canvasPaneRef.current;
-    if (host === null) {
-      return Math.max(MIN_SIDEBAR_WIDTH_PX, value);
-    }
-    const maxWidth = Math.max(
-      host.clientWidth - MIN_CANVAS_BODY_WIDTH_PX - DIVIDER_SIZE_PX,
-      MIN_SIDEBAR_WIDTH_PX,
-    );
-    return clamp(value, MIN_SIDEBAR_WIDTH_PX, maxWidth);
+    return clampSidebarWidthValue(value, canvasBodyRef.current ?? canvasPaneRef.current);
   }, []);
 
   const toggleSidebar = useCallback((): void => {
@@ -2212,6 +2401,17 @@ export function App(): ReactElement {
               </Button>
               {isOverflowOpen && (
                 <div className="absolute right-0 top-full z-30 mt-1 w-52 rounded-md border bg-popover text-popover-foreground shadow-md">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleDownloadWorkspace();
+                      setIsOverflowOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/70"
+                  >
+                    <Download className="size-3.5" />
+                    {t("app.toolbar.downloadWorkspace")}
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -2536,6 +2736,8 @@ export function App(): ReactElement {
                       activeGroupId={notebook.name}
                       onNodeRename={handleRename}
                       onNodeSelect={handleNodeSelect}
+                      groupPositions={canvasGroupPositions}
+                      onGroupPositionChange={handleGroupPositionChange}
                       onInputsChange={handleInputsChange}
                       onOutputsChange={handleOutputsChange}
                       onWireCreate={handleWireCreate}

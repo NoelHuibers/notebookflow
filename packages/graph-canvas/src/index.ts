@@ -11,7 +11,7 @@ export {
   addManifestNode,
   type SynthesizeNodeFn,
 } from "./addManifestNode";
-export type { PaneDropTarget } from "./components/Canvas";
+export type { CanvasGroupPosition, PaneDropTarget } from "./components/Canvas";
 export { Canvas } from "./components/Canvas";
 export { NotebookNode } from "./components/Node";
 export { NodeConfigEditor } from "./components/NodeConfigEditor";
