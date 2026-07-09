@@ -104,6 +104,55 @@ describe("InletOutletGrid", () => {
     expect(handles?.length).toBe(2);
   });
 
+  it("mirrors long stacked variable labels in the handle rail for alignment", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    document.body.appendChild(container);
+    mounts.push({ container, root });
+
+    act(() => {
+      root.render(
+        <>
+          <InletOutletGrid
+            tag="transform"
+            inputs={["very_long_input_variable_name<-Load CSV.extremely_long_source_name"]}
+            outputs={[]}
+            showInlets
+            showOutlets={false}
+            editable={false}
+            inputSuggestions={[]}
+            outputSuggestions={[]}
+            placement="stacked"
+            edge="top"
+          />
+          <InletOutletGrid
+            tag="transform"
+            inputs={[]}
+            outputs={["very_long_output_variable_name"]}
+            showInlets={false}
+            showOutlets
+            editable={false}
+            inputSuggestions={[]}
+            outputSuggestions={[]}
+            placement="stacked"
+            edge="bottom"
+          />
+        </>,
+      );
+    });
+
+    const topKeeper = container.querySelector(
+      '[data-testid="handle-rail-top"] [data-testid="stacked-port-width-keeper"]',
+    );
+    const bottomKeeper = container.querySelector(
+      '[data-testid="handle-rail-bottom"] [data-testid="stacked-port-width-keeper"]',
+    );
+
+    expect(topKeeper?.textContent).toContain("very_long_input_variable_name");
+    expect(topKeeper?.textContent).not.toContain("Load CSV");
+    expect(bottomKeeper?.textContent).toContain("very_long_output_variable_name");
+  });
+
   it("renders side input and output columns below the header row", () => {
     const container = document.createElement("div");
     const root = createRoot(container);

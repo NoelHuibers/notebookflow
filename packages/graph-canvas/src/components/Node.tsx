@@ -26,7 +26,7 @@ import {
   outletPortsVisible,
   type PortPlacement,
 } from "./InletOutletGrid";
-import { STACKED_PORT_COLUMN_MIN } from "./portEditorShared";
+import { estimateNodeWidth } from "./nodeLayout";
 
 export interface NotebookNodeData extends NodeModel {
   onRename?: (nodeId: string, nextName: string) => void;
@@ -141,11 +141,6 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
   const portPlacement = data.portPlacement ?? "stacked";
   const stackedPorts = portPlacement === "stacked";
   const metaLabel = formatMeta(data.meta);
-  const portRows = Math.max(
-    showInlets ? data.inputs.length + (portsEditable ? 1 : 0) : 0,
-    showOutlets ? data.outputs.length + (portsEditable ? 1 : 0) : 0,
-    1,
-  );
   const topPortsVisible = inletPortsVisible(
     showInlets,
     data.inputs,
@@ -160,6 +155,10 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
   );
   const hasMetaContent =
     metaLabel !== null || (data.unresolvedInputs !== undefined && data.unresolvedInputs.length > 0);
+  const layoutHints = {
+    portsEditable,
+    hasMeta: hasMetaContent,
+  };
   const showBodySection =
     hasMetaContent ||
     (!stackedPorts && (showInlets || showOutlets)) ||
@@ -172,7 +171,7 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
   const styles = nodeStyles(
     data.tag,
     selected,
-    stackedPorts ? Math.max(220, portRows * STACKED_PORT_COLUMN_MIN + 20) : 200,
+    estimateNodeWidth(data, portPlacement, layoutHints),
     stackedPorts
       ? {
           layout: "stacked",

@@ -118,15 +118,38 @@
   color: color-mix(in oklch, var(--primary) 85%, var(--foreground));
 }
 
+/* Keep notebook cells fitted to the current pane width. */
+.notebookflow-codemirror,
+.notebookflow-codemirror .cm-editor {
+  max-width: 100%;
+}
+
+.notebookflow-codemirror .cm-scroller {
+  overflow-x: hidden;
+}
+
+.notebookflow-codemirror .cm-content,
+.notebookflow-codemirror .cm-line {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.cell-output-html {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 /* Pandas DataFrame outputs land here via display(df) -> text/html. Sanitized
    by DOMPurify before render; tag/attr allowlist is in CellOutputs.tsx. */
 .cell-output-html table {
-  @apply w-max min-w-full border-collapse font-mono text-[11px];
+  @apply w-full max-w-full table-fixed border-collapse font-mono text-[11px];
   font-variant-numeric: tabular-nums;
 }
 .cell-output-html th,
 .cell-output-html td {
   @apply border-b px-3 py-1 text-left align-top text-muted-foreground;
+  overflow-wrap: anywhere;
 }
 .cell-output-html thead th {
   @apply border-b-2 font-medium text-foreground;

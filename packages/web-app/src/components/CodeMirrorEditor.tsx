@@ -26,7 +26,9 @@ export default function CodeMirrorEditor({
   const extensions = useMemo(() => (isCode ? [python()] : []), [isCode]);
   return (
     <CodeMirror
+      className="notebookflow-codemirror"
       value={value}
+      width="100%"
       height="auto"
       minHeight="40px"
       theme={oneDark}

@@ -30,6 +30,17 @@ export interface ParsedNotebook {
   doc: IpynbDoc;
 }
 
+interface RawNbOutput extends Record<string, unknown> {
+  output_type?: unknown;
+  name?: unknown;
+  text?: unknown;
+  data?: unknown;
+  metadata?: unknown;
+  ename?: unknown;
+  evalue?: unknown;
+  traceback?: unknown;
+}
+
 export function parseNotebook(text: string): ParsedNotebook {
   let doc: IpynbDoc;
   try {
@@ -61,6 +72,20 @@ export function toIpynbCell(cell: NotebookCell): IpynbCell {
     metadata: cloneMetadata(cell.metadata) ?? {},
     ...(cell.cellType === "code" ? { execution_count: null, outputs: [] } : {}),
   };
+}
+
+export function extractOutputsByCell(doc: IpynbDoc): Record<number, NbOutput[]> {
+  const outputsByCell: Record<number, NbOutput[]> = {};
+  doc.cells.forEach((cell, index) => {
+    if (cell.cell_type !== "code" || !Array.isArray(cell.outputs) || cell.outputs.length === 0) {
+      return;
+    }
+    const outputs = cell.outputs.map(normalizeNbOutput).filter((output) => output !== null);
+    if (outputs.length > 0) {
+      outputsByCell[index] = outputs;
+    }
+  });
+  return outputsByCell;
 }
 
 function normaliseCellType(kind: string): NotebookCell["cellType"] {
@@ -115,6 +140,73 @@ function mergeCell(updated: NotebookCell, original?: IpynbCell, outputs?: NbOutp
         }
       : {}),
   };
+}
+
+function normalizeNbOutput(output: unknown): NbOutput | null {
+  if (!isRawNbOutput(output)) {
+    return null;
+  }
+  const outputType = output.output_type;
+  if (outputType === "stream") {
+    const name = output.name;
+    const text = normalizeText(output.text);
+    if ((name !== "stdout" && name !== "stderr") || text === null) {
+      return null;
+    }
+    return { output_type: "stream", name, text };
+  }
+  if (outputType === "display_data" || outputType === "execute_result") {
+    const data = normalizeMimeBundle(output.data);
+    if (data === null) {
+      return null;
+    }
+    return {
+      output_type: outputType,
+      data,
+      metadata: isRecord(output.metadata) ? output.metadata : {},
+    };
+  }
+  if (outputType === "error") {
+    const ename = typeof output.ename === "string" ? output.ename : "";
+    const evalue = typeof output.evalue === "string" ? output.evalue : "";
+    const traceback = Array.isArray(output.traceback)
+      ? output.traceback.filter((line): line is string => typeof line === "string")
+      : [];
+    return { output_type: "error", ename, evalue, traceback };
+  }
+  return null;
+}
+
+function normalizeMimeBundle(value: unknown): Record<string, string> | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const data: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    const text = normalizeText(raw);
+    if (text !== null) {
+      data[key] = text;
+    }
+  }
+  return Object.keys(data).length === 0 ? null : data;
+}
+
+function normalizeText(value: unknown): string | null {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value) && value.every((part) => typeof part === "string")) {
+    return value.join("");
+  }
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isRawNbOutput(value: unknown): value is RawNbOutput {
+  return isRecord(value);
 }
 
 /** nbformat stores source as an array of strings each ending with \n. */

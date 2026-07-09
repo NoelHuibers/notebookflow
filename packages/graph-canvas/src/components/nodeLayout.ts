@@ -7,7 +7,13 @@ import type { Node } from "reactflow";
 
 import type { NodeModel } from "../types";
 import type { PortPlacement } from "./InletOutletGrid";
-import { SIDES_PORT_LABEL_MIN, STACKED_PORT_COLUMN_MIN } from "./portEditorShared";
+import {
+  CHIP_REMOVE_STRIP_WIDTH,
+  displayInputPortName,
+  PORT_EDGE_INSET,
+  SIDES_PORT_LABEL_MIN,
+  STACKED_CHIP_MIN_WIDTH,
+} from "./portEditorShared";
 
 export interface MeasuredSize {
   width: number;
@@ -59,7 +65,10 @@ const SIDES_PORT_ROW = 26;
 const SIDES_META_LINE = 16;
 const SIDES_MIN_WIDTH = 200;
 const SIDES_BODY_MIN_WIDTH = 120;
-const SIDES_LABEL_COLUMN = SIDES_PORT_LABEL_MIN;
+const SIDES_GRID_GAP = 8;
+const STACKED_PORT_GAP = 4;
+const PORT_LABEL_CHAR_WIDTH = 7.2;
+const PORT_LABEL_PADDING = 8;
 
 function showInlets(tag: NodeModel["tag"]): boolean {
   return tag !== "input";
@@ -132,8 +141,13 @@ export function estimateNodeWidth(
   const portsEditable = hints.portsEditable ?? false;
 
   if (portPlacement === "stacked") {
-    const columns = countStackedPortColumns(node, portsEditable);
-    return Math.max(220, columns * STACKED_PORT_COLUMN_MIN + 20);
+    const inputWidth = showInlets(node.tag)
+      ? estimateStackedPortRowWidth(node.inputs, "input", portsEditable)
+      : 0;
+    const outputWidth = showOutlets(node.tag)
+      ? estimateStackedPortRowWidth(node.outputs, "output", portsEditable)
+      : 0;
+    return Math.max(220, inputWidth, outputWidth);
   }
 
   const rows = countSidePortRows(node, portsEditable);
@@ -142,13 +156,64 @@ export function estimateNodeWidth(
   }
 
   let width = SIDES_BODY_MIN_WIDTH;
+  let columns = 0;
   if (showInlets(node.tag)) {
-    width += SIDES_LABEL_COLUMN;
+    width += maxPortColumnWidth(node.inputs, "input", portsEditable);
+    columns += 1;
   }
   if (showOutlets(node.tag)) {
-    width += SIDES_LABEL_COLUMN;
+    width += maxPortColumnWidth(node.outputs, "output", portsEditable);
+    columns += 1;
+  }
+  if (columns > 1) {
+    width += SIDES_GRID_GAP;
   }
   return Math.max(SIDES_MIN_WIDTH, width);
+}
+
+function estimateStackedPortRowWidth(
+  ports: string[],
+  kind: "input" | "output",
+  portsEditable: boolean,
+): number {
+  const columnWidths = ports.map((port) => portChipWidth(portLabel(kind, port), portsEditable));
+  if (portsEditable) {
+    columnWidths.push(STACKED_CHIP_MIN_WIDTH);
+  }
+  if (columnWidths.length === 0) {
+    return 0;
+  }
+  const rowWidth = columnWidths.reduce((sum, width) => sum + width, 0);
+  const gaps = Math.max(0, columnWidths.length - 1) * STACKED_PORT_GAP;
+  return PORT_EDGE_INSET * 2 + rowWidth + gaps;
+}
+
+function maxPortColumnWidth(
+  ports: string[],
+  kind: "input" | "output",
+  portsEditable: boolean,
+): number {
+  const labels = ports.map((port) => portLabel(kind, port));
+  if (portsEditable) {
+    labels.push("");
+  }
+  if (labels.length === 0) {
+    return SIDES_PORT_LABEL_MIN;
+  }
+  return Math.max(...labels.map((label) => portChipWidth(label, portsEditable)));
+}
+
+function portChipWidth(label: string, portsEditable: boolean): number {
+  const labelWidth = Math.max(SIDES_PORT_LABEL_MIN, approximateTextWidth(label));
+  return portsEditable ? labelWidth + CHIP_REMOVE_STRIP_WIDTH : labelWidth;
+}
+
+function portLabel(kind: "input" | "output", value: string): string {
+  return kind === "input" ? displayInputPortName(value) : value;
+}
+
+function approximateTextWidth(value: string): number {
+  return Math.ceil(value.length * PORT_LABEL_CHAR_WIDTH + PORT_LABEL_PADDING);
 }
 
 /** Cumulative X for the nth horizontal cell (0-based), given prior cell widths. */

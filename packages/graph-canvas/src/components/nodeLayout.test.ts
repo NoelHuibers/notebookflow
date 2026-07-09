@@ -80,6 +80,18 @@ describe("nodeLayout", () => {
     expect(wide).toBeGreaterThan(narrow);
   });
 
+  it("estimates stacked width from full variable labels", () => {
+    const short = estimateNodeWidth({ ...transformNode, outputs: ["y"] }, "stacked", {
+      portsEditable: true,
+    });
+    const long = estimateNodeWidth(
+      { ...transformNode, outputs: ["feature_importance_summary_table"] },
+      "stacked",
+      { portsEditable: true },
+    );
+    expect(long).toBeGreaterThan(short);
+  });
+
   it("spaces horizontal cells by width plus uniform gap", () => {
     const widths = [200, 240, 180];
     expect(horizontalCellX([])).toBe(16);

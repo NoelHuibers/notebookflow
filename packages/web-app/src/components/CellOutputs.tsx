@@ -60,7 +60,7 @@ export function CellOutputs({
   const lastIsStream = lastIndex >= 0 && outputs[lastIndex]?.output_type === "stream";
   const inlineCursor = isStreaming && lastIsStream;
   return (
-    <div className="flex flex-col gap-1 border-t bg-background px-3 py-2 text-[12px]">
+    <div className="flex min-w-0 flex-col gap-1 border-t bg-background px-3 py-2 text-[12px]">
       {outputs.map((output, idx) => (
         <OutputBlock
           key={`output-${String(idx)}`}
@@ -69,7 +69,7 @@ export function CellOutputs({
         />
       ))}
       {isStreaming && !lastIsStream && (
-        <pre className="whitespace-pre-wrap font-mono text-muted-foreground">
+        <pre className="whitespace-pre-wrap break-words font-mono text-muted-foreground">
           <StreamingCursor />
         </pre>
       )}
@@ -98,7 +98,7 @@ function OutputBlock({ output, trailingCursor = false }: OutputBlockProps): Reac
   if (output.output_type === "stream") {
     const colour = output.name === "stderr" ? "text-destructive" : "text-foreground";
     return (
-      <pre className={`whitespace-pre-wrap font-mono ${colour}`}>
+      <pre className={`whitespace-pre-wrap break-words font-mono ${colour}`}>
         {output.text}
         {trailingCursor && <StreamingCursor />}
       </pre>
@@ -112,7 +112,7 @@ function OutputBlock({ output, trailingCursor = false }: OutputBlockProps): Reac
       <div className="font-semibold">
         {output.ename}: {output.evalue}
       </div>
-      <pre className="mt-1 whitespace-pre-wrap text-[11px] opacity-80">
+      <pre className="mt-1 whitespace-pre-wrap break-words text-[11px] opacity-80">
         {output.traceback.join("\n")}
       </pre>
     </div>
@@ -148,12 +148,14 @@ function RichOutput({ data }: { data: Record<string, string> }): ReactElement {
   if (sanitized !== null) {
     return (
       <div
-        className="cell-output-html overflow-x-auto"
+        className="cell-output-html min-w-0 max-w-full overflow-hidden"
         // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized via DOMPurify with a strict tag/attr allowlist
         dangerouslySetInnerHTML={{ __html: sanitized }}
       />
     );
   }
   const text = data["text/plain"] ?? "";
-  return <pre className="whitespace-pre-wrap font-mono text-muted-foreground">{text}</pre>;
+  return (
+    <pre className="whitespace-pre-wrap break-words font-mono text-muted-foreground">{text}</pre>
+  );
 }

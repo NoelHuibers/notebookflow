@@ -9,25 +9,24 @@ export const NODE_FOREGROUND = "var(--notebookflow-node-fg, var(--card-foregroun
 
 /** Minimum label width for side (horizontal) port bands. */
 export const SIDES_PORT_LABEL_MIN = 96;
-export const SIDES_PORT_LABEL_MAX = 168;
 /** Width of the × remove strip on port chips (label + strip = chip min width). */
 export const CHIP_REMOVE_STRIP_WIDTH = 26;
 /** Minimum stacked port column / chip width — keeps chips inside padded rails. */
 export const STACKED_CHIP_MIN_WIDTH: number = SIDES_PORT_LABEL_MIN + CHIP_REMOVE_STRIP_WIDTH;
-/** Minimum width per port column in stacked (vertical) layout. */
-export const STACKED_PORT_COLUMN_MIN: number = STACKED_CHIP_MIN_WIDTH;
-/** Maximum width per port column before wrapping to additional lines. */
-export const STACKED_PORT_COLUMN_MAX = 184;
 /** Inset for port chips from the cell edge; pairs with handle edge offset in each layout. */
 export const PORT_EDGE_INSET = 6;
 
-/** Ellipsis at the text start so port suffixes (e.g. `.df`) stay visible when truncated. */
-export function portLabelEllipsis(textAlign: "left" | "right" = "left"): CSSProperties {
+export function displayInputPortName(value: string): string {
+  return parseInputBinding(value)?.localName ?? value;
+}
+
+/** Full port label text; node measurement grows around it instead of clipping. */
+export function portLabelFull(textAlign: "left" | "right" = "left"): CSSProperties {
   return {
-    overflow: "hidden",
-    textOverflow: "ellipsis",
+    overflow: "visible",
+    textOverflow: "clip",
     whiteSpace: "nowrap",
-    direction: "rtl",
+    direction: "ltr",
     textAlign,
   };
 }
@@ -77,7 +76,6 @@ export const portChipStyles: PortChipStyles = {
     border: `1px solid ${NODE_BORDER}`,
     background: "rgba(127, 127, 127, 0.08)",
     padding: "1px 2px 1px 4px",
-    maxWidth: "100%",
     boxSizing: "border-box",
   },
   chipLabel: {
@@ -90,10 +88,9 @@ export const portChipStyles: PortChipStyles = {
     lineHeight: 1.35,
     padding: 0,
     cursor: "text",
-    minWidth: 0,
-    maxWidth: "100%",
-    width: "100%",
-    ...portLabelEllipsis("left"),
+    minWidth: "max-content",
+    width: "auto",
+    ...portLabelFull("left"),
   },
   sidesChip: {
     display: "inline-flex",
@@ -104,16 +101,14 @@ export const portChipStyles: PortChipStyles = {
     background: "rgba(127, 127, 127, 0.08)",
     padding: 0,
     minWidth: SIDES_PORT_LABEL_MIN + CHIP_REMOVE_STRIP_WIDTH,
-    maxWidth: "100%",
     boxSizing: "border-box",
-    overflow: "hidden",
+    overflow: "visible",
   },
   sidesChipLabelRegion: {
     display: "flex",
     alignItems: "center",
     minWidth: SIDES_PORT_LABEL_MIN,
-    maxWidth: SIDES_PORT_LABEL_MAX,
-    flex: 1,
+    flex: "0 0 auto",
     padding: "2px 4px",
     boxSizing: "border-box",
   },
@@ -144,15 +139,12 @@ export const portChipStyles: PortChipStyles = {
   readOnlyPort: {
     fontSize: 12,
     lineHeight: 1.4,
-    maxWidth: "100%",
-    ...portLabelEllipsis("left"),
+    ...portLabelFull("left"),
   },
   readOnlyPortSideRight: {
     fontSize: 12,
     lineHeight: 1.4,
-    maxWidth: "100%",
-    width: "100%",
-    ...portLabelEllipsis("right"),
+    ...portLabelFull("right"),
   },
   chipRemove: {
     appearance: "none",

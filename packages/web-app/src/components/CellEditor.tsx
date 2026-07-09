@@ -41,7 +41,7 @@ export function CellEditor({
         ? "cells.typeRaw"
         : "cells.typeCode";
   return (
-    <div className="overflow-hidden rounded-md border bg-card">
+    <div className="min-w-0 overflow-hidden rounded-md border bg-card">
       <div className="flex items-center justify-between border-b px-3 py-1.5 text-[11px] text-muted-foreground">
         <span className="font-mono">{t("cells.cellLabel", { index })}</span>
         <span className="uppercase tracking-wider">{t(typeLabelKey)}</span>
@@ -60,7 +60,7 @@ export function CellEditor({
 
 function EditorFallback({ source }: { source: string }): ReactElement {
   return (
-    <pre className="min-h-[40px] overflow-x-auto whitespace-pre-wrap bg-[#282c34] px-3 py-2 font-mono text-[12px] text-[#abb2bf]">
+    <pre className="min-h-[40px] overflow-hidden whitespace-pre-wrap break-words bg-[#282c34] px-3 py-2 font-mono text-[12px] text-[#abb2bf]">
       {source === "" ? " " : source}
     </pre>
   );

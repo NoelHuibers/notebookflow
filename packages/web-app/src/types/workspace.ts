@@ -4,6 +4,7 @@
 
 import type { NotebookCell } from "@notebookflow/graph-canvas/sync";
 
+import type { NbOutput } from "@/lib/EngineClient";
 import type { IpynbDoc } from "@/lib/notebook";
 
 export interface LoadedNotebook {
@@ -11,6 +12,8 @@ export interface LoadedNotebook {
   cells: NotebookCell[];
   doc: IpynbDoc;
 }
+
+export type CellOutputsByCell = Record<number, NbOutput[]>;
 
 /** A file open in the workspace. The active file's live content lives in the
  * `notebook` state; this carries the rail's identity (id + name). */
@@ -26,6 +29,7 @@ export interface FileSnapshot {
   doc: IpynbDoc;
   baseline: string[];
   fileHandle: FileSystemFileHandle | null;
+  outputsByCell: CellOutputsByCell;
 }
 
 export type DragAxis = "horizontal" | "vertical";

@@ -119,7 +119,7 @@ export function CellList({
   }, [scrollToCellIndex, scrollToCellRevision]);
 
   return (
-    <div ref={containerRef} className="flex flex-col gap-3 p-4">
+    <div ref={containerRef} className="flex min-w-0 flex-col gap-3 p-4">
       {draft.length === 0 ? (
         <p className="text-sm italic text-muted-foreground">{t("cells.empty")}</p>
       ) : (
@@ -135,8 +135,8 @@ export function CellList({
               }}
               className={
                 isFocused
-                  ? "rounded-md ring-2 ring-ring/60 ring-offset-2 ring-offset-background transition-shadow"
-                  : "transition-shadow"
+                  ? "min-w-0 rounded-md ring-2 ring-ring/60 ring-offset-2 ring-offset-background transition-shadow"
+                  : "min-w-0 transition-shadow"
               }
             >
               <CellEditor

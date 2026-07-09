@@ -17,6 +17,7 @@ import { formatInputBinding, formatRef, parseInputBinding, parseRef } from "../s
 import type { NodeTag } from "../types";
 import { PortComboboxFloating } from "./PortComboboxFloating";
 import {
+  displayInputPortName,
   INLET_DROP_HANDLE_ID,
   isValidPort,
   NODE_BACKGROUND,
@@ -26,7 +27,6 @@ import {
   type PortKind,
   portChipStyles,
   STACKED_CHIP_MIN_WIDTH,
-  STACKED_PORT_COLUMN_MAX,
 } from "./portEditorShared";
 
 const TAG_HANDLE_COLOR: Record<NodeTag, string> = {
@@ -343,6 +343,60 @@ function StackedPortCell(props: { children: ReactNode }): ReactElement {
   return <div style={stackedStyles.portColumnContent}>{props.children}</div>;
 }
 
+function StackedPortWidthKeeper({
+  kind,
+  value,
+  editable,
+}: {
+  kind: PortKind;
+  value: string | null;
+  editable: boolean;
+}): ReactElement {
+  let content: ReactNode;
+  if (value === null) {
+    content =
+      kind === "input" ? (
+        <span style={stackedStyles.dropHint}>
+          <Plus aria-hidden="true" size={11} strokeWidth={2.5} />
+          <span>wire or add</span>
+        </span>
+      ) : (
+        <span style={portChipStyles.addButton}>
+          <Plus aria-hidden="true" size={11} strokeWidth={2.5} />
+        </span>
+      );
+  } else if (editable) {
+    content = (
+      <SidePortLabel
+        kind={kind}
+        value={value}
+        dimmed={false}
+        onEdit={() => undefined}
+        onRemove={() => undefined}
+      />
+    );
+  } else {
+    content =
+      kind === "input" ? (
+        <span style={portChipStyles.readOnlyPort}>
+          <InputPortLabel value={value} />
+        </span>
+      ) : (
+        <span style={portChipStyles.readOnlyPort}>{value}</span>
+      );
+  }
+
+  return (
+    <div
+      aria-hidden="true"
+      data-testid="stacked-port-width-keeper"
+      style={stackedStyles.widthKeeper}
+    >
+      {content}
+    </div>
+  );
+}
+
 /** Center the lone drop/add affordance when no ports exist yet. */
 function stackedPortRowStyles(
   columns: ReadonlyArray<{ port: string | null }>,
@@ -433,6 +487,11 @@ function StackedPortSection(props: InletOutletGridProps): ReactElement | null {
                 type="target"
                 position={Position.Top}
                 style={stackedHandleStyle(handleColor, "top")}
+              />
+              <StackedPortWidthKeeper
+                kind="input"
+                value={col.port}
+                editable={editable && onInputsChange !== undefined}
               />
             </div>
           ))}
@@ -567,7 +626,9 @@ function StackedPortSection(props: InletOutletGridProps): ReactElement | null {
       <div style={handleRowStyle} data-testid="handle-rail-bottom">
         {columns.map((col) =>
           col.port === null ? (
-            <div key={col.key} style={portColumnStyle} />
+            <div key={col.key} style={portColumnStyle}>
+              <StackedPortWidthKeeper kind="output" value={null} editable={addOutlet} />
+            </div>
           ) : (
             <div key={col.key} style={portColumnStyle}>
               <Handle
@@ -575,6 +636,11 @@ function StackedPortSection(props: InletOutletGridProps): ReactElement | null {
                 type="source"
                 position={Position.Bottom}
                 style={stackedHandleStyle(handleColor, "bottom")}
+              />
+              <StackedPortWidthKeeper
+                kind="output"
+                value={col.port}
+                editable={editable && onOutputsChange !== undefined}
               />
             </div>
           ),
@@ -754,13 +820,10 @@ function SidePortLabel(props: PortChipProps): ReactElement {
 }
 
 function InputPortLabel({ value }: { value: string }): ReactElement {
-  const binding = parseInputBinding(value);
-  if (binding !== null) {
-    return <span style={inputRefLabelStyles.label}>{binding.localName}</span>;
-  }
+  const displayName = displayInputPortName(value);
   const dotIdx = value.lastIndexOf(".");
-  if (dotIdx <= 0 || dotIdx === value.length - 1) {
-    return <span style={inputRefLabelStyles.label}>{value}</span>;
+  if (displayName !== value || dotIdx <= 0 || dotIdx === value.length - 1) {
+    return <span style={inputRefLabelStyles.label}>{displayName}</span>;
   }
   return (
     <span style={inputRefLabelStyles.label}>
@@ -803,24 +866,21 @@ function stackedHandleStyle(color: string, edge: "top" | "bottom"): CSSPropertie
 const inputRefLabelStyles = {
   label: {
     display: "inline-flex",
-    minWidth: 0,
-    maxWidth: "100%",
-    overflow: "hidden",
+    minWidth: "max-content",
+    overflow: "visible",
     direction: "ltr",
     textAlign: "left",
     whiteSpace: "nowrap",
   },
   prefix: {
-    minWidth: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
+    overflow: "visible",
+    textOverflow: "clip",
     color: NODE_MUTED,
-    flexShrink: 1,
+    flexShrink: 0,
   },
   variable: {
-    minWidth: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
+    overflow: "visible",
+    textOverflow: "clip",
     color: "inherit",
     flexShrink: 0,
   },
@@ -953,9 +1013,8 @@ const stackedStyles = {
   },
   portColumn: {
     position: "relative",
-    flex: "1 1 0",
+    flex: "0 0 auto",
     minWidth: STACKED_CHIP_MIN_WIDTH,
-    maxWidth: STACKED_PORT_COLUMN_MAX,
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
@@ -975,11 +1034,18 @@ const stackedStyles = {
   },
   portColumnContent: {
     width: "100%",
-    maxWidth: "100%",
-    minWidth: 0,
+    minWidth: "max-content",
     display: "flex",
     justifyContent: "center",
     boxSizing: "border-box",
+  },
+  widthKeeper: {
+    visibility: "hidden",
+    pointerEvents: "none",
+    height: 0,
+    overflow: "hidden",
+    display: "flex",
+    justifyContent: "center",
   },
   emptySlot: {
     display: "block",

@@ -30,6 +30,7 @@ function snapshot(cells: NotebookCell[]): FileSnapshot {
     doc: docFor(cells),
     baseline: cells.map((cell) => cell.source),
     fileHandle: null,
+    outputsByCell: {},
   };
 }
 
@@ -83,5 +84,6 @@ describe("workspace patch routing", () => {
     expect(original.cells[0]?.source).not.toContain("in=df<-a:Load.df");
     expect(patched.baseline).toEqual(original.baseline);
     expect(patched.fileHandle).toBe(original.fileHandle);
+    expect(patched.outputsByCell).toBe(original.outputsByCell);
   });
 });

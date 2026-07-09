@@ -88,7 +88,6 @@ import type {
   AskAnswer,
   DataFile,
   EngineEvent,
-  NbOutput,
   PipelineDef,
   PipelineExplanation,
   PipelineProposal,
@@ -101,6 +100,7 @@ import { useI18n } from "@/lib/i18n";
 import { openInJupyterLab } from "@/lib/jupyter";
 import type { IpynbDoc } from "@/lib/notebook";
 import {
+  extractOutputsByCell,
   extractSourceFilename,
   parseNotebook,
   serializeNotebook,
@@ -129,7 +129,13 @@ import {
   type WorkspacePatchLookup,
 } from "@/lib/workspacePatches";
 import { downloadWorkspaceZip, type WorkspaceFile } from "@/lib/workspaceZip";
-import type { DragState, FileSnapshot, LoadedNotebook, OpenFileMeta } from "@/types/workspace";
+import type {
+  CellOutputsByCell,
+  DragState,
+  FileSnapshot,
+  LoadedNotebook,
+  OpenFileMeta,
+} from "@/types/workspace";
 
 const EMPTY_GRAPH: GraphModel = { nodes: {}, groups: {}, wires: {} };
 const DIVIDER_SIZE_PX = 10;
@@ -226,6 +232,36 @@ function findNodeForCellIndex(
   return null;
 }
 
+function shiftOutputsAfterDelete(
+  outputs: CellOutputsByCell,
+  deletedIndex: number,
+): CellOutputsByCell {
+  const next: CellOutputsByCell = {};
+  for (const [key, value] of Object.entries(outputs)) {
+    const index = Number(key);
+    if (!Number.isInteger(index) || index === deletedIndex) {
+      continue;
+    }
+    next[index > deletedIndex ? index - 1 : index] = value;
+  }
+  return next;
+}
+
+function shiftOutputsAfterInsert(
+  outputs: CellOutputsByCell,
+  insertedIndex: number,
+): CellOutputsByCell {
+  const next: CellOutputsByCell = {};
+  for (const [key, value] of Object.entries(outputs)) {
+    const index = Number(key);
+    if (!Number.isInteger(index)) {
+      continue;
+    }
+    next[index >= insertedIndex ? index + 1 : index] = value;
+  }
+  return next;
+}
+
 export function App(): ReactElement {
   const { t } = useI18n();
   const initialWorkspaceRef = useRef<InitialWorkspaceFile[] | null>(null);
@@ -267,6 +303,7 @@ export function App(): ReactElement {
           doc: fileNotebook.doc,
           baseline: fileNotebook.cells.map((cell) => cell.source),
           fileHandle: null,
+          outputsByCell: extractOutputsByCell(fileNotebook.doc),
         },
       ]),
     ),
@@ -287,12 +324,15 @@ export function App(): ReactElement {
   const [selected, setSelected] = useState<NodeModel | null>(null);
   const [patches, setPatches] = useState<CellPatch[]>([]);
   const [events, setEvents] = useState<EngineEvent[]>([]);
-  const [outputsByCell, setOutputsByCell] = useState<Record<number, NbOutput[]>>({});
+  const [outputsByCell, setOutputsByCell] = useState<CellOutputsByCell>(() =>
+    extractOutputsByCell(firstInitialFile.notebook.doc),
+  );
   const [runtimeByNode, setRuntimeByNode] = useState<Record<string, RuntimeState>>({});
   // Post-run output row counts, keyed by node id. Merged with the static
   // filename map (derived from cell source) into the canvas meta line.
   const [rowsByNode, setRowsByNode] = useState<Record<string, number>>({});
   const [streamingCellIndex, setStreamingCellIndex] = useState<number | null>(null);
+  const [streamingNotebookPath, setStreamingNotebookPath] = useState<string | null>(null);
   const [timingByNode, setTimingByNode] = useState<Record<string, number>>({});
   const [runSummary, setRunSummary] = useState<RunSummary | null>(null);
   const [focusedCellIndex, setFocusedCellIndex] = useState<number | null>(null);
@@ -469,6 +509,63 @@ export function App(): ReactElement {
   const topPaneRef = useRef<HTMLDivElement | null>(null);
   const canvasPaneRef = useRef<HTMLDivElement | null>(null);
   const canvasBodyRef = useRef<HTMLDivElement | null>(null);
+  const activeFileIdRef = useRef(activeFileId);
+  const openFilesRef = useRef(openFiles);
+  const outputsByCellRef = useRef(outputsByCell);
+  activeFileIdRef.current = activeFileId;
+  openFilesRef.current = openFiles;
+  outputsByCellRef.current = outputsByCell;
+
+  const replaceActiveOutputsByCell = useCallback((next: CellOutputsByCell): void => {
+    outputsByCellRef.current = next;
+    setOutputsByCell(next);
+  }, []);
+
+  const updateOutputsForFile = useCallback(
+    (fileId: string, update: (current: CellOutputsByCell) => CellOutputsByCell): void => {
+      if (fileId === activeFileIdRef.current) {
+        setOutputsByCell((current) => {
+          const next = update(current);
+          outputsByCellRef.current = next;
+          return next;
+        });
+        return;
+      }
+      const snapshot = snapshotsRef.current.get(fileId);
+      if (snapshot === undefined) {
+        return;
+      }
+      snapshotsRef.current.set(fileId, {
+        ...snapshot,
+        outputsByCell: update(snapshot.outputsByCell),
+      });
+    },
+    [],
+  );
+
+  const updateOutputsForNotebookPath = useCallback(
+    (notebookPath: string, update: (current: CellOutputsByCell) => CellOutputsByCell): void => {
+      const file = openFilesRef.current.find((candidate) => candidate.name === notebookPath);
+      if (file === undefined) {
+        return;
+      }
+      updateOutputsForFile(file.id, update);
+    },
+    [updateOutputsForFile],
+  );
+
+  const clearOutputsForOpenFiles = useCallback((): void => {
+    for (const file of openFilesRef.current) {
+      if (file.id === activeFileIdRef.current) {
+        continue;
+      }
+      const snapshot = snapshotsRef.current.get(file.id);
+      if (snapshot !== undefined) {
+        snapshotsRef.current.set(file.id, { ...snapshot, outputsByCell: {} });
+      }
+    }
+    replaceActiveOutputsByCell({});
+  }, [replaceActiveOutputsByCell]);
 
   // Cells of every open file, keyed by notebook path (= file name). The active
   // file is live; inactive files come from their frozen snapshots. Drives both
@@ -605,12 +702,12 @@ export function App(): ReactElement {
     setSelected(null);
     setPatches([]);
     setEvents([]);
-    setOutputsByCell({});
     setRuntimeByNode({});
     setTimingByNode({});
     setRowsByNode({});
     setRunSummary(null);
     setStreamingCellIndex(null);
+    setStreamingNotebookPath(null);
     setFocusedCellIndex(null);
     setCellNavigationTarget(null);
     setExplanation(null);
@@ -625,6 +722,7 @@ export function App(): ReactElement {
       doc: notebook.doc,
       baseline: baselineSources,
       fileHandle: fileHandleRef.current,
+      outputsByCell: outputsByCellRef.current,
     });
   }, [activeFileId, notebook, baselineSources]);
 
@@ -640,12 +738,13 @@ export function App(): ReactElement {
         setNotebook({ name: targetName, cells: snap.cells, doc: snap.doc });
         setBaselineSources(snap.baseline);
         fileHandleRef.current = snap.fileHandle;
+        replaceActiveOutputsByCell(snap.outputsByCell);
         snapshotsRef.current.delete(targetId);
       }
       resetTransient();
       setActiveFileId(targetId);
     },
-    [activeFileId, openFiles, snapshotActive, resetTransient],
+    [activeFileId, openFiles, snapshotActive, resetTransient, replaceActiveOutputsByCell],
   );
 
   const handleFile = useCallback(
@@ -665,6 +764,7 @@ export function App(): ReactElement {
         setNotebook({ name, cells: parsed.cells, doc: parsed.doc });
         setBaselineSources(parsed.cells.map((cell) => cell.source));
         fileHandleRef.current = null;
+        replaceActiveOutputsByCell(extractOutputsByCell(parsed.doc));
         resetTransient();
         setError(null);
       } catch (err: unknown) {
@@ -672,7 +772,7 @@ export function App(): ReactElement {
         setError(t("app.errors.loadFailed", { name, message }));
       }
     },
-    [openFiles, snapshotActive, switchToFile, resetTransient, t],
+    [openFiles, snapshotActive, switchToFile, resetTransient, replaceActiveOutputsByCell, t],
   );
 
   const handleCreateNotebook = useCallback((): void => {
@@ -684,10 +784,11 @@ export function App(): ReactElement {
     setNotebook(next);
     setBaselineSources(next.cells.map((cell) => cell.source));
     fileHandleRef.current = null;
+    replaceActiveOutputsByCell({});
     resetTransient();
     setFocusedCellIndex(0);
     setError(null);
-  }, [openFiles, snapshotActive, resetTransient]);
+  }, [openFiles, snapshotActive, resetTransient, replaceActiveOutputsByCell]);
 
   const closeFile = useCallback(
     (id: string): void => {
@@ -836,8 +937,11 @@ export function App(): ReactElement {
       nextDocCells.splice(focusedCellIndex, 1);
       return { ...prev, cells: nextCells, doc: { ...prev.doc, cells: nextDocCells } };
     });
+    updateOutputsForFile(activeFileIdRef.current, (current) =>
+      shiftOutputsAfterDelete(current, focusedCellIndex),
+    );
     setFocusedCellIndex(null);
-  }, [focusedCellIndex]);
+  }, [focusedCellIndex, updateOutputsForFile]);
 
   const handleCopyFocusedCell = useCallback((): void => {
     if (focusedCellIndex === null) {
@@ -866,8 +970,11 @@ export function App(): ReactElement {
       nextDocCells.splice(insertAt, 0, toIpynbCell(cellClipboard));
       return { ...prev, cells: nextCells, doc: { ...prev.doc, cells: nextDocCells } };
     });
+    updateOutputsForFile(activeFileIdRef.current, (current) =>
+      shiftOutputsAfterInsert(current, insertAt),
+    );
     setFocusedCellIndex(insertAt);
-  }, [cellClipboard, focusedCellIndex, notebook.cells.length]);
+  }, [cellClipboard, focusedCellIndex, notebook.cells.length, updateOutputsForFile]);
 
   const handleChangeFocusedCellType = useCallback(
     (kind: CellKind): void => {
@@ -886,8 +993,18 @@ export function App(): ReactElement {
         nextDocCells[focusedCellIndex] = toIpynbCell(updated);
         return { ...prev, cells: nextCells, doc: { ...prev.doc, cells: nextDocCells } };
       });
+      if (kind !== "code") {
+        updateOutputsForFile(activeFileIdRef.current, (current) => {
+          if (current[focusedCellIndex] === undefined) {
+            return current;
+          }
+          const next = { ...current };
+          delete next[focusedCellIndex];
+          return next;
+        });
+      }
     },
-    [focusedCellIndex],
+    [focusedCellIndex, updateOutputsForFile],
   );
 
   const handleRename = useCallback((nodeId: string, nextName: string): void => {
@@ -1232,12 +1349,13 @@ export function App(): ReactElement {
     setSelected(null);
     setPatches([]);
     setEvents([]);
-    setOutputsByCell({});
+    replaceActiveOutputsByCell({});
     setRuntimeByNode({});
     setTimingByNode({});
     setRowsByNode({});
     setRunSummary(null);
     setStreamingCellIndex(null);
+    setStreamingNotebookPath(null);
     setFocusedCellIndex(null);
     setExplanation(null);
     fileHandleRef.current = null;
@@ -1246,7 +1364,7 @@ export function App(): ReactElement {
     setComposeResult(null);
     setComposePrompt("");
     setComposeError(null);
-  }, [composeResult, notebook.doc]);
+  }, [composeResult, notebook.doc, replaceActiveOutputsByCell]);
 
   const manifestById = useMemo(
     () => new Map(paletteNodes.map((manifest) => [manifest.id, manifest] as const)),
@@ -1381,11 +1499,12 @@ export function App(): ReactElement {
       return;
     }
     setEvents([]);
-    setOutputsByCell({});
+    clearOutputsForOpenFiles();
     setTimingByNode({});
     setRowsByNode({});
     setRunSummary(null);
     setStreamingCellIndex(null);
+    setStreamingNotebookPath(null);
     const initialRuntime: Record<string, RuntimeState> = {};
     for (const nodeId of Object.keys(graph.nodes)) {
       initialRuntime[nodeId] = "queued";
@@ -1404,10 +1523,11 @@ export function App(): ReactElement {
             const node = graph.nodes[event.nodeId];
             const cellIndex = node?.cellIndices[0];
             setStreamingCellIndex(cellIndex ?? null);
+            setStreamingNotebookPath(node?.groupId ?? null);
             // Reset this cell's outputs so the streaming cursor doesn't ride
             // on top of stale text from a prior run.
-            if (cellIndex !== undefined) {
-              setOutputsByCell((prev) => {
+            if (node !== undefined && cellIndex !== undefined) {
+              updateOutputsForNotebookPath(node.groupId, (prev) => {
                 if (prev[cellIndex] === undefined) {
                   return prev;
                 }
@@ -1420,9 +1540,13 @@ export function App(): ReactElement {
           if (event.type === "nodeCompleted") {
             const node = graph.nodes[event.result.nodeId];
             const cellIndex = node?.cellIndices[0];
-            if (cellIndex !== undefined) {
-              setOutputsByCell((prev) => ({ ...prev, [cellIndex]: event.result.outputs }));
+            if (node !== undefined && cellIndex !== undefined) {
+              updateOutputsForNotebookPath(node.groupId, (prev) => ({
+                ...prev,
+                [cellIndex]: event.result.outputs,
+              }));
               setStreamingCellIndex((current) => (current === cellIndex ? null : current));
+              setStreamingNotebookPath((current) => (current === node.groupId ? null : current));
             }
             const status = event.result.status;
             if (status === "ok" || status === "error" || status === "skipped") {
@@ -1456,8 +1580,9 @@ export function App(): ReactElement {
       .finally(() => {
         setIsRunning(false);
         setStreamingCellIndex(null);
+        setStreamingNotebookPath(null);
       });
-  }, [isRunning, pipelineDef, graph, t]);
+  }, [isRunning, clearOutputsForOpenFiles, pipelineDef, graph, updateOutputsForNotebookPath, t]);
 
   // Export every open file's .ipynb as one zip — a single "Download" is
   // ambiguous once the workspace spans multiple files. The active file carries
@@ -1474,7 +1599,11 @@ export function App(): ReactElement {
       const snap = snapshotsRef.current.get(file.id);
       return {
         name: file.name,
-        json: serializeNotebook(snap?.cells ?? [], snap?.doc ?? notebook.doc, {}),
+        json: serializeNotebook(
+          snap?.cells ?? [],
+          snap?.doc ?? notebook.doc,
+          snap?.outputsByCell ?? {},
+        ),
       };
     });
   }, [openFiles, activeFileId, notebook, outputsByCell]);
@@ -1534,6 +1663,7 @@ export function App(): ReactElement {
             doc: p.doc,
             baseline: p.cells.map((c) => c.source),
             fileHandle: null,
+            outputsByCell: extractOutputsByCell(p.doc),
           });
         }
         setOpenFiles(parsed.map((p) => ({ id: p.id, name: p.name })));
@@ -1541,6 +1671,7 @@ export function App(): ReactElement {
         setNotebook({ name: first.name, cells: first.cells, doc: first.doc });
         setBaselineSources(first.cells.map((c) => c.source));
         fileHandleRef.current = null;
+        replaceActiveOutputsByCell(extractOutputsByCell(first.doc));
         resetTransient();
         setCloudId(id);
         setIsCloudOpen(false);
@@ -1550,7 +1681,7 @@ export function App(): ReactElement {
         setCloudBusy(false);
       }
     },
-    [resetTransient, t],
+    [resetTransient, replaceActiveOutputsByCell, t],
   );
 
   const handleDeleteFromCloud = useCallback(
@@ -2299,7 +2430,7 @@ export function App(): ReactElement {
                         setIsCellsCollapsed(true);
                       }}
                     />
-                    <ScrollArea className="min-h-0 flex-1">
+                    <ScrollArea className="min-h-0 min-w-0 flex-1">
                       <CellList
                         cells={notebook.cells}
                         onCellsChange={handleCellsChange}
@@ -2308,7 +2439,9 @@ export function App(): ReactElement {
                         scrollToCellRevision={cellNavigationTarget?.revision ?? 0}
                         focusedCellIndex={focusedCellIndex}
                         onFocusCell={handleFocusCell}
-                        streamingCellIndex={streamingCellIndex}
+                        streamingCellIndex={
+                          streamingNotebookPath === notebook.name ? streamingCellIndex : null
+                        }
                       />
                     </ScrollArea>
                     <CellPaneFooter cells={notebook.cells} isDirty={isDirty} />
