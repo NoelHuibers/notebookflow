@@ -2,8 +2,8 @@
 // react-i18next's <Trans> (see LandingHero.tsx / index.tsx). Code snippets inside
 // the tags (# @node:, .ipynb, data:Node.port) are product syntax — kept verbatim
 // in both locales. The hero graph's node names stay English: they mirror the
-// `# @node: Load Data` markers in the illustrated .ipynb, so translating them
-// would desync the diagram from the code it depicts.
+// bundled example notebook markers, so translating them would desync the
+// diagram from the code it depicts.
 export const en = {
   badge: "Private beta",
   heroTitle: "n8n for your <accent>notebooks</accent>.",

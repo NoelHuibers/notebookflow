@@ -20,11 +20,16 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
 const extensionPath = path.join(repoRoot, "packages", "vscode-extension");
-const examplePath = path.join(repoRoot, "examples", "demo.ipynb");
+const examplePaths = [
+  "preprocessing.ipynb",
+  "model_baseline.ipynb",
+  "model_advanced.ipynb",
+  "postprocessing.ipynb",
+].map((file) => path.join(repoRoot, "examples", file));
 
 const child = spawn(
   "code",
-  ["--extensionDevelopmentPath", extensionPath, "--new-window", examplePath],
+  ["--extensionDevelopmentPath", extensionPath, "--new-window", ...examplePaths],
   { stdio: "inherit", shell: true },
 );
 

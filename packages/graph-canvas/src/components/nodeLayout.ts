@@ -268,6 +268,7 @@ export function applyMeasuredGroupLayout(
   horizontalCells: boolean,
   constants: GroupLayoutConstants,
   fallbackSize: (node: Node) => MeasuredSize,
+  manualGroupIds?: ReadonlySet<string>,
 ): Node[] {
   const groupNodes = nodes.filter((node) => node.type === "group");
   if (groupNodes.length === 0) {
@@ -286,6 +287,8 @@ export function applyMeasuredGroupLayout(
   const priorGroupHeights: number[] = [];
 
   for (const group of sortedGroups) {
+    const groupData = group.data as { id?: string };
+    const groupNotebookId = groupData.id ?? group.id.replace(/^group:/, "");
     const children = nodes
       .filter((node) => node.parentNode === group.id && node.type === "notebook")
       .sort((a, b) => cellSortKey(a) - cellSortKey(b));
@@ -323,8 +326,6 @@ export function applyMeasuredGroupLayout(
         maxCellHeight +
         constants.groupInnerBottomPadding;
       if (!collapsed) {
-        const groupData = group.data as { id?: string };
-        const groupNotebookId = groupData.id ?? group.id.replace(/^group:/, "");
         const slots = layoutInsertSlotsForGroup(
           children,
           sizes,
@@ -363,8 +364,6 @@ export function applyMeasuredGroupLayout(
       expandedHeight =
         constants.groupHeaderHeight + stackedContentHeight + constants.groupInnerBottomPadding;
       if (!collapsed) {
-        const groupData = group.data as { id?: string };
-        const groupNotebookId = groupData.id ?? group.id.replace(/^group:/, "");
         const slots = layoutInsertSlotsForGroup(
           children,
           sizes,
@@ -386,17 +385,20 @@ export function applyMeasuredGroupLayout(
       height: collapsed ? constants.collapsedGroupHeight : expandedHeight,
     });
     const groupHeight = collapsed ? constants.collapsedGroupHeight : expandedHeight;
+    const preservePosition = manualGroupIds?.has(groupNotebookId) === true;
     groupPositions.set(
       group.id,
-      horizontalCells
-        ? {
-            x: group.position.x,
-            y: groupRowY(priorGroupHeights, constants.columnGap),
-          }
-        : {
-            x: groupColumnX(priorGroupWidths, constants.columnGap),
-            y: group.position.y,
-          },
+      preservePosition
+        ? group.position
+        : horizontalCells
+          ? {
+              x: group.position.x,
+              y: groupRowY(priorGroupHeights, constants.columnGap),
+            }
+          : {
+              x: groupColumnX(priorGroupWidths, constants.columnGap),
+              y: group.position.y,
+            },
     );
     priorGroupWidths.push(groupWidth);
     priorGroupHeights.push(groupHeight);

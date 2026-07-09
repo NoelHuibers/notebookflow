@@ -55,64 +55,81 @@ export interface GraphNode {
   chart?: boolean;
 }
 
-/**
- * The authentic demo pipeline (examples/demo.ipynb): a 4-node chain in
- * pipeline.ipynb, plus one cross-notebook AI node in model.ipynb.
- */
+/** The bundled analyst pipeline: preprocessing feeds two model notebooks, then postprocessing. */
 export const NODES: GraphNode[] = [
   {
     id: "load",
-    name: "Load Data",
+    name: "Load customer data",
     tag: "input",
     x: 64,
-    y: 150,
-    out: ["df"],
-    meta: "demo.csv · 6 rows",
+    y: 124,
+    out: ["raw_df"],
+    meta: "520 rows",
   },
   {
-    id: "filter",
-    name: "Filter",
+    id: "clean",
+    name: "Clean features",
     tag: "transform",
-    x: 336,
-    y: 150,
-    in: ["Load Data.df"],
-    out: ["clean_df"],
-    meta: "5 rows",
+    x: 316,
+    y: 124,
+    in: ["Load customer data.raw_df"],
+    out: ["feature_df"],
+    meta: "feature set",
   },
   {
-    id: "summarize",
-    name: "Summarize",
+    id: "split",
+    name: "Train test split",
     tag: "transform",
-    x: 608,
-    y: 150,
-    in: ["Filter.clean_df"],
-    out: ["by_region"],
-    meta: "3 rows",
+    x: 568,
+    y: 124,
+    in: ["Clean features.feature_df"],
+    out: ["train_df", "test_df"],
+    meta: "390 / 130 rows",
+  },
+  {
+    id: "baseline",
+    name: "Train baseline",
+    tag: "transform",
+    x: 326,
+    y: 344,
+    in: ["preprocessing:Train test split.train_df"],
+    out: ["baseline_scores"],
+    meta: "global linear",
+  },
+  {
+    id: "segmented",
+    name: "Train segmented model",
+    tag: "transform",
+    x: 326,
+    y: 582,
+    in: ["preprocessing:Train test split.train_df"],
+    out: ["segmented_scores"],
+    meta: "by channel",
+  },
+  {
+    id: "compare",
+    name: "Compare models",
+    tag: "transform",
+    x: 704,
+    y: 394,
+    in: ["model_baseline:Train baseline.baseline_scores"],
+    out: ["comparison"],
+    meta: "best RMSE",
   },
   {
     id: "report",
-    name: "Report",
+    name: "Analyst report",
     tag: "output",
-    x: 880,
-    y: 150,
-    in: ["Summarize.by_region"],
-    meta: "by region",
+    x: 884,
+    y: 512,
+    in: ["Compare models.comparison"],
+    meta: "model report",
     chart: true,
-  },
-  {
-    id: "forecast",
-    name: "Forecast",
-    tag: "ai",
-    x: 608,
-    y: 470,
-    in: ["data:Summarize.by_region"],
-    out: ["trend"],
-    meta: "model.ipynb",
   },
 ];
 
 /** Order the run-pulse sweeps the DAG (topological). */
-export const RUN_ORDER = ["load", "filter", "summarize", "report", "forecast"];
+export const RUN_ORDER = ["load", "clean", "split", "baseline", "segmented", "compare", "report"];
 
 export interface GraphEdge {
   id: string;
@@ -122,10 +139,13 @@ export interface GraphEdge {
 }
 
 export const EDGES: GraphEdge[] = [
-  { id: "e-load-filter", from: "load", to: "filter", kind: "local" },
-  { id: "e-filter-summarize", from: "filter", to: "summarize", kind: "local" },
-  { id: "e-summarize-report", from: "summarize", to: "report", kind: "local" },
-  { id: "e-summarize-forecast", from: "summarize", to: "forecast", kind: "cross" },
+  { id: "e-load-clean", from: "load", to: "clean", kind: "local" },
+  { id: "e-clean-split", from: "clean", to: "split", kind: "local" },
+  { id: "e-split-baseline", from: "split", to: "baseline", kind: "cross" },
+  { id: "e-split-segmented", from: "split", to: "segmented", kind: "cross" },
+  { id: "e-baseline-compare", from: "baseline", to: "compare", kind: "cross" },
+  { id: "e-segmented-compare", from: "segmented", to: "compare", kind: "cross" },
+  { id: "e-compare-report", from: "compare", to: "report", kind: "local" },
 ];
 
 /** The two notebook containers, as design-space rectangles. */
@@ -139,8 +159,10 @@ export interface Container {
 }
 
 export const CONTAINERS: Container[] = [
-  { id: "a", label: "pipeline.ipynb", x: 40, y: 108, w: 1072, h: 158 },
-  { id: "b", label: "model.ipynb", x: 584, y: 430, w: 256, h: 158 },
+  { id: "pre", label: "preprocessing.ipynb", x: 40, y: 88, w: 760, h: 158 },
+  { id: "base", label: "model_baseline.ipynb", x: 300, y: 308, w: 260, h: 158 },
+  { id: "adv", label: "model_advanced.ipynb", x: 300, y: 546, w: 260, h: 158 },
+  { id: "post", label: "postprocessing.ipynb", x: 680, y: 354, w: 432, h: 250 },
 ];
 
 const node = (id: string) => NODES.find((n) => n.id === id) as GraphNode;

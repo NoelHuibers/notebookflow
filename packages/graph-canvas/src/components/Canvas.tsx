@@ -5,8 +5,8 @@
  * arrays and forwards interactive edits back to the parent through the
  * `onNode*` / `onWire*` callbacks. Phase-2 layout is deterministic: each
  * NodeGroup is rendered as a header card at the top of its column, and the
- * group's nodes are stacked beneath in cellIndex order. Positions are not
- * draggable yet — a future iteration will introduce free-form layout.
+ * group's nodes are stacked beneath in cellIndex order. Notebook groups can
+ * then be freely repositioned by dragging their headers.
  */
 
 import { Map as MapIcon, Network } from "lucide-react";
@@ -39,7 +39,7 @@ import { InsertDropContext } from "./insertDropContext";
 import type { NotebookNodeData } from "./Node";
 import { NotebookNode } from "./Node";
 import type { NodeGroupData } from "./NodeGroup";
-import { NODE_GROUP_HEADER_HEIGHT, NodeGroup } from "./NodeGroup";
+import { NODE_GROUP_DRAG_HANDLE_CLASS, NODE_GROUP_HEADER_HEIGHT, NodeGroup } from "./NodeGroup";
 import {
   applyMeasuredGroupLayout,
   estimateNodeHeight,
@@ -184,6 +184,8 @@ const DEFAULT_EDGE_OPTIONS = {
   zIndex: WIRE_LAYER_Z_INDEX,
 } as const;
 
+type CanvasPosition = { x: number; y: number };
+
 export interface CanvasProps {
   graph: GraphModel;
   /** When provided, the host controls which notebook node is visibly selected. */
@@ -280,7 +282,25 @@ function CanvasInner(props: CanvasProps): ReactElement {
   const [layout, setLayout] = useState<CanvasLayout>("manual");
   const [paletteDragActive, setPaletteDragActive] = useState(false);
   const [hoveredSlotId, setHoveredSlotId] = useState<string | null>(null);
+  const [manualGroupPositions, setManualGroupPositions] = useState<
+    ReadonlyMap<string, CanvasPosition>
+  >(() => new Map());
   const paletteDragDepthRef = useRef(0);
+
+  useEffect(() => {
+    setManualGroupPositions((current) => {
+      let changed = false;
+      const next = new Map<string, CanvasPosition>();
+      for (const [groupId, position] of current) {
+        if (graph.groups[groupId] !== undefined) {
+          next.set(groupId, position);
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [graph.groups]);
 
   useEffect(() => {
     const endPaletteDrag = (): void => {
@@ -312,6 +332,7 @@ function CanvasInner(props: CanvasProps): ReactElement {
       metaByNode,
       unresolvedByNode,
       portPlacement,
+      manualGroupPositions,
     });
   }, [
     graph,
@@ -327,7 +348,13 @@ function CanvasInner(props: CanvasProps): ReactElement {
     metaByNode,
     unresolvedByNode,
     portPlacement,
+    manualGroupPositions,
   ]);
+
+  const manualGroupIds = useMemo(
+    () => new Set(manualGroupPositions.keys()),
+    [manualGroupPositions],
+  );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(baseNodes);
 
@@ -391,6 +418,23 @@ function CanvasInner(props: CanvasProps): ReactElement {
       onNodeSelect(null);
     }
   }, [onNodeSelect]);
+
+  const handleNodeDragStop = useCallback((_event: unknown, node: Node): void => {
+    const groupId = groupIdForReactFlowNode(node);
+    if (groupId === null) {
+      return;
+    }
+    const nextPosition = { x: node.position.x, y: node.position.y };
+    setManualGroupPositions((current) => {
+      const previous = current.get(groupId);
+      if (previous?.x === nextPosition.x && previous.y === nextPosition.y) {
+        return current;
+      }
+      const next = new Map(current);
+      next.set(groupId, nextPosition);
+      return next;
+    });
+  }, []);
 
   const handleEdgesDelete = useCallback(
     (edges: Edge[]): void => {
@@ -502,13 +546,14 @@ function CanvasInner(props: CanvasProps): ReactElement {
             onConnect={handleConnect}
             isValidConnection={isValidConnection}
             onNodeClick={handleNodeClick}
+            onNodeDragStop={handleNodeDragStop}
             onPaneClick={handlePaneClick}
             onEdgesDelete={handleEdgesDelete}
-            nodesDraggable={false}
+            nodesDraggable
             fitView
             proOptions={{ hideAttribution: true }}
           >
-            <MeasuredGroupLayout portPlacement={portPlacement} />
+            <MeasuredGroupLayout portPlacement={portPlacement} manualGroupIds={manualGroupIds} />
             <Background />
             <Controls>
               <ControlButton
@@ -557,7 +602,13 @@ function CanvasInner(props: CanvasProps): ReactElement {
   );
 }
 
-function MeasuredGroupLayout({ portPlacement }: { portPlacement: PortPlacement }): null {
+function MeasuredGroupLayout({
+  portPlacement,
+  manualGroupIds,
+}: {
+  portPlacement: PortPlacement;
+  manualGroupIds: ReadonlySet<string>;
+}): null {
   const initialized = useNodesInitialized();
   const store = useStoreApi();
   const { getNodes, setNodes } = useReactFlow();
@@ -629,12 +680,22 @@ function MeasuredGroupLayout({ portPlacement }: { portPlacement: PortPlacement }
       horizontalCells,
       GROUP_LAYOUT,
       fallbackSize,
+      manualGroupIds,
     );
 
     if (measuredLayoutDiffers(current, next)) {
       setNodes(next);
     }
-  }, [initialized, measureSignature, horizontalCells, store, getNodes, setNodes, fallbackSize]);
+  }, [
+    initialized,
+    measureSignature,
+    horizontalCells,
+    store,
+    getNodes,
+    setNodes,
+    fallbackSize,
+    manualGroupIds,
+  ]);
 
   return null;
 }
@@ -654,6 +715,7 @@ function buildNodes(
     metaByNode: CanvasProps["metaByNode"];
     unresolvedByNode: CanvasProps["unresolvedByNode"];
     portPlacement: PortPlacement;
+    manualGroupPositions: ReadonlyMap<string, CanvasPosition>;
   },
 ): Node[] {
   const {
@@ -669,6 +731,7 @@ function buildNodes(
     metaByNode,
     unresolvedByNode,
     portPlacement,
+    manualGroupPositions,
   } = callbacks;
   const vars = variablesByNode ?? {};
   const runtime = runtimeByNode ?? {};
@@ -691,8 +754,9 @@ function buildNodes(
       continue;
     }
 
-    const groupX = horizontalCells ? 0 : nextGroupX;
-    const groupY = horizontalCells ? nextGroupY : GROUP_Y;
+    const manualPosition = manualGroupPositions.get(group.id);
+    const groupX = manualPosition?.x ?? (horizontalCells ? 0 : nextGroupX);
+    const groupY = manualPosition?.y ?? (horizontalCells ? nextGroupY : GROUP_Y);
     const groupData: NodeGroupData = {
       ...group,
       ...(activeGroupId === undefined ? {} : { active: activeGroupId === group.id }),
@@ -763,7 +827,8 @@ function buildNodes(
       type: "group",
       position: { x: groupX, y: groupY },
       data: groupData,
-      draggable: false,
+      draggable: true,
+      dragHandle: `.${NODE_GROUP_DRAG_HANDLE_CLASS}`,
       selectable: false,
       focusable: false,
       style: {
@@ -885,6 +950,17 @@ function buildNodes(
   }
 
   return rfNodes;
+}
+
+function groupIdForReactFlowNode(node: Node): string | null {
+  if (node.type !== "group") {
+    return null;
+  }
+  const data = node.data as { id?: unknown };
+  if (typeof data.id === "string") {
+    return data.id;
+  }
+  return node.id.startsWith("group:") ? node.id.slice("group:".length) : null;
 }
 
 const BREADCRUMBS_STYLE = {

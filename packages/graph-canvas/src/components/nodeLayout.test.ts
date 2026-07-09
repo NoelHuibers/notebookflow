@@ -154,6 +154,33 @@ describe("nodeLayout", () => {
     expect(group2?.position.x).toBe(wideWidth + GROUP_LAYOUT.columnGap);
   });
 
+  it("preserves manually positioned stacked groups", () => {
+    const g1 = "group:g1";
+    const g2 = "group:g2";
+    const nodes = [
+      groupNode(g1),
+      notebookNode("a", 0, g1),
+      { ...groupNode(g2), position: { x: 500, y: 72 } },
+      notebookNode("b", 0, g2),
+    ];
+    const measured = new Map([
+      ["a", { width: 380, height: 100 }],
+      ["b", { width: 220, height: 100 }],
+    ]);
+    const fallback = (): { width: number; height: number } => ({ width: 200, height: 100 });
+    const laidOut = applyMeasuredGroupLayout(
+      nodes,
+      measured,
+      false,
+      GROUP_LAYOUT,
+      fallback,
+      new Set(["g2"]),
+    );
+
+    const group2 = laidOut.find((node) => node.id === g2);
+    expect(group2?.position).toEqual({ x: 500, y: 72 });
+  });
+
   it("positions horizontal row from measured widths with uniform gap", () => {
     const groupId = "group:g1";
     const nodes = [

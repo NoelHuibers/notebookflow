@@ -82,7 +82,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { authClient, useSession } from "@/lib/auth-client";
-import { bootstrapBaselineSources, bootstrapFromFixture } from "@/lib/bootstrap";
+import { bootstrapNotebookFixtures } from "@/lib/bootstrap";
 import { applyCellPatch } from "@/lib/cellPatch";
 import type {
   AskAnswer,
@@ -192,6 +192,27 @@ function createBlankNotebook(name: string): LoadedNotebook {
   };
 }
 
+interface InitialWorkspaceFile {
+  id: string;
+  notebook: LoadedNotebook;
+}
+
+function createInitialWorkspaceFiles(): InitialWorkspaceFile[] {
+  const notebooks = bootstrapNotebookFixtures();
+  if (notebooks.length === 0) {
+    return [{ id: makeFileId(), notebook: createBlankNotebook("preprocessing.ipynb") }];
+  }
+  return notebooks.map((notebook) => ({ id: makeFileId(), notebook }));
+}
+
+function firstInitialWorkspaceFile(files: InitialWorkspaceFile[]): InitialWorkspaceFile {
+  const first = files[0];
+  if (first === undefined) {
+    throw new Error("Initial workspace must contain at least one notebook");
+  }
+  return first;
+}
+
 function findNodeForCellIndex(
   graph: GraphModel,
   groupId: string,
@@ -207,6 +228,12 @@ function findNodeForCellIndex(
 
 export function App(): ReactElement {
   const { t } = useI18n();
+  const initialWorkspaceRef = useRef<InitialWorkspaceFile[] | null>(null);
+  if (initialWorkspaceRef.current === null) {
+    initialWorkspaceRef.current = createInitialWorkspaceFiles();
+  }
+  const initialWorkspace = initialWorkspaceRef.current;
+  const firstInitialFile = firstInitialWorkspaceFile(initialWorkspace);
   // Translate the shared graph-canvas labels from the `canvas` namespace. Keys
   // mirror graph-canvas's CanvasLabels, so iterate the defaults and look each up.
   const canvasLabels = useMemo<CanvasLabels>(() => {
@@ -216,20 +243,34 @@ export function App(): ReactElement {
     }
     return out;
   }, [t]);
-  const [notebook, setNotebook] = useState<LoadedNotebook>(() => bootstrapFromFixture());
+  const [notebook, setNotebook] = useState<LoadedNotebook>(() => firstInitialFile.notebook);
   // Multi-file workspace. The active file's live content is `notebook`; other
   // open files freeze into snapshotsRef until switched back to.
-  const initialFileIdRef = useRef<string>(makeFileId());
   const [openFiles, setOpenFiles] = useState<OpenFileMeta[]>(() => [
-    { id: initialFileIdRef.current, name: notebook.name },
+    ...initialWorkspace.map(({ id, notebook: fileNotebook }) => ({
+      id,
+      name: fileNotebook.name,
+    })),
   ]);
-  const [activeFileId, setActiveFileId] = useState<string>(() => initialFileIdRef.current);
+  const [activeFileId, setActiveFileId] = useState<string>(() => firstInitialFile.id);
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
   // Files list and code cells collapse independently — close files without
   // closing code, and vice-versa.
   const [isFilesCollapsed, setIsFilesCollapsed] = useState(() => readPanelLayout().filesCollapsed);
   const [isCellsCollapsed, setIsCellsCollapsed] = useState(() => readPanelLayout().cellsCollapsed);
-  const snapshotsRef = useRef<Map<string, FileSnapshot>>(new Map());
+  const snapshotsRef = useRef<Map<string, FileSnapshot>>(
+    new Map(
+      initialWorkspace.slice(1).map(({ id, notebook: fileNotebook }) => [
+        id,
+        {
+          cells: fileNotebook.cells,
+          doc: fileNotebook.doc,
+          baseline: fileNotebook.cells.map((cell) => cell.source),
+          fileHandle: null,
+        },
+      ]),
+    ),
+  );
   const workspacePatchLookupRef = useRef<WorkspacePatchLookup>({
     openFiles,
     activeFileId,
@@ -262,7 +303,7 @@ export function App(): ReactElement {
   const [cellClipboard, setCellClipboard] = useState<NotebookCell | null>(null);
   const [isAddCellMenuOpen, setIsAddCellMenuOpen] = useState(false);
   const [baselineSources, setBaselineSources] = useState<string[]>(() =>
-    bootstrapBaselineSources(),
+    firstInitialFile.notebook.cells.map((cell) => cell.source),
   );
   const [definedByCell, setDefinedByCell] = useState<string[][]>([]);
   const [isRunning, setIsRunning] = useState(false);

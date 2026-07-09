@@ -38,8 +38,8 @@ It's idempotent — re-run after pulling.
 | Command              | What happens                                                                                              |
 |----------------------|-----------------------------------------------------------------------------------------------------------|
 | `pnpm start:web`     | Engine + Vite web app side-by-side via `concurrently`. Open the printed URL (`http://localhost:5173/`).   |
-| `pnpm start:vscode`  | Builds the extension, then auto-launches a VS Code dev host with `examples/demo.ipynb` already open. Engine spawns automatically once you run the **NotebookFlow: Open Canvas** command. |
-| `pnpm start:jupyter` | Builds the labextension bundle, then runs engine and JupyterLab side-by-side via `concurrently`. Lab opens with `examples/demo.ipynb`. |
+| `pnpm start:vscode`  | Builds the extension, then auto-launches a VS Code dev host with the multi-notebook analyst pipeline in `examples/` already open. Engine spawns automatically once you run the **NotebookFlow: Open Canvas** command. |
+| `pnpm start:jupyter` | Builds the labextension bundle, then runs engine and JupyterLab side-by-side via `concurrently`. Lab opens the multi-notebook analyst pipeline in `examples/`. |
 
 Ctrl+C in any `start:*` command tears down all child processes via `concurrently`'s `--kill-others-on-fail`.
 
@@ -124,9 +124,16 @@ notebookflow/
 └── README.md
 ```
 
-## Example notebook
+## Example notebooks
 
-`examples/demo.ipynb` is a self-contained four-node pipeline (Load Data → Filter → Summarize → Report) using inline pandas data — no external CSV required, so the `Run pipeline` button works out of the box. Use it as the reference for the marker grammar.
+The `examples/` directory contains a self-contained analyst workflow split across four notebooks:
+
+- `preprocessing.ipynb` generates synthetic customer revenue data, cleans it, engineers features, and publishes train/test splits.
+- `model_baseline.ipynb` trains a global linear baseline from the preprocessing outputs.
+- `model_advanced.ipynb` trains a channel-segmented model from the same split.
+- `postprocessing.ipynb` compares model metrics, selects the winner, and renders an analyst-facing report.
+
+The web app boots with `preprocessing.ipynb` only; open the model/report notebooks when you want to inspect the full cross-notebook graph. The extension launchers open all four example notebooks, whose markers demonstrate refs such as `preprocessing:Train test split.train_df`.
 
 ## Deploying
 

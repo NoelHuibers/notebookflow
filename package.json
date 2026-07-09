@@ -21,7 +21,7 @@
     "bootstrap:engine": "uv --project engine sync --all-extras",
     "bootstrap:jupyter": "uv --project engine add --optional dev jupyterlab && pnpm --filter @notebookflow/jupyterlab-extension add -D @jupyterlab/builder && pnpm --filter @notebookflow/jupyterlab-extension build:lab && pnpm jupyter:install",
     "engine": "uv --project engine run notebookflow",
-    "jupyter:lab": "uv --project engine run jupyter lab examples/demo.ipynb",
+    "jupyter:lab": "uv --project engine run jupyter lab examples/preprocessing.ipynb examples/model_baseline.ipynb examples/model_advanced.ipynb examples/postprocessing.ipynb",
     "jupyter:install": "node scripts/install-labextension.mjs",
     "start:web": "concurrently --names \"engine,web\" --prefix-colors \"yellow,cyan\" --kill-others-on-fail \"pnpm engine\" \"turbo run dev --filter=@notebookflow/web-app\"",
     "start:vscode": "pnpm --filter @notebookflow/vscode-extension build && node scripts/launch-vscode.mjs",

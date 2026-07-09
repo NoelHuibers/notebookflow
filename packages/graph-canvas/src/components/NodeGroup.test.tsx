@@ -3,7 +3,7 @@ import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { NODE_GROUP_HEADER_HEIGHT, NodeGroup } from "./NodeGroup";
+import { NODE_GROUP_DRAG_HANDLE_CLASS, NODE_GROUP_HEADER_HEIGHT, NodeGroup } from "./NodeGroup";
 
 const baseGroup = {
   id: "group-a",
@@ -68,6 +68,26 @@ describe("NodeGroup", () => {
 
     expect(container.textContent).toContain("main.ipynb");
     expect(container.textContent).toContain("data/pipelines/main.ipynb");
+  });
+
+  it("marks the header as the group drag handle", () => {
+    const container = mount(
+      <NodeGroup
+        id="group-a"
+        type="group"
+        selected={false}
+        xPos={0}
+        yPos={0}
+        zIndex={0}
+        isConnectable={false}
+        dragging={false}
+        data={baseGroup}
+      />,
+    );
+
+    const header = container.querySelector(`.${NODE_GROUP_DRAG_HANDLE_CLASS}`);
+    expect(header).not.toBeNull();
+    expect(header?.querySelector("button")?.className).toContain("nodrag");
   });
 
   it("calls onToggle with the group id when the chevron is clicked", () => {

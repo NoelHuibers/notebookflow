@@ -1,6 +1,6 @@
 /**
  * The source notebook card shown in the hero — a stylised .ipynb with the real
- * `# @node:` markers from examples/demo.ipynb. Lightweight static Python
+ * `# @node:` markers from examples/preprocessing.ipynb. Lightweight static Python
  * tinting (no CodeMirror). The marker lines carry `.nf-marker` so the scroll
  * timeline can make them glow ("this comment is what derives the node").
  *
@@ -30,23 +30,25 @@ interface Cell {
 
 const CELLS: Cell[] = [
   {
-    marker: "# @node: Load Data  [input]  out=df",
+    marker: "# @node: Load customer data  [input]  out=raw_df",
     lines: [
-      { code: "import pandas as pd", kind: "kw" },
-      { code: 'df = pd.DataFrame({"region": …, "revenue": …})' },
+      { code: "import numpy as np", kind: "kw" },
+      { code: 'raw_df = pd.DataFrame({"channel": …, "revenue": …})' },
     ],
   },
   {
-    marker: "# @node: Filter  [transform]  in=df<-Load Data.df  out=clean_df",
-    lines: [{ code: 'clean_df = df.dropna(subset=["revenue"])' }],
+    marker:
+      "# @node: Clean features  [transform]  in=raw_df<-Load customer data.raw_df  out=feature_df",
+    lines: [{ code: 'feature_df["ad_spend"] = feature_df["ad_spend"].fillna(…)' }],
   },
   {
-    marker: "# @node: Summarize  [transform]  in=clean_df<-Filter.clean_df  out=by_region",
-    lines: [{ code: 'by_region = clean_df.groupby("region").agg(…)' }],
+    marker:
+      "# @node: Train test split  [transform]  in=feature_df<-Clean features.feature_df  out=train_df,test_df,feature_cols",
+    lines: [{ code: "train_df = feature_df.iloc[:cutoff].copy()" }],
   },
   {
-    marker: "# @node: Report  [output]  in=by_region<-Summarize.by_region",
-    lines: [{ code: "print(by_region.to_string(index=False))", kind: "fn" }],
+    marker: "# model_baseline.ipynb consumes preprocessing:Train test split.train_df",
+    lines: [{ code: "cross-notebook refs stay visible on the canvas", kind: "fn" }],
   },
 ];
 
@@ -66,7 +68,7 @@ export function NotebookCard(): ReactElement {
       >
         <LogoMark className="size-4 text-primary" />
         <span style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>
-          pipeline.ipynb
+          preprocessing.ipynb
         </span>
         <span style={{ marginLeft: "auto", display: "flex", gap: 5 }}>
           {["#ef4444", "#f59e0b", "#10b981"].map((c) => (

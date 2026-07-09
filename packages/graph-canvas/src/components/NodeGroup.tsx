@@ -20,6 +20,7 @@ export interface NodeGroupData extends NodeGroupModel {
 }
 
 export const NODE_GROUP_HEADER_HEIGHT = 36;
+export const NODE_GROUP_DRAG_HANDLE_CLASS = "notebookflow-group-drag-handle";
 
 const GROUP_FOREGROUND = "var(--notebookflow-group-fg, var(--foreground, #111827))";
 const GROUP_MUTED = "var(--notebookflow-group-muted, var(--muted-foreground, #6b7280))";
@@ -38,9 +39,9 @@ interface NodeGroupStyles {
 }
 
 export function NodeGroup(props: NodeProps<NodeGroupData>): ReactElement {
-  const { data, selected } = props;
+  const { data, dragging, selected } = props;
   const labels = useCanvasLabels();
-  const styles = groupStyles(selected, data.active === true, data.collapsed);
+  const styles = groupStyles(selected, data.active === true, data.collapsed, dragging);
 
   const handleToggle = (event: React.MouseEvent<HTMLButtonElement>): void => {
     // Don't let the click bubble to React Flow's pane / node click handler.
@@ -52,7 +53,7 @@ export function NodeGroup(props: NodeProps<NodeGroupData>): ReactElement {
 
   return (
     <div style={styles.wrapper}>
-      <div style={styles.header}>
+      <div className={NODE_GROUP_DRAG_HANDLE_CLASS} style={styles.header}>
         <button
           type="button"
           onClick={handleToggle}
@@ -71,7 +72,12 @@ export function NodeGroup(props: NodeProps<NodeGroupData>): ReactElement {
   );
 }
 
-function groupStyles(selected: boolean, active: boolean, collapsed: boolean): NodeGroupStyles {
+function groupStyles(
+  selected: boolean,
+  active: boolean,
+  collapsed: boolean,
+  dragging: boolean,
+): NodeGroupStyles {
   const highlighted = active || selected;
   const borderColor = active
     ? "var(--notebookflow-group-active-border, var(--primary, #0d9488))"
@@ -104,6 +110,7 @@ function groupStyles(selected: boolean, active: boolean, collapsed: boolean): No
       background: GROUP_HEADER_BG,
       borderBottom: collapsed ? "none" : `1px solid ${borderColor}`,
       boxSizing: "border-box",
+      cursor: dragging ? "grabbing" : "grab",
     },
     toggleButton: {
       appearance: "none",

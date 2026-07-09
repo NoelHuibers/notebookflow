@@ -1,20 +1,21 @@
 /**
- * Initial workspace bootstrap — load the bundled sales-demo fixture as the
- * starting notebook and its baseline sources. The demo is a self-contained
- * four-node pipeline (generate → clean → aggregate → plot) that renders a
- * table and a bar chart when run, with no external data file needed.
+ * Initial workspace bootstrap — load the preprocessing notebook from the
+ * bundled analyst pipeline. The other pipeline notebooks live beside it in
+ * /examples and can be opened when the user wants the full cross-file graph.
  */
 
 import type { LoadedNotebook } from "@/types/workspace";
 
-import salesDemo from "../fixtures/sales-demo.ipynb.json";
+import preprocessing from "../../../../examples/preprocessing.ipynb?raw";
 import { parseNotebook } from "./notebook";
 
-export function bootstrapFromFixture(): LoadedNotebook {
-  const parsed = parseNotebook(JSON.stringify(salesDemo));
-  return { name: "sales-demo.ipynb", cells: parsed.cells, doc: parsed.doc };
-}
+const NOTEBOOK_FIXTURES: Array<{ name: string; text: string }> = [
+  { name: "preprocessing.ipynb", text: preprocessing },
+];
 
-export function bootstrapBaselineSources(): string[] {
-  return parseNotebook(JSON.stringify(salesDemo)).cells.map((cell) => cell.source);
+export function bootstrapNotebookFixtures(): LoadedNotebook[] {
+  return NOTEBOOK_FIXTURES.map(({ name, text }) => {
+    const parsed = parseNotebook(text);
+    return { name, cells: parsed.cells, doc: parsed.doc };
+  });
 }
