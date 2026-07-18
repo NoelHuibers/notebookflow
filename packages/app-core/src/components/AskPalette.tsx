@@ -1,14 +1,45 @@
+/**
+ * AskPalette — the "Ask AI" command palette. Fully controlled: prompt text,
+ * busy flag, result, and error state all live in the host.
+ *
+ * i18n follows the app-core labels pattern: every user-facing string is a
+ * label with an English default, and a host overrides them via the optional
+ * `labels` prop. Rendering without one yields the exact English strings.
+ */
+
 import { Command, X } from "lucide-react";
-import type { ReactElement } from "react";
+import type { KeyboardEvent, ReactElement } from "react";
 import { useEffect, useRef } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import type { AskAnswer } from "@/lib/EngineClient";
-import { useI18n } from "@/lib/i18n";
+import type { AskAnswer } from "../types";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { ScrollArea } from "./ui/scroll-area";
 
-interface AskPaletteProps {
+export interface AskPaletteLabels {
+  title: string;
+  dismiss: string;
+  promptPlaceholder: string;
+  promptLabel: string;
+  thinking: string;
+  ask: string;
+  shortcutHint: string;
+}
+
+// English defaults — must match the strings the web-app rendered before the
+// labels seam existed (its `ask` catalog remains the translation source).
+export const defaultAskPaletteLabels: AskPaletteLabels = {
+  title: "Ask AI",
+  dismiss: "Dismiss",
+  promptPlaceholder:
+    "Ask anything — describe what you want to do, request an explanation, or ask a pandas question",
+  promptLabel: "Ask AI prompt",
+  thinking: "Thinking…",
+  ask: "Ask",
+  shortcutHint: "⌘/Ctrl+Enter to send · Esc to close",
+};
+
+export interface AskPaletteProps {
   prompt: string;
   isAsking: boolean;
   result: AskAnswer | null;
@@ -16,6 +47,7 @@ interface AskPaletteProps {
   onPromptChange: (next: string) => void;
   onSubmit: () => void;
   onClose: () => void;
+  labels?: Partial<AskPaletteLabels>;
 }
 
 export function AskPalette({
@@ -26,13 +58,14 @@ export function AskPalette({
   onPromptChange,
   onSubmit,
   onClose,
+  labels,
 }: AskPaletteProps): ReactElement {
-  const { t } = useI18n();
+  const merged: AskPaletteLabels = { ...defaultAskPaletteLabels, ...labels };
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
-  function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>): void {
+  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
       onSubmit();
@@ -48,14 +81,14 @@ export function AskPalette({
         <div className="flex items-center justify-between">
           <span className="flex items-center gap-2 text-sm font-semibold">
             <Command className="size-4 text-primary" />
-            {t("ask.title")}
+            {merged.title}
           </span>
           <Button
             variant="ghost"
             size="sm"
             className="h-7 px-1.5"
             onClick={onClose}
-            aria-label={t("ask.dismiss")}
+            aria-label={merged.dismiss}
           >
             <X className="size-3.5" />
           </Button>
@@ -68,8 +101,8 @@ export function AskPalette({
             onPromptChange(event.target.value);
           }}
           onKeyDown={handleKeyDown}
-          placeholder={t("ask.promptPlaceholder")}
-          aria-label={t("ask.promptLabel")}
+          placeholder={merged.promptPlaceholder}
+          aria-label={merged.promptLabel}
           className="resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
         />
         {errorMessage !== null && (
@@ -79,14 +112,14 @@ export function AskPalette({
         )}
         <div className="flex items-center gap-2">
           <Button variant="default" size="sm" onClick={onSubmit} disabled={isAsking}>
-            {isAsking ? t("ask.thinking") : t("ask.ask")}
+            {isAsking ? merged.thinking : merged.ask}
           </Button>
           {result !== null && (
             <Badge variant="outline" className="font-mono text-[10px]">
               {result.backend}
             </Badge>
           )}
-          <span className="ml-auto text-[10px] text-muted-foreground">{t("ask.shortcutHint")}</span>
+          <span className="ml-auto text-[10px] text-muted-foreground">{merged.shortcutHint}</span>
         </div>
         {result !== null && (
           <ScrollArea className="min-h-[120px] flex-1 rounded border bg-muted/30 p-3">

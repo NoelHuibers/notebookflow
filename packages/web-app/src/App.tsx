@@ -10,9 +10,20 @@
  * - Click Download to save the patched `.ipynb` or the full workspace back to disk.
  */
 
+import type {
+  AskPaletteLabels,
+  ComposeDialogLabels,
+  ExplanationPanelLabels,
+} from "@notebookflow/app-core";
 import {
+  AskPalette,
   buildGenerationStatus,
   buildPipelineDef,
+  ComposeDialog,
+  defaultAskPaletteLabels,
+  defaultComposeDialogLabels,
+  defaultExplanationPanelLabels,
+  ExplanationPanel,
   renderEvent,
   stripMarkerLine,
 } from "@notebookflow/app-core";
@@ -49,15 +60,12 @@ import {
 import type { ReactElement } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
-import { AskPalette } from "@/components/AskPalette";
 import { CanvasSidebar } from "@/components/CanvasSidebar";
 import { CellList } from "@/components/CellList";
 import { CellPaneFooter } from "@/components/CellPaneFooter";
 import type { CellKind } from "@/components/CellToolbar";
 import { CellToolbar } from "@/components/CellToolbar";
 import { CloudNotebooksDialog } from "@/components/CloudNotebooksDialog";
-import { ComposeDialog } from "@/components/ComposeDialog";
-import { ExplanationPanel } from "@/components/ExplanationPanel";
 import { FileDropZone } from "@/components/FileDropZone";
 import { FilesRail } from "@/components/FilesRail";
 import { InspectorPanel } from "@/components/InspectorPanel";
@@ -110,6 +118,32 @@ export function App(): ReactElement {
     const out = {} as CanvasLabels;
     for (const key of Object.keys(defaultCanvasLabels) as (keyof CanvasLabels)[]) {
       out[key] = t(`canvas.${key}`);
+    }
+    return out;
+  }, [t]);
+  // Same pattern for the shared AI dialogs (components live in app-core; the
+  // `ask` / `compose` / `explanation` catalogs here stay the translation
+  // source and mirror the label keys 1:1).
+  const askLabels = useMemo<AskPaletteLabels>(() => {
+    const out = {} as AskPaletteLabels;
+    for (const key of Object.keys(defaultAskPaletteLabels) as (keyof AskPaletteLabels)[]) {
+      out[key] = t(`ask.${key}`);
+    }
+    return out;
+  }, [t]);
+  const composeLabels = useMemo<ComposeDialogLabels>(() => {
+    const out = {} as ComposeDialogLabels;
+    for (const key of Object.keys(defaultComposeDialogLabels) as (keyof ComposeDialogLabels)[]) {
+      out[key] = t(`compose.${key}`);
+    }
+    return out;
+  }, [t]);
+  const explanationLabels = useMemo<ExplanationPanelLabels>(() => {
+    const out = {} as ExplanationPanelLabels;
+    for (const key of Object.keys(
+      defaultExplanationPanelLabels,
+    ) as (keyof ExplanationPanelLabels)[]) {
+      out[key] = t(`explanation.${key}`);
     }
     return out;
   }, [t]);
@@ -1445,6 +1479,7 @@ export function App(): ReactElement {
         {explanation !== null && (
           <ExplanationPanel
             explanation={explanation}
+            labels={explanationLabels}
             onClose={() => {
               setExplanation(null);
             }}
@@ -1454,6 +1489,7 @@ export function App(): ReactElement {
         {isComposeOpen && (
           <ComposeDialog
             prompt={composePrompt}
+            labels={composeLabels}
             isComposing={isComposing}
             result={composeResult}
             errorMessage={composeError}
@@ -1473,6 +1509,7 @@ export function App(): ReactElement {
         {isAskOpen && (
           <AskPalette
             prompt={askPrompt}
+            labels={askLabels}
             isAsking={isAsking}
             result={askResult}
             errorMessage={askError}

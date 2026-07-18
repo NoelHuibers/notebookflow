@@ -10,11 +10,29 @@
  */
 
 export {
+  AskPalette,
+  type AskPaletteLabels,
+  type AskPaletteProps,
+  defaultAskPaletteLabels,
+} from "./components/AskPalette";
+export {
   CellOutputs,
   type CellOutputsLabels,
   type CellOutputsProps,
   defaultCellOutputsLabels,
 } from "./components/CellOutputs";
+export {
+  ComposeDialog,
+  type ComposeDialogLabels,
+  type ComposeDialogProps,
+  defaultComposeDialogLabels,
+} from "./components/ComposeDialog";
+export {
+  defaultExplanationPanelLabels,
+  ExplanationPanel,
+  type ExplanationPanelLabels,
+  type ExplanationPanelProps,
+} from "./components/ExplanationPanel";
 export { EngineClient } from "./EngineClient";
 export {
   buildGenerationStatus,
