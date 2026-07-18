@@ -14,7 +14,6 @@ import type {
   CanvasLabels,
   GraphModel,
   NodeManifestDef,
-  NodeModel,
   RunSummary,
   RuntimeState,
   WireModel,
@@ -63,6 +62,7 @@ import { TriggersDialog } from "@/components/TriggersDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { type CanvasSelectionSync, useCanvasSelectionSync } from "@/hooks/useCanvasSelectionSync";
 import { useCloudNotebooks } from "@/hooks/useCloudNotebooks";
 import { usePanelLayout } from "@/hooks/usePanelLayout";
 import { useWorkspaceExport } from "@/hooks/useWorkspaceExport";
@@ -97,19 +97,6 @@ import { applyPatchToSnapshot, resolveWorkspacePatchTarget } from "@/lib/workspa
 const EMPTY_GRAPH: GraphModel = { nodes: {}, groups: {}, wires: {} };
 // Cell-patches inspector panel is a dev-only debugging view.
 const DEV_MODE = import.meta.env.DEV;
-
-function findNodeForCellIndex(
-  graph: GraphModel,
-  groupId: string,
-  cellIndex: number,
-): NodeModel | null {
-  for (const node of Object.values(graph.nodes)) {
-    if (node.groupId === groupId && node.cellIndices.includes(cellIndex)) {
-      return node;
-    }
-  }
-  return null;
-}
 
 export function App(): ReactElement {
   const { t } = useI18n();
@@ -153,7 +140,6 @@ export function App(): ReactElement {
     collectUiState,
   } = usePanelLayout();
   const [graph, setGraph] = useState<GraphModel>(EMPTY_GRAPH);
-  const [selected, setSelected] = useState<NodeModel | null>(null);
   const [patches, setPatches] = useState<CellPatch[]>([]);
   const [events, setEvents] = useState<EngineEvent[]>([]);
   const [runtimeByNode, setRuntimeByNode] = useState<Record<string, RuntimeState>>({});
@@ -164,11 +150,6 @@ export function App(): ReactElement {
   const [streamingNotebookPath, setStreamingNotebookPath] = useState<string | null>(null);
   const [timingByNode, setTimingByNode] = useState<Record<string, number>>({});
   const [runSummary, setRunSummary] = useState<RunSummary | null>(null);
-  const [focusedCellIndex, setFocusedCellIndex] = useState<number | null>(null);
-  const [cellNavigationTarget, setCellNavigationTarget] = useState<{
-    index: number;
-    revision: number;
-  } | null>(null);
   const [cellClipboard, setCellClipboard] = useState<NotebookCell | null>(null);
   const [isAddCellMenuOpen, setIsAddCellMenuOpen] = useState(false);
   const [definedByCell, setDefinedByCell] = useState<string[][]>([]);
@@ -303,18 +284,17 @@ export function App(): ReactElement {
     };
   }, [setIsSidebarCollapsed, setShowMinimap]);
 
-  // Selecting a node should surface its inspector in the right sidebar.
-  useEffect(() => {
-    if (selected !== null) {
-      setIsSidebarCollapsed(false);
-    }
-  }, [selected, setIsSidebarCollapsed]);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+
+  // Selection state lives in useCanvasSelectionSync, which must run after
+  // useWorkspaceFiles (it needs openFiles / switchToFile) — the callbacks
+  // below reach it through a stable ref assigned once the hook has returned.
+  const selectionRef = useRef<CanvasSelectionSync | null>(null);
 
   // Reset the ephemeral run / edit UI to a clean slate. Used whenever the
   // active document changes (open a file, switch files, apply a draft).
   const resetTransient = useCallback((): void => {
-    setSelected(null);
+    selectionRef.current?.reset();
     setPatches([]);
     setEvents([]);
     setRuntimeByNode({});
@@ -323,14 +303,12 @@ export function App(): ReactElement {
     setRunSummary(null);
     setStreamingCellIndex(null);
     setStreamingNotebookPath(null);
-    setFocusedCellIndex(null);
-    setCellNavigationTarget(null);
     setExplanation(null);
     setSaveStatus("idle");
   }, []);
 
   const handleNotebookCreated = useCallback((): void => {
-    setFocusedCellIndex(0);
+    selectionRef.current?.setFocusedCellIndex(0);
   }, []);
 
   // Detach the cloud linkage when the workspace is replaced wholesale. The
@@ -381,6 +359,38 @@ export function App(): ReactElement {
     t,
   });
 
+  // Canvas <-> notebook selection sync: the selected node, focused cell, and
+  // scroll-to-cell navigation target.
+  const handleRevealCells = useCallback((): void => {
+    setIsCellsCollapsed(false);
+  }, [setIsCellsCollapsed]);
+  const selection = useCanvasSelectionSync({
+    graph,
+    activeName: notebook.name,
+    openFiles,
+    switchToFile,
+    onRevealCells: handleRevealCells,
+  });
+  const {
+    selected,
+    setSelected,
+    focusedCellIndex,
+    setFocusedCellIndex,
+    cellNavigationTarget,
+    handleFocusCell,
+    handleNodeSelect,
+  } = selection;
+  // Direct ref assignment during render keeps timing identical — the ref is
+  // only read from event handlers.
+  selectionRef.current = selection;
+
+  // Selecting a node should surface its inspector in the right sidebar.
+  useEffect(() => {
+    if (selected !== null) {
+      setIsSidebarCollapsed(false);
+    }
+  }, [selected, setIsSidebarCollapsed]);
+
   // Construct the SyncEngine for the workspace. Re-created when the set of open
   // files changes so closed notebooks drop out of the union graph; the ingest
   // effect below repopulates it with every open file.
@@ -424,23 +434,6 @@ export function App(): ReactElement {
       }
     }
   }, [openFiles, cellsByPath]);
-
-  useEffect(() => {
-    setSelected((current) => (current === null ? null : (graph.nodes[current.id] ?? null)));
-  }, [graph]);
-
-  const selectedCellIndexForActiveNotebook = useMemo(() => {
-    if (selected === null || selected.groupId !== notebook.name) {
-      return null;
-    }
-    return selected.cellIndices[0] ?? null;
-  }, [notebook.name, selected]);
-
-  useEffect(() => {
-    if (selectedCellIndexForActiveNotebook !== null) {
-      setFocusedCellIndex(selectedCellIndexForActiveNotebook);
-    }
-  }, [selectedCellIndexForActiveNotebook]);
 
   // Persist Settings dialog state (engine URL override + theme) and apply the
   // theme to the <html> element. "system" tracks prefers-color-scheme.
@@ -509,44 +502,6 @@ export function App(): ReactElement {
     [setNotebook],
   );
 
-  const handleFocusCell = useCallback(
-    (index: number): void => {
-      setFocusedCellIndex(index);
-      setSelected(findNodeForCellIndex(graph, notebook.name, index));
-    },
-    [graph, notebook.name],
-  );
-
-  const handleNodeSelect = useCallback(
-    (node: NodeModel | null): void => {
-      if (node === null) {
-        setSelected(null);
-        return;
-      }
-
-      const targetFile =
-        node.groupId === notebook.name
-          ? null
-          : openFiles.find((file) => file.name === node.groupId);
-      if (targetFile !== null && targetFile !== undefined) {
-        switchToFile(targetFile.id);
-      }
-
-      setSelected(node);
-      const cellIndex = node.cellIndices[0] ?? null;
-      const canNavigateToCell = node.groupId === notebook.name || targetFile !== undefined;
-      if (cellIndex !== null && canNavigateToCell) {
-        setIsCellsCollapsed(false);
-        setFocusedCellIndex(cellIndex);
-        setCellNavigationTarget((current) => ({
-          index: cellIndex,
-          revision: (current?.revision ?? 0) + 1,
-        }));
-      }
-    },
-    [notebook.name, openFiles, switchToFile, setIsCellsCollapsed],
-  );
-
   const handleAddCell = useCallback(
     (kind: CellKind): void => {
       const fresh: NotebookCell = { cellType: kind, source: "" };
@@ -557,7 +512,7 @@ export function App(): ReactElement {
         return { ...prev, cells: nextCells, doc: { ...prev.doc, cells: nextDocCells } };
       });
     },
-    [setNotebook],
+    [setNotebook, setFocusedCellIndex],
   );
 
   const handleDeleteFocusedCell = useCallback((): void => {
@@ -578,7 +533,13 @@ export function App(): ReactElement {
       shiftOutputsAfterDelete(current, focusedCellIndex),
     );
     setFocusedCellIndex(null);
-  }, [focusedCellIndex, updateOutputsForFile, activeFileIdRef.current, setNotebook]);
+  }, [
+    focusedCellIndex,
+    updateOutputsForFile,
+    activeFileIdRef.current,
+    setNotebook,
+    setFocusedCellIndex,
+  ]);
 
   const handleCopyFocusedCell = useCallback((): void => {
     if (focusedCellIndex === null) {
@@ -618,6 +579,7 @@ export function App(): ReactElement {
     updateOutputsForFile,
     activeFileIdRef.current,
     setNotebook,
+    setFocusedCellIndex,
   ]);
 
   const handleChangeFocusedCellType = useCallback(
@@ -1015,6 +977,8 @@ export function App(): ReactElement {
     setBaselineSources,
     setNotebook,
     fileHandleRef,
+    setSelected,
+    setFocusedCellIndex,
   ]);
 
   const manifestById = useMemo(
