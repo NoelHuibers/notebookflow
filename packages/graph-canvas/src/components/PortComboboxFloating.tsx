@@ -10,6 +10,7 @@ import type { CSSProperties, KeyboardEvent, ReactElement } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { useCanvasLabels } from "../labels";
 import { isValidPort, type PortKind, portChipStyles } from "./portEditorShared";
 
 const PORTAL_Z_INDEX = 10_000;
@@ -25,6 +26,7 @@ export interface PortComboboxFloatingProps {
 
 export function PortComboboxFloating(props: PortComboboxFloatingProps): ReactElement | null {
   const { anchorEl, kind, initialValue, suggestions, onCommit, onCancel } = props;
+  const labels = useCanvasLabels();
   const [query, setQuery] = useState(initialValue);
   const [highlight, setHighlight] = useState(0);
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
@@ -150,7 +152,7 @@ export function PortComboboxFloating(props: PortComboboxFloatingProps): ReactEle
     >
       <input
         ref={inputRef}
-        aria-label={kind === "input" ? "Input source" : "Output variable"}
+        aria-label={kind === "input" ? labels.portSourceAria : labels.portVariableAria}
         className="nodrag nopan"
         value={query}
         placeholder={placeholder}

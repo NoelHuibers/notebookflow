@@ -274,8 +274,8 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
       <div style={styles.titleRow}>
         <span
           role="img"
-          aria-label={`Status: ${statusLabel}`}
-          title={`Status: ${statusLabel}`}
+          aria-label={labels.statusTitle.replace("{status}", statusLabel)}
+          title={labels.statusTitle.replace("{status}", statusLabel)}
           style={{
             display: "inline-block",
             width: 8,
@@ -287,7 +287,10 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
           }}
         />
         {durationLabel !== null && (
-          <span title={`Last run: ${durationLabel}`} style={styles.duration}>
+          <span
+            title={labels.lastRunTitle.replace("{duration}", durationLabel)}
+            style={styles.duration}
+          >
             {durationLabel}
           </span>
         )}
@@ -342,10 +345,10 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
       )}
       {data.unresolvedInputs !== undefined && data.unresolvedInputs.length > 0 && (
         <div
-          title={`Unresolved input refs:\n${data.unresolvedInputs.join("\n")}`}
+          title={labels.unresolvedRefsTitle.replace("{refs}", data.unresolvedInputs.join("\n"))}
           style={{ fontSize: 10, color: "#b45309", fontWeight: 500 }}
         >
-          ⚠ unresolved: {data.unresolvedInputs.join(", ")}
+          ⚠ {labels.unresolvedShort.replace("{refs}", data.unresolvedInputs.join(", "))}
         </div>
       )}
       {!stackedPorts && (showInlets || showOutlets) && <InletOutletGrid {...portGridProps} />}
