@@ -95,6 +95,7 @@ import type {
   TriggerSpec,
 } from "@/lib/EngineClient";
 import { EngineClient } from "@/lib/EngineClient";
+import { formatError } from "@/lib/errors";
 import { buildGenerationStatus, renderEvent } from "@/lib/events";
 import { canSaveInPlace, pickSaveFileHandle, writeFileHandle } from "@/lib/fileSystemAccess";
 import { useI18n } from "@/lib/i18n";
@@ -905,7 +906,7 @@ export function App(): ReactElement {
           setError(null);
           return;
         } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : t("app.errors.unknown");
+          const message = formatError(t, err);
           setError(t("app.errors.loadFailed", { name, message }));
           return;
         }
@@ -929,7 +930,7 @@ export function App(): ReactElement {
         resetTransient();
         setError(null);
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : t("app.errors.unknown");
+        const message = formatError(t, err);
         setError(t("app.errors.loadFailed", { name, message }));
       }
     },
@@ -1025,7 +1026,7 @@ export function App(): ReactElement {
         .uploadDataFile(file)
         .then(() => refreshDataFiles())
         .catch((err: unknown) => {
-          setError(err instanceof Error ? err.message : t("app.errors.uploadFailed"));
+          setError(formatError(t, err, "app.errors.uploadFailed"));
         });
     };
     input.click();
@@ -1036,7 +1037,7 @@ export function App(): ReactElement {
         .deleteDataFile(name)
         .then(() => refreshDataFiles())
         .catch((err: unknown) => {
-          setError(err instanceof Error ? err.message : t("app.errors.deleteFailed"));
+          setError(formatError(t, err, "app.errors.deleteFailed"));
         });
     },
     [refreshDataFiles, t],
@@ -1245,11 +1246,11 @@ export function App(): ReactElement {
         notebookPath: targetPath,
         insertAtCellIndex,
         onSynthesisError: (err: unknown) => {
-          const message = err instanceof Error ? err.message : t("app.errors.unknown");
+          const message = formatError(t, err);
           setError(t("app.errors.addNodeNamed", { name: manifest.name, message }));
         },
       }).catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : t("app.errors.unknown");
+        const message = formatError(t, err);
         setError(t("app.errors.addNodeNamed", { name: manifest.name, message }));
       });
     },
@@ -1282,7 +1283,7 @@ export function App(): ReactElement {
           Date.now(),
         )
         .catch((err: unknown) => {
-          setError(err instanceof Error ? err.message : t("app.errors.addNode"));
+          setError(formatError(t, err, "app.errors.addNode"));
         });
     },
     [notebook.name, t],
@@ -1348,7 +1349,7 @@ export function App(): ReactElement {
         if (cancelled) {
           return;
         }
-        const message = err instanceof Error ? err.message : t("app.errors.unknown");
+        const message = formatError(t, err);
         setPaletteError(t("app.errors.loadRegistry", { message }));
       });
     return () => {
@@ -1436,7 +1437,7 @@ export function App(): ReactElement {
       const result = await clientRef.current.explainPipeline(pipelineDef);
       setExplanation(result);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : t("app.errors.unknown");
+      const message = formatError(t, err);
       setError(t("app.errors.explainPipeline", { message }));
     } finally {
       setIsExplaining(false);
@@ -1454,7 +1455,7 @@ export function App(): ReactElement {
       const result = await clientRef.current.proposePipeline(composePrompt.trim());
       setComposeResult(result);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : t("app.errors.unknown");
+      const message = formatError(t, err);
       setComposeError(t("app.errors.composePipeline", { message }));
     } finally {
       setIsComposing(false);
@@ -1468,7 +1469,7 @@ export function App(): ReactElement {
       const list = await clientRef.current.listTriggers();
       setTriggers(list);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : t("app.errors.unknown");
+      const message = formatError(t, err);
       setTriggersError(t("app.errors.loadTriggers", { message }));
     } finally {
       setIsLoadingTriggers(false);
@@ -1497,7 +1498,7 @@ export function App(): ReactElement {
       const result = await clientRef.current.askLLM(askPrompt.trim(), pipeline);
       setAskResult(result);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : t("app.errors.unknown");
+      const message = formatError(t, err);
       setAskError(t("app.errors.reachEngine", { message }));
     } finally {
       setIsAsking(false);
@@ -1663,7 +1664,7 @@ export function App(): ReactElement {
         setConfigStatus(buildGenerationStatus(readNotebookflowMetadata(metadata)));
       })
       .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : t("app.errors.unknown");
+        const message = formatError(t, err);
         setConfigError(t("app.errors.updateNode", { name: selected.name, message }));
       })
       .finally(() => {
@@ -1751,7 +1752,7 @@ export function App(): ReactElement {
         },
       })
       .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : t("app.errors.unknown");
+        const message = formatError(t, err);
         setError(t("app.errors.runFailed", { message }));
       })
       .finally(() => {
@@ -1857,7 +1858,7 @@ export function App(): ReactElement {
       }
       await refreshCloudList();
     } catch (err) {
-      setCloudError(err instanceof Error ? err.message : t("app.errors.cloudSaveFailed"));
+      setCloudError(formatError(t, err, "app.errors.cloudSaveFailed"));
     } finally {
       setCloudBusy(false);
     }
@@ -1873,7 +1874,7 @@ export function App(): ReactElement {
         setCloudId(id);
         setIsCloudOpen(false);
       } catch (err) {
-        setCloudError(err instanceof Error ? err.message : t("app.errors.cloudOpenFailed"));
+        setCloudError(formatError(t, err, "app.errors.cloudOpenFailed"));
       } finally {
         setCloudBusy(false);
       }
@@ -1890,7 +1891,7 @@ export function App(): ReactElement {
         if (cloudId === id) setCloudId(null);
         await refreshCloudList();
       } catch (err) {
-        setCloudError(err instanceof Error ? err.message : t("app.errors.cloudDeleteFailed"));
+        setCloudError(formatError(t, err, "app.errors.cloudDeleteFailed"));
       } finally {
         setCloudBusy(false);
       }
@@ -1989,7 +1990,7 @@ export function App(): ReactElement {
       if (err instanceof Error && err.name === "AbortError") {
         return;
       }
-      const message = err instanceof Error ? err.message : t("app.errors.unknown");
+      const message = formatError(t, err);
       setError(t("app.errors.saveFailed", { message }));
     }
   }, [notebook, outputsByCell, t]);

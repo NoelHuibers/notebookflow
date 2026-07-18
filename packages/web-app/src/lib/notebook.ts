@@ -7,9 +7,9 @@
  */
 
 import type { NotebookCell } from "@notebookflow/graph-canvas/sync";
-
-import type { NbOutput } from "./EngineClient";
 import { triggerDownload } from "./download";
+import type { NbOutput } from "./EngineClient";
+import { LocalizableError } from "./errors";
 
 export interface IpynbCell {
   cell_type: string;
@@ -48,10 +48,10 @@ export function parseNotebook(text: string): ParsedNotebook {
     doc = JSON.parse(text) as IpynbDoc;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "unknown error";
-    throw new Error(`Not valid JSON: ${message}`);
+    throw new LocalizableError("app.errors.notValidJson", { message });
   }
   if (!Array.isArray(doc.cells)) {
-    throw new Error("Not an nbformat document (missing `cells` array)");
+    throw new LocalizableError("app.errors.notNbformat");
   }
   const cells = doc.cells.map(toNotebookCell);
   return { cells, doc };

@@ -3,6 +3,7 @@
  * with the session cookie; server scopes everything to the signed-in user.
  */
 
+import { LocalizableError } from "@/lib/errors";
 import type { WorkspaceFile } from "@/lib/workspaceZip";
 
 export interface NotebookSummary {
@@ -69,7 +70,7 @@ export function serializeWorkspace(workspace: ParsedWorkspace | WorkspaceFile[])
 export function parseWorkspace(content: string): ParsedWorkspace {
   const parsed = JSON.parse(content) as unknown;
   if (!isRecord(parsed)) {
-    throw new Error("Not a NotebookFlow workspace");
+    throw new LocalizableError("app.errors.notWorkspace");
   }
   const workspace: {
     activeFileName?: unknown;
@@ -79,11 +80,11 @@ export function parseWorkspace(content: string): ParsedWorkspace {
   } = parsed;
   const rawFiles = workspace.files;
   if (!Array.isArray(rawFiles)) {
-    throw new Error("Not a NotebookFlow workspace");
+    throw new LocalizableError("app.errors.notWorkspace");
   }
   const files = rawFiles.filter(isWorkspaceFile);
   if (files.length === 0) {
-    throw new Error("NotebookFlow workspace has no notebooks");
+    throw new LocalizableError("app.errors.workspaceNoNotebooks");
   }
   const activeFileName =
     typeof workspace.activeFileName === "string" ? workspace.activeFileName : undefined;
@@ -183,7 +184,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 async function request(path: string, init?: RequestInit): Promise<Response> {
   const res = await fetch(`/api/notebooks${path}`, { credentials: "include", ...init });
   if (!res.ok) {
-    throw new Error(`notebooks ${init?.method ?? "GET"} ${path || "/"} failed: ${res.status}`);
+    throw new LocalizableError("app.errors.cloudRequestFailed", { status: res.status });
   }
   return res;
 }

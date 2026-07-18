@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { LocalizableError } from "./errors";
 import { parseWorkspace, serializeWorkspace } from "./notebooksApi";
 
 const file = { name: "preprocessing.ipynb", json: '{"cells":[]}' };
@@ -27,9 +28,25 @@ describe("workspace serialization", () => {
     });
   });
 
-  it("rejects non-workspace JSON", () => {
-    expect(() => parseWorkspace(JSON.stringify({ cells: [] }))).toThrow(
-      "Not a NotebookFlow workspace",
-    );
+  it("rejects non-workspace JSON with a localizable error", () => {
+    let thrown: unknown;
+    try {
+      parseWorkspace(JSON.stringify({ cells: [] }));
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(LocalizableError);
+    expect((thrown as LocalizableError).messageKey).toBe("app.errors.notWorkspace");
+  });
+
+  it("rejects a workspace without notebooks with a localizable error", () => {
+    let thrown: unknown;
+    try {
+      parseWorkspace(JSON.stringify({ version: 2, files: [] }));
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(LocalizableError);
+    expect((thrown as LocalizableError).messageKey).toBe("app.errors.workspaceNoNotebooks");
   });
 });
