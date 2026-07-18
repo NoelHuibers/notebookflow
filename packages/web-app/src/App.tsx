@@ -11,7 +11,6 @@
  */
 
 import type {
-  CanvasGroupPosition,
   CanvasLabels,
   GraphModel,
   NodeManifestDef,
@@ -65,6 +64,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { usePanelLayout } from "@/hooks/usePanelLayout";
+import { useWorkspaceExport } from "@/hooks/useWorkspaceExport";
 import { useWorkspaceFiles } from "@/hooks/useWorkspaceFiles";
 import { authClient, useSession } from "@/lib/auth-client";
 import { applyCellPatch } from "@/lib/cellPatch";
@@ -90,7 +90,6 @@ import {
   getNotebook,
   listNotebooks,
   type NotebookSummary,
-  type ParsedWorkspace,
   parseWorkspace,
   serializeWorkspace,
   updateNotebook,
@@ -103,11 +102,6 @@ import { applyTheme, readUserSettings, SETTINGS_STORAGE_KEY } from "@/lib/settin
 import { cn, isTypingTarget } from "@/lib/utils";
 import { shiftOutputsAfterDelete, shiftOutputsAfterInsert } from "@/lib/workspaceFiles";
 import { applyPatchToSnapshot, resolveWorkspacePatchTarget } from "@/lib/workspacePatches";
-import {
-  downloadWorkspaceDocument,
-  downloadWorkspaceZip,
-  type WorkspaceFile,
-} from "@/lib/workspaceZip";
 
 const EMPTY_GRAPH: GraphModel = { nodes: {}, groups: {}, wires: {} };
 // Cell-patches inspector panel is a dev-only debugging view.
@@ -1251,68 +1245,21 @@ export function App(): ReactElement {
       });
   }, [isRunning, clearOutputsForOpenFiles, pipelineDef, graph, updateOutputsForNotebookPath, t]);
 
-  // Export every open file's .ipynb as one zip — a single "Download" is
-  // ambiguous once the workspace spans multiple files. The active file carries
-  // its live cells + run outputs; inactive files come from their snapshots.
-  // Serialize every open file's .ipynb — shared by zip export and cloud save.
-  const collectWorkspaceFiles = useCallback((): WorkspaceFile[] => {
-    return openFiles.map((file) => {
-      if (file.id === activeFileId) {
-        return {
-          name: notebook.name,
-          json: serializeNotebook(notebook.cells, notebook.doc, outputsByCell),
-        };
-      }
-      const snap = snapshotsRef.current.get(file.id);
-      return {
-        name: file.name,
-        json: serializeNotebook(
-          snap?.cells ?? [],
-          snap?.doc ?? notebook.doc,
-          snap?.outputsByCell ?? {},
-        ),
-      };
+  // Workspace export: collect the full workspace document and the two
+  // download handlers. The cloud save below reuses collectWorkspaceDocument.
+  const { collectWorkspaceDocument, handleDownloadAll, handleDownloadWorkspace } =
+    useWorkspaceExport({
+      openFiles,
+      activeFileId,
+      notebook,
+      outputsByCell,
+      snapshotsRef,
+      canvasGroupPositionsByFileId,
+      setBaselineSources,
+      collectUiState,
+      t,
+      setError,
     });
-  }, [openFiles, activeFileId, notebook, outputsByCell, snapshotsRef.current.get]);
-
-  const collectWorkspaceDocument = useCallback((): ParsedWorkspace => {
-    const groupPositions: Record<string, CanvasGroupPosition> = {};
-    for (const file of openFiles) {
-      const position = canvasGroupPositionsByFileId[file.id];
-      if (position !== undefined) {
-        groupPositions[file.id === activeFileId ? notebook.name : file.name] = position;
-      }
-    }
-    return {
-      files: collectWorkspaceFiles(),
-      activeFileName: notebook.name,
-      layout: {
-        groupPositions,
-      },
-      ui: collectUiState(),
-    };
-  }, [
-    openFiles,
-    activeFileId,
-    notebook.name,
-    canvasGroupPositionsByFileId,
-    collectWorkspaceFiles,
-    collectUiState,
-  ]);
-
-  const handleDownloadAll = useCallback(async (): Promise<void> => {
-    try {
-      await downloadWorkspaceZip(collectWorkspaceFiles());
-      setBaselineSources(notebook.cells.map((cell) => cell.source));
-    } catch (err: unknown) {
-      setError(t("app.errors.downloadFailed", { message: formatError(t, err) }));
-    }
-  }, [collectWorkspaceFiles, notebook.cells, t, setBaselineSources]);
-
-  const handleDownloadWorkspace = useCallback((): void => {
-    downloadWorkspaceDocument(serializeWorkspace(collectWorkspaceDocument()));
-    setBaselineSources(notebook.cells.map((cell) => cell.source));
-  }, [collectWorkspaceDocument, notebook.cells, setBaselineSources]);
 
   // --- Cloud notebooks (#60): save/open/delete the user's workspaces in Turso.
   const refreshCloudList = useCallback(async (): Promise<void> => {
