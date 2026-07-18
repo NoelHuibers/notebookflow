@@ -18,7 +18,7 @@
     "clean": "rimraf dist .turbo *.tsbuildinfo ../../engine/notebookflow/labextension"
   },
   "dependencies": {
-    "@jupyterlab/application": "^4.5.7",
+    "@jupyterlab/application": "^4.6.1",
     "@jupyterlab/apputils": "^4.6.7",
     "@jupyterlab/nbformat": "^4.5.7",
     "@jupyterlab/notebook": "^4.5.7",
