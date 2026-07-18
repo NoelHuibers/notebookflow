@@ -126,6 +126,6 @@ jobs:
           uv tool run pip-audit -r /tmp/nbf-requirements.txt --disable-pip
 
       - name: Gitleaks secret scan
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
