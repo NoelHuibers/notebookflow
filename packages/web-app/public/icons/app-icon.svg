@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">NotebookFlow app icon</title>
+  <rect width="512" height="512" rx="112" fill="#0d9488" />
+  <path d="M166 166 336 235M166 346 336 277" fill="none" stroke="#ccfbf1" stroke-width="25" stroke-linecap="round" opacity=".68" />
+  <circle cx="137" cy="151" r="52" fill="#fff" />
+  <circle cx="137" cy="361" r="52" fill="#fff" />
+  <circle cx="374" cy="256" r="58" fill="#fff" />
+</svg>

@@ -14,6 +14,14 @@ import {
 import "reactflow/dist/style.css";
 import "../index.css";
 
+const SITE_ORIGIN = "https://notebookflow.vercel.app";
+const PAGE_TITLE = "NotebookFlow | Visual pipelines for notebooks";
+const PAGE_DESCRIPTION =
+  "Wire notebooks and cell groups into visual pipelines on a canvas, with AI assistance, bring-your-own-key models, and bidirectional sync.";
+const SOCIAL_DESCRIPTION =
+  "Connect notebook cells into visual pipelines with AI, BYOK, and bidirectional sync.";
+const SOCIAL_IMAGE_URL = `${SITE_ORIGIN}/og-image.png`;
+
 // Resolve the locale on the server from the request (cookie → Accept-Language), and on
 // the client from document.cookie → navigator.language. Same precedence both sides, so
 // SSR and hydration agree. The server-only import is behind `import.meta.env.SSR`, so it
@@ -36,21 +44,32 @@ export const Route = createRootRoute({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "NotebookFlow — visual pipelines for notebooks" },
-      {
-        name: "description",
-        content:
-          "Wire notebooks and cell groups into visual pipelines on a canvas, with AI assistance, bring-your-own-key models, and bidirectional sync.",
-      },
-      { property: "og:title", content: "NotebookFlow" },
-      {
-        property: "og:description",
-        content: "n8n for your notebooks — visual pipelines with AI, BYOK, and bidirectional sync.",
-      },
+      { title: PAGE_TITLE },
+      { name: "application-name", content: "NotebookFlow" },
+      { name: "description", content: PAGE_DESCRIPTION },
+      { property: "og:title", content: PAGE_TITLE },
+      { property: "og:description", content: SOCIAL_DESCRIPTION },
       { property: "og:type", content: "website" },
+      { property: "og:site_name", content: "NotebookFlow" },
+      { property: "og:url", content: SITE_ORIGIN },
+      { property: "og:image", content: SOCIAL_IMAGE_URL },
+      { property: "og:image:type", content: "image/png" },
+      { property: "og:image:width", content: "1200" },
+      { property: "og:image:height", content: "630" },
+      { property: "og:image:alt", content: "NotebookFlow — visual pipelines for notebooks" },
+      { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: PAGE_TITLE },
+      { name: "twitter:description", content: SOCIAL_DESCRIPTION },
+      { name: "twitter:image", content: SOCIAL_IMAGE_URL },
+      { name: "twitter:image:alt", content: "NotebookFlow — visual pipelines for notebooks" },
       { name: "theme-color", content: "#0d9488" },
     ],
-    links: [{ rel: "icon", href: "/favicon.svg", type: "image/svg+xml" }],
+    links: [
+      { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
+      { rel: "icon", href: "/favicon.ico", sizes: "32x32" },
+      { rel: "apple-touch-icon", href: "/apple-touch-icon.png", sizes: "180x180" },
+      { rel: "manifest", href: "/manifest.webmanifest" },
+    ],
   }),
   notFoundComponent: NotFound,
   component: RootComponent,
