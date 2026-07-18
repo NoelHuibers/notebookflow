@@ -36,6 +36,17 @@ async function toWebRequest(req: IncomingMessage): Promise<Request> {
   return new Request(url, init);
 }
 
+// Security headers (HSTS, CSP, X-Frame-Options, ...) are NOT set here: the
+// source of truth is the `headers` block in vercel.json, which Vercel applies
+// to every response of this function (the `/(.*)` rewrite routes everything
+// through it). Rationale for the non-obvious CSP bits:
+//   - script-src 'unsafe-inline': TanStack Start's <Scripts/> injects an inline
+//     hydration script and there is no nonce plumbing yet (nonce-based CSP is a
+//     tracked follow-up).
+//   - connect-src allows https:/wss: broadly plus localhost http/ws because the
+//     engine URL is user-configurable (BYO-engine Settings override).
+// Dev parity: vite.config.ts reads the same vercel.json block and applies it
+// as middleware.
 async function sendWebResponse(res: ServerResponse, response: Response): Promise<void> {
   res.statusCode = response.status;
   const setCookie =

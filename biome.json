@@ -20,6 +20,7 @@
       "!**/*.css",
       "!**/*.html",
       "!**/routeTree.gen.ts",
+      "!packages/web-app/drizzle",
       "!engine",
       "!node-library-spec/notebookflow-node-hello"
     ]

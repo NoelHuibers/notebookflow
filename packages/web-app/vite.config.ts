@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -43,6 +44,26 @@ function serverApiDevPlugin(): Plugin {
   };
 }
 
+// In production Vercel applies the `headers` block from vercel.json to every
+// response. Mirror those exact headers in dev (read from the same file, so the
+// two can't drift) so CSP breakage surfaces during development instead of only
+// after deploy.
+function securityHeadersDevPlugin(): Plugin {
+  const { headers = [] } = JSON.parse(readFileSync(path.resolve(here, "vercel.json"), "utf8")) as {
+    headers?: Array<{ source: string; headers: Array<{ key: string; value: string }> }>;
+  };
+  const pairs = headers.flatMap((entry) => entry.headers);
+  return {
+    name: "notebookflow:security-headers-dev",
+    configureServer(server) {
+      server.middlewares.use((_req, res, next) => {
+        for (const { key, value } of pairs) res.setHeader(key, value);
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   // Expose all env (incl. server-only secrets like TURSO_*/BETTER_AUTH_*) to the
   // dev process so the auth handler can read them. This does NOT leak to the
@@ -58,7 +79,13 @@ export default defineConfig(({ mode }) => {
     // so we bridge that handler to a Vercel serverless function in api/ (see
     // api/index.ts + vercel.json). Tailwind, the graph-canvas source alias, the @/
     // alias, and Vite env all carry over unchanged.
-    plugins: [serverApiDevPlugin(), tailwindcss(), tanstackStart(), react()],
+    plugins: [
+      securityHeadersDevPlugin(),
+      serverApiDevPlugin(),
+      tailwindcss(),
+      tanstackStart(),
+      react(),
+    ],
     resolve: {
       alias: [
         { find: "@notebookflow/graph-canvas/sync", replacement: `${graphCanvasSrc}/sync/index.ts` },

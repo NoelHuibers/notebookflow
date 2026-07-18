@@ -780,6 +780,60 @@ def test_data_file_quota_enforced(client: TestClient, monkeypatch: pytest.Monkey
     client.delete("/files/a.csv", headers=h)
 
 
+def _post_request_with_content_length(value: str) -> Any:
+    """Bare FastAPI Request carrying only a Content-Length header (#82)."""
+    from fastapi import Request
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/files",
+        "headers": [(b"content-length", value.encode())],
+        "query_string": b"",
+    }
+    return Request(scope)
+
+
+def test_upload_precheck_rejects_oversized_content_length(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fastapi import HTTPException
+
+    monkeypatch.setenv("NOTEBOOKFLOW_MAX_DATA_BYTES", "64")
+    (tmp_path / "existing.csv").write_bytes(b"x" * 50)
+
+    # 50 existing + 100 declared > 64 -> rejected before the body is read.
+    with pytest.raises(HTTPException) as exc_info:
+        server._precheck_upload_size(_post_request_with_content_length("100"), tmp_path, "new.csv")
+    assert exc_info.value.status_code == 413
+
+    # Fits the remaining quota -> allowed through to the authoritative check.
+    server._precheck_upload_size(_post_request_with_content_length("10"), tmp_path, "new.csv")
+
+    # Overwriting credits the existing file's size against the quota.
+    server._precheck_upload_size(_post_request_with_content_length("60"), tmp_path, "existing.csv")
+
+    # Absent or malformed Content-Length defers to the post-read enforcement.
+    server._precheck_upload_size(_post_request_with_content_length("nope"), tmp_path, "new.csv")
+
+
+def test_upload_content_length_precheck_413_before_body_read(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mint = _jwt_factory(monkeypatch)
+    monkeypatch.setenv("NOTEBOOKFLOW_MAX_DATA_BYTES", "64")
+    # If the pre-check let the request through, this would blow up the test:
+    # the 413 below must come from the Content-Length check, not post-read.
+    monkeypatch.setattr(
+        server,
+        "_enforce_data_quota",
+        lambda *a, **k: pytest.fail("body was read before the Content-Length pre-check fired"),
+    )
+    h = _bearer(mint("cl-precheck"))
+    r = client.post("/files", files={"file": ("big.csv", b"x" * 4096, "text/csv")}, headers=h)
+    assert r.status_code == 413
+
+
 # ---------------------------------------------------------------------------
 # /pipelines/explain
 # ---------------------------------------------------------------------------

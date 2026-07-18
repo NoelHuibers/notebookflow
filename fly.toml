@@ -11,6 +11,9 @@ primary_region = 'fra'
 
 [env]
   PORT = '8765'
+  # CORS: only the hosted web app may call this engine from a browser
+  # (comma-separated; unset = open, the self-host default).
+  NOTEBOOKFLOW_ALLOWED_ORIGINS = 'https://notebookflow.vercel.app'
 
 [http_service]
   internal_port = 8765

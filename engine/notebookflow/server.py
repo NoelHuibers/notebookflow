@@ -52,6 +52,7 @@ from notebookflow.llm.credentials import CredentialContext, resolve_credentials
 from notebookflow.llm.explainer import Explainer
 from notebookflow.llm.pipeline_author import PipelineAuthor
 from notebookflow.protocol.registry import Registry
+from notebookflow.ratelimit import rate_limited
 
 
 def _default_env_roots() -> tuple[Path, Path]:
@@ -306,9 +307,21 @@ async def _log_trigger_fire(trigger: Trigger, firing: TriggerFiring) -> None:
 
 app = FastAPI(title="NotebookFlow Engine", version="0.0.0", lifespan=lifespan)
 
+
+def _allowed_origins() -> list[str]:
+    """Browser origins allowed by CORS. Comma-separated via
+    NOTEBOOKFLOW_ALLOWED_ORIGINS (the hosted deploy locks this to the web-app
+    origin in fly.toml); unset keeps the open self-host default. Credentials
+    stay off — auth is bearer tokens, never cookies — so `*` is safe there."""
+    configured = os.environ.get("NOTEBOOKFLOW_ALLOWED_ORIGINS", "").strip()
+    if configured == "":
+        return ["*"]
+    return [origin.strip() for origin in configured.split(",") if origin.strip() != ""]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins(),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -433,6 +446,32 @@ def _enforce_data_quota(data_dir: Path, incoming_name: str, incoming_size: int) 
             status_code=413, detail=f"data file limit reached ({max_files} files per user)"
         )
     if max_bytes > 0 and total > max_bytes:
+        raise HTTPException(
+            status_code=413, detail=f"data storage limit reached ({max_bytes} bytes per user)"
+        )
+
+
+def _precheck_upload_size(request: Request, data_dir: Path, incoming_name: str) -> None:
+    """Cheap 413 *before* buffering the upload body into memory.
+
+    The multipart Content-Length is a slight over-estimate of the file size
+    (boundary + part headers), so it is an upper bound: a request whose
+    declared size can't possibly fit the remaining byte quota is rejected
+    without reading it. `_enforce_data_quota` after the read stays the
+    authoritative check (it sees the exact size and the file-count limit)."""
+    declared_header = request.headers.get("content-length", "").strip()
+    if not declared_header.isdigit():
+        return
+    declared = int(declared_header)
+    _, max_bytes = _data_quota()
+    if max_bytes <= 0:
+        return
+    files = [e for e in data_dir.iterdir() if e.is_file()] if data_dir.is_dir() else []
+    existing = next((e for e in files if e.name == incoming_name), None)
+    prior_bytes = sum(e.stat().st_size for e in files) - (
+        existing.stat().st_size if existing is not None else 0
+    )
+    if prior_bytes + declared > max_bytes:
         raise HTTPException(
             status_code=413, detail=f"data storage limit reached ({max_bytes} bytes per user)"
         )
@@ -583,7 +622,7 @@ async def list_nodes() -> list[dict[str, object]]:
 @app.post(
     "/nodes/synthesize",
     response_model=SynthesizeNodeResponse,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_auth), Depends(rate_limited("nodes-synthesize", 10, 60))],
 )
 async def synthesize_node(request: SynthesizeNodeRequest) -> SynthesizeNodeResponse:
     registry = _registry(app)
@@ -645,16 +684,22 @@ async def list_data_files(
     ]
 
 
-@app.post("/files", response_model=DataFileModel)
+@app.post(
+    "/files",
+    response_model=DataFileModel,
+    dependencies=[Depends(rate_limited("files-upload", 20, 60))],
+)
 async def upload_data_file(
+    request: Request,
     file: Annotated[UploadFile, File()],
     principal: Annotated[AuthPrincipal, Depends(require_auth)],
 ) -> DataFileModel:
     """Store an uploaded data file so cells can `read_csv("name")` it on run.
     Written to the owning user's store and bounded by the per-user quota."""
     name = _safe_data_name(file.filename or "")
-    contents = await file.read()
     data_dir = _data_dir(app, principal.user_id)
+    _precheck_upload_size(request, data_dir, name)
+    contents = await file.read()
     _enforce_data_quota(data_dir, name, len(contents))
     (data_dir / name).write_bytes(contents)
     return DataFileModel(name=name, size=len(contents))
@@ -674,6 +719,7 @@ async def delete_data_file(
 @app.post(
     "/pipelines/{pipeline_id}/run",
     response_model=RunResponse,
+    dependencies=[Depends(rate_limited("pipelines-run", 30, 60))],
 )
 async def run_pipeline(
     pipeline_id: str,
@@ -687,7 +733,7 @@ async def run_pipeline(
 @app.post(
     "/pipelines/explain",
     response_model=ExplainPipelineResponse,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_auth), Depends(rate_limited("pipelines-explain", 10, 60))],
 )
 async def explain_pipeline(request: ExplainPipelineRequest) -> ExplainPipelineResponse:
     """Return a literate prose walkthrough of the pipeline.
@@ -716,7 +762,7 @@ async def explain_pipeline(request: ExplainPipelineRequest) -> ExplainPipelineRe
 @app.post(
     "/pipelines/propose",
     response_model=ProposePipelineResponse,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_auth), Depends(rate_limited("pipelines-propose", 10, 60))],
 )
 async def propose_pipeline(request: ProposePipelineRequest) -> ProposePipelineResponse:
     """Draft a new pipeline from a natural-language prompt.
@@ -845,7 +891,7 @@ async def list_firings(trigger_id: str) -> list[dict[str, Any]]:
 @app.post(
     "/llm/ask",
     response_model=AskResponse,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_auth), Depends(rate_limited("llm-ask", 10, 60))],
 )
 async def ask_llm(request: AskRequest) -> AskResponse:
     """Free-form Q&A backing the web-app's Cmd/Ctrl+K command palette.
