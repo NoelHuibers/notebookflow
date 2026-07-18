@@ -34,26 +34,13 @@ import {
 import type { CellPatch, NotebookCell } from "@notebookflow/graph-canvas/sync";
 import { SyncEngine } from "@notebookflow/graph-canvas/sync";
 import {
-  Cloud,
-  Command,
-  Download,
-  ExternalLink,
   FilePlus,
-  Keyboard,
-  MoreHorizontal,
   PanelBottom,
   PanelBottomClose,
   PanelLeftOpen,
   PanelRight,
   PanelRightClose,
-  Play,
-  RotateCcw,
-  Save,
-  Settings as SettingsIcon,
-  Sparkles,
   Upload,
-  Wand2,
-  Zap,
 } from "lucide-react";
 import type {
   ReactElement,
@@ -61,6 +48,7 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppHeader } from "@/components/AppHeader";
 import { AskPalette } from "@/components/AskPalette";
 import { CanvasSidebar } from "@/components/CanvasSidebar";
 import { CellList } from "@/components/CellList";
@@ -69,12 +57,10 @@ import type { CellKind } from "@/components/CellToolbar";
 import { CellToolbar } from "@/components/CellToolbar";
 import { CloudNotebooksDialog } from "@/components/CloudNotebooksDialog";
 import { ComposeDialog } from "@/components/ComposeDialog";
-import { EngineStatus } from "@/components/EngineStatus";
 import { ExplanationPanel } from "@/components/ExplanationPanel";
 import { FileDropZone } from "@/components/FileDropZone";
 import { FilesRail } from "@/components/FilesRail";
 import { InspectorPanel } from "@/components/InspectorPanel";
-import { Wordmark } from "@/components/Logo";
 import { PaneDivider } from "@/components/PaneDivider";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { ShortcutsDialog } from "@/components/ShortcutsDialog";
@@ -97,9 +83,8 @@ import type {
 import { EngineClient } from "@/lib/EngineClient";
 import { formatError } from "@/lib/errors";
 import { buildGenerationStatus, renderEvent } from "@/lib/events";
-import { canSaveInPlace, pickSaveFileHandle, writeFileHandle } from "@/lib/fileSystemAccess";
+import { pickSaveFileHandle, writeFileHandle } from "@/lib/fileSystemAccess";
 import { useI18n } from "@/lib/i18n";
-import { openInJupyterLab } from "@/lib/jupyter";
 import type { IpynbDoc } from "@/lib/notebook";
 import {
   extractOutputsByCell,
@@ -159,16 +144,6 @@ const MIN_INSPECTOR_HEIGHT_PX = 140;
 const DEFAULT_NOTEBOOK_RATIO = 50;
 const DEFAULT_MAIN_RATIO = 72;
 const KEYBOARD_RESIZE_STEP = 2;
-const DEFAULT_JUPYTER_URL = "http://localhost:8888";
-
-const JUPYTER_URL: string = (() => {
-  const raw = import.meta.env.VITE_NOTEBOOKFLOW_JUPYTER_URL;
-  // Undefined env var -> use default. Explicitly empty string -> opt-out, no button.
-  if (raw === undefined) {
-    return DEFAULT_JUPYTER_URL;
-  }
-  return raw.trim();
-})();
 
 function makeFileId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -416,7 +391,6 @@ export function App(): ReactElement {
   const [isAsking, setIsAsking] = useState(false);
   const [askResult, setAskResult] = useState<AskAnswer | null>(null);
   const [askError, setAskError] = useState<string | null>(null);
-  const [isOverflowOpen, setIsOverflowOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [showMinimap, setShowMinimap] = useState(false);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(
@@ -2273,193 +2247,47 @@ export function App(): ReactElement {
   return (
     <FileDropZone onFile={handleFile}>
       <div className="flex h-screen overflow-hidden flex-col bg-background text-foreground font-sans">
-        <header className="flex items-center gap-3 border-b bg-card px-4 py-2.5">
-          <Wordmark />
-          <EngineStatus client={clientRef.current} />
-          <div className="ml-auto flex items-center gap-2">
-            {canSaveInPlace && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  void handleSave();
-                }}
-                disabled={saveStatus === "saving"}
-                title={
-                  fileHandleRef.current === null
-                    ? t("app.toolbar.saveTitleFirst")
-                    : t("app.toolbar.saveTitleAgain")
-                }
-              >
-                <Save className="mr-1.5 size-3.5" />
-                {saveStatus === "saving"
-                  ? t("app.toolbar.saving")
-                  : saveStatus === "saved"
-                    ? t("app.toolbar.saved")
-                    : t("app.toolbar.save")}
-              </Button>
-            )}
-            {session.data && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setIsCloudOpen(true);
-                  void refreshCloudList();
-                }}
-                title={t("app.toolbar.cloudTitle")}
-              >
-                <Cloud className="mr-1.5 size-3.5" />
-                {t("app.toolbar.cloud")}
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setIsTriggersOpen(true);
-              }}
-              title={t("app.toolbar.triggersTitle")}
-            >
-              <Zap className="mr-1.5 size-3.5" />
-              {t("app.toolbar.triggers")}
-              {triggers.length > 0 && (
-                <Badge variant="outline" className="ml-2 px-1 font-mono text-[10px]">
-                  {triggers.length}
-                </Badge>
-              )}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                void handleExplain();
-              }}
-              disabled={isExplaining}
-              title={t("app.toolbar.explainTitle")}
-            >
-              <Sparkles className="mr-1.5 size-3.5" />
-              {isExplaining ? t("app.toolbar.explaining") : t("app.toolbar.explain")}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setIsComposeOpen(true);
-              }}
-              title={t("app.toolbar.composeTitle")}
-            >
-              <Wand2 className="mr-1.5 size-3.5" />
-              {t("app.toolbar.compose")}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setIsAskOpen(true);
-              }}
-              title={t("app.toolbar.askAiTitle")}
-            >
-              <Command className="mr-1.5 size-3.5" />
-              {t("app.toolbar.askAi")}
-              <Badge variant="outline" className="ml-2 px-1 font-mono text-[10px]">
-                ⌘K
-              </Badge>
-            </Button>
-            <Button variant="default" size="sm" onClick={handleRun} disabled={isRunning}>
-              <Play className="mr-1.5 size-3.5" />
-              {isRunning ? t("app.toolbar.running") : t("app.toolbar.runPipeline")}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="px-2"
-              title={t("app.toolbar.shortcutsTitle")}
-              aria-label={t("app.toolbar.shortcuts")}
-              onClick={() => {
-                setIsShortcutsOpen((open) => !open);
-              }}
-            >
-              <Keyboard className="size-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="px-2"
-              title={t("app.toolbar.settings")}
-              aria-label={t("app.toolbar.settings")}
-              onClick={() => {
-                setIsSettingsOpen((open) => !open);
-              }}
-            >
-              <SettingsIcon className="size-4" />
-            </Button>
-            <div className="relative">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="px-2"
-                onClick={() => {
-                  setIsOverflowOpen((open) => !open);
-                }}
-                title={t("app.toolbar.moreActions")}
-                aria-label={t("app.toolbar.moreActions")}
-              >
-                <MoreHorizontal className="size-3.5" />
-              </Button>
-              {isOverflowOpen && (
-                <div className="absolute right-0 top-full z-30 mt-1 w-52 rounded-md border bg-popover text-popover-foreground shadow-md">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleDownloadWorkspace();
-                      setIsOverflowOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/70"
-                  >
-                    <Download className="size-3.5" />
-                    {t("app.toolbar.downloadWorkspace")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleDownloadAll();
-                      setIsOverflowOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/70"
-                  >
-                    <Download className="size-3.5" />
-                    {t("app.toolbar.downloadAllZip")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleReingest();
-                      setIsOverflowOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/70"
-                  >
-                    <RotateCcw className="size-3.5" />
-                    {t("app.toolbar.reingest")}
-                  </button>
-                  {JUPYTER_URL !== "" && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        openInJupyterLab(JUPYTER_URL, notebook.name);
-                        setIsOverflowOpen(false);
-                      }}
-                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/70"
-                    >
-                      <ExternalLink className="size-3.5" />
-                      {t("app.toolbar.editInJupyter")}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </header>
+        <AppHeader
+          engineClient={clientRef.current}
+          saveStatus={saveStatus}
+          hasSaveTarget={fileHandleRef.current !== null}
+          onSave={() => {
+            void handleSave();
+          }}
+          isSignedIn={Boolean(session.data)}
+          onOpenCloud={() => {
+            setIsCloudOpen(true);
+            void refreshCloudList();
+          }}
+          triggersCount={triggers.length}
+          onOpenTriggers={() => {
+            setIsTriggersOpen(true);
+          }}
+          isExplaining={isExplaining}
+          onExplain={() => {
+            void handleExplain();
+          }}
+          onOpenCompose={() => {
+            setIsComposeOpen(true);
+          }}
+          onOpenAsk={() => {
+            setIsAskOpen(true);
+          }}
+          isRunning={isRunning}
+          onRun={handleRun}
+          onToggleShortcuts={() => {
+            setIsShortcutsOpen((open) => !open);
+          }}
+          onToggleSettings={() => {
+            setIsSettingsOpen((open) => !open);
+          }}
+          notebookName={notebook.name}
+          onDownloadWorkspace={handleDownloadWorkspace}
+          onDownloadAll={() => {
+            void handleDownloadAll();
+          }}
+          onReingest={handleReingest}
+        />
 
         {isSettingsOpen && (
           <SettingsDialog
