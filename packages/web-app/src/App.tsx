@@ -10,6 +10,12 @@
  * - Click Download to save the patched `.ipynb` or the full workspace back to disk.
  */
 
+import {
+  buildGenerationStatus,
+  buildPipelineDef,
+  renderEvent,
+  stripMarkerLine,
+} from "@notebookflow/app-core";
 import type {
   CanvasLabels,
   GraphModel,
@@ -80,13 +86,11 @@ import type {
 } from "@/lib/EngineClient";
 import { EngineClient } from "@/lib/EngineClient";
 import { formatError } from "@/lib/errors";
-import { buildGenerationStatus, renderEvent } from "@/lib/events";
 import { pickSaveFileHandle, writeFileHandle } from "@/lib/fileSystemAccess";
 import { useI18n } from "@/lib/i18n";
 import type { IpynbDoc } from "@/lib/notebook";
 import { extractSourceFilename, serializeNotebook, toIpynbCell } from "@/lib/notebook";
 import { sortPalette } from "@/lib/palette";
-import { buildPipelineDef, stripMarkerLine } from "@/lib/pipeline";
 import { deleteProviderKey, getProviderKey, saveProviderKey } from "@/lib/providerKeyApi";
 import type { UserSettings } from "@/lib/settings";
 import { applyTheme, readUserSettings, SETTINGS_STORAGE_KEY } from "@/lib/settings";

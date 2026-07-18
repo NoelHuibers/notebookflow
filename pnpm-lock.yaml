@@ -216,6 +216,9 @@ importers:
       '@libsql/client':
         specifier: ^0.17.4
         version: 0.17.4
+      '@notebookflow/app-core':
+        specifier: workspace:*
+        version: link:../app-core
       '@notebookflow/graph-canvas':
         specifier: workspace:*
         version: link:../graph-canvas
