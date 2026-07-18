@@ -12,6 +12,8 @@ import {
   addManifestNode,
   Canvas,
   configValuesEqual,
+  deCanvasLabels,
+  deNodeConfigLabels,
   hasMissingRequiredConfig,
   NodeConfigEditor,
   readNotebookflowMetadata,
@@ -30,6 +32,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { EngineEvent, PipelineDef } from "./EngineClient";
 import type { NotebookBridge } from "./NotebookBridge";
+import { resolveLocale, resolveStrings } from "./strings";
 
 export interface AppProps {
   bridge: NotebookBridge;
@@ -44,6 +47,14 @@ export interface AppProps {
     currentSource: string;
   }) => Promise<{ source: string; backend: string; warnings: string[] }>;
 }
+
+// JupyterLab's UI language is fixed for the page's lifetime, so resolve the
+// string table once at module scope. `undefined` labels keep graph-canvas on
+// its English defaults.
+const locale = resolveLocale();
+const s = resolveStrings();
+const canvasLabels = locale === "de" ? deCanvasLabels : undefined;
+const nodeConfigLabels = locale === "de" ? deNodeConfigLabels : undefined;
 
 const EMPTY_GRAPH: GraphModel = { nodes: {}, groups: {}, wires: {} };
 const DIVIDER_SIZE_PX = 10;
@@ -118,7 +129,7 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
           return;
         }
         const message = err instanceof Error ? err.message : "unknown error";
-        setPaletteError(`Could not load node registry: ${message}`);
+        setPaletteError(s.couldNotLoadRegistry.replace("{message}", message));
       });
     return () => {
       cancelled = true;
@@ -179,11 +190,17 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
       insertAtCellIndex: bridge.readCells().length,
       onSynthesisError: (err: unknown) => {
         const message = err instanceof Error ? err.message : "unknown error";
-        setEvents((prev) => [...prev, { type: "error", message: `add node failed: ${message}` }]);
+        setEvents((prev) => [
+          ...prev,
+          { type: "error", message: s.addNodeFailed.replace("{message}", message) },
+        ]);
       },
     }).catch((err: unknown) => {
       const message = err instanceof Error ? err.message : "unknown error";
-      setEvents((prev) => [...prev, { type: "error", message: `add node failed: ${message}` }]);
+      setEvents((prev) => [
+        ...prev,
+        { type: "error", message: s.addNodeFailed.replace("{message}", message) },
+      ]);
     });
   };
 
@@ -272,7 +289,9 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
       })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : "unknown error";
-        setConfigError(`Could not update ${selected.name}: ${message}`);
+        setConfigError(
+          s.couldNotUpdateNode.replace("{name}", selected.name).replace("{message}", message),
+        );
       })
       .finally(() => {
         setIsConfigSubmitting(false);
@@ -311,7 +330,7 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
         const message = err instanceof Error ? err.message : "unknown error";
         setEvents((prev) => [
           ...prev,
-          { type: "error", message: `output update failed: ${message}` },
+          { type: "error", message: s.outputUpdateFailed.replace("{message}", message) },
         ]);
       }
     })
@@ -450,14 +469,16 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
       <header style={headerStyle}>
         <span style={{ fontWeight: 600 }}>NotebookFlow</span>
         <span style={{ opacity: 0.65, fontSize: 11 }}>
-          {Object.keys(graph.nodes).length} nodes · {bridge.notebookPath}
+          {s.nodeCountPath
+            .replace("{count}", String(Object.keys(graph.nodes).length))
+            .replace("{path}", bridge.notebookPath)}
         </span>
         <div style={headerActionsStyle}>
           <button type="button" style={secondaryButtonStyle} onClick={toggleSidebar}>
-            {isSidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+            {isSidebarCollapsed ? s.showSidebar : s.hideSidebar}
           </button>
           <button type="button" style={buttonStyle} onClick={handleRun} disabled={isRunning}>
-            {isRunning ? "Running…" : "Run pipeline"}
+            {isRunning ? s.running : s.runPipeline}
           </button>
         </div>
       </header>
@@ -473,13 +494,14 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
             onOutputsChange={handleOutputsChange}
             onWireCreate={handleWireCreate}
             onWireDelete={handleWireDelete}
+            {...(canvasLabels === undefined ? {} : { labels: canvasLabels })}
           />
         </main>
 
         {!isSidebarCollapsed && (
           <button
             type="button"
-            aria-label="Resize canvas sidebar"
+            aria-label={s.resizeSidebarAria}
             style={dividerStyle}
             onPointerDown={handleSidebarDividerPointerDown}
             onKeyDown={handleSidebarDividerKeyDown}
@@ -491,9 +513,9 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
         {!isSidebarCollapsed && (
           <aside style={sidebarStyle}>
             <div style={sidebarSelectedSectionStyle}>
-              <h3 style={sectionTitleStyle}>Selected</h3>
+              <h3 style={sectionTitleStyle}>{s.selectedHeading}</h3>
               {selected === null ? (
-                <p style={mutedStyle}>Click a node.</p>
+                <p style={mutedStyle}>{s.clickNode}</p>
               ) : selectedManifest !== null && selectedManifest.configFields.length > 0 ? (
                 <NodeConfigEditor
                   manifest={selectedManifest}
@@ -508,6 +530,7 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
                     setConfigDraft((current) => ({ ...current, [key]: value }));
                   }}
                   onSubmit={handleApplySelectedConfig}
+                  {...(nodeConfigLabels === undefined ? {} : { labels: nodeConfigLabels })}
                 />
               ) : (
                 <pre style={preStyle}>{JSON.stringify(selected, null, 2)}</pre>
@@ -515,13 +538,13 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
             </div>
             <div style={sidebarScrollSectionStyle}>
               <div style={sidebarSectionHeaderStyle}>
-                <h3 style={sectionTitleResetStyle}>Palette</h3>
+                <h3 style={sectionTitleResetStyle}>{s.paletteHeading}</h3>
                 <span style={countBadgeStyle}>{paletteNodes.length}</span>
               </div>
               {paletteError !== null ? (
                 <p style={mutedStyle}>{paletteError}</p>
               ) : paletteNodes.length === 0 ? (
-                <p style={mutedStyle}>Loading node registry…</p>
+                <p style={mutedStyle}>{s.loadingRegistry}</p>
               ) : (
                 <div style={paletteStyle}>
                   {groupPalette(paletteNodes).map(([tag, nodes]) => (
@@ -552,9 +575,11 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
                   ))}
                 </div>
               )}
-              <h3 style={sectionTitleStyle}>Execution ({events.length})</h3>
+              <h3 style={sectionTitleStyle}>
+                {s.executionEvents.replace("{count}", String(events.length))}
+              </h3>
               {events.length === 0 ? (
-                <p style={mutedStyle}>Click Run to dispatch this pipeline.</p>
+                <p style={mutedStyle}>{s.clickRunToDispatch}</p>
               ) : (
                 <ul style={eventListStyle}>
                   {events.map((event, idx) => (
@@ -619,11 +644,12 @@ function buildGenerationStatus(metadata: {
   if (metadata.lastGenerationBackend === undefined && metadata.lastGeneratedAt === undefined) {
     return null;
   }
+  const backend = metadata.lastGenerationBackend ?? "template";
   if (metadata.lastGeneratedAt === undefined) {
-    return `Last generated via ${metadata.lastGenerationBackend ?? "template"}.`;
+    return s.generatedVia.replace("{backend}", backend);
   }
   const when = new Date(metadata.lastGeneratedAt).toLocaleString();
-  return `Last generated via ${metadata.lastGenerationBackend ?? "template"} at ${when}.`;
+  return s.generatedViaAt.replace("{backend}", backend).replace("{when}", when);
 }
 
 function renderEvent(event: EngineEvent): string {
