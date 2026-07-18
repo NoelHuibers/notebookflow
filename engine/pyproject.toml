@@ -22,7 +22,7 @@ dependencies = [
     "croniter>=6.2.2",
     "anthropic>=0.100.0",
     "httpx>=0.28.1",
-    "litellm>=1.0.0",
+    "litellm>=1.92.0",
     "pyjwt[crypto]>=2.10.1",
 ]
 
