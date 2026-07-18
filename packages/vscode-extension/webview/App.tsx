@@ -27,6 +27,8 @@ import {
   addManifestNode,
   Canvas,
   configValuesEqual,
+  deCanvasLabels,
+  deNodeConfigLabels,
   hasMissingRequiredConfig,
   NodeConfigEditor,
   readNotebookflowMetadata,
@@ -44,6 +46,8 @@ import type {
 } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { resolveLocale, resolveStrings } from "./strings";
+
 declare global {
   interface VsCodeApi {
     postMessage(msg: unknown): void;
@@ -54,6 +58,14 @@ declare global {
 }
 
 const vscode = acquireVsCodeApi();
+
+// The webview's locale is fixed for its whole lifetime (VS Code injects it into
+// the HTML), so resolve the string table once at module scope. `undefined`
+// labels keep graph-canvas on its English defaults.
+const locale = resolveLocale();
+const s = resolveStrings();
+const canvasLabels = locale === "de" ? deCanvasLabels : undefined;
+const nodeConfigLabels = locale === "de" ? deNodeConfigLabels : undefined;
 
 interface IngestMessage {
   type: "ingest";
@@ -245,7 +257,7 @@ export function App(): ReactElement {
           ...prev,
           {
             type: "error",
-            message: "Start the engine before adding nodes from the palette.",
+            message: s.startEngineBeforePalette,
           },
         ]);
         return;
@@ -257,11 +269,17 @@ export function App(): ReactElement {
         insertAtCellIndex,
         onSynthesisError: (err: unknown) => {
           const message = err instanceof Error ? err.message : "unknown error";
-          setEvents((prev) => [...prev, { type: "error", message: `add node failed: ${message}` }]);
+          setEvents((prev) => [
+            ...prev,
+            { type: "error", message: s.addNodeFailed.replace("{message}", message) },
+          ]);
         },
       }).catch((err: unknown) => {
         const message = err instanceof Error ? err.message : "unknown error";
-        setEvents((prev) => [...prev, { type: "error", message: `add node failed: ${message}` }]);
+        setEvents((prev) => [
+          ...prev,
+          { type: "error", message: s.addNodeFailed.replace("{message}", message) },
+        ]);
       });
     },
     [cells.length, engineUrl, notebookPath],
@@ -292,7 +310,7 @@ export function App(): ReactElement {
   useEffect(() => {
     if (engineUrl === null) {
       setPaletteNodes([]);
-      setPaletteError("Start the engine to load the node palette.");
+      setPaletteError(s.startEngineToLoadPalette);
       return;
     }
 
@@ -316,7 +334,7 @@ export function App(): ReactElement {
           return;
         }
         const message = err instanceof Error ? err.message : "unknown error";
-        setPaletteError(`Could not load node registry: ${message}`);
+        setPaletteError(s.couldNotLoadRegistry.replace("{message}", message));
       });
 
     return () => {
@@ -408,7 +426,9 @@ export function App(): ReactElement {
       })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : "unknown error";
-        setConfigError(`Could not update ${selected.name}: ${message}`);
+        setConfigError(
+          s.couldNotUpdateNode.replace("{name}", selected.name).replace("{message}", message),
+        );
       })
       .finally(() => {
         setIsConfigSubmitting(false);
@@ -601,18 +621,19 @@ export function App(): ReactElement {
       <header className="flex items-center gap-3 border-b bg-card px-4 py-2">
         <span className="text-sm font-semibold">NotebookFlow</span>
         <span className="text-xs text-muted-foreground">
-          {Object.keys(graph.nodes).length} nodes
+          {s.nodeCount.replace("{count}", String(Object.keys(graph.nodes).length))}
         </span>
         <div className="ml-auto flex items-center gap-2 text-xs">
           <span className={engineUrl === null ? "text-muted-foreground" : "text-foreground"}>
-            engine: {engineUrl ?? "not running"}
+            {s.enginePrefix}
+            {engineUrl ?? s.engineNotRunning}
           </span>
           <button
             type="button"
             onClick={toggleSidebar}
             className="rounded border border-border bg-background px-3 py-1 disabled:opacity-50"
           >
-            {isSidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+            {isSidebarCollapsed ? s.showSidebar : s.hideSidebar}
           </button>
           <button
             type="button"
@@ -620,7 +641,7 @@ export function App(): ReactElement {
             disabled={engineUrl === null || isRunning}
             className="rounded border border-border bg-primary px-3 py-1 text-primary-foreground disabled:opacity-50"
           >
-            {isRunning ? "Running…" : "Run pipeline"}
+            {isRunning ? s.running : s.runPipeline}
           </button>
         </div>
       </header>
@@ -637,13 +658,14 @@ export function App(): ReactElement {
             onWireCreate={handleWireCreate}
             onWireDelete={handleWireDelete}
             onPaneDrop={handlePaneDrop}
+            {...(canvasLabels === undefined ? {} : { labels: canvasLabels })}
           />
         </main>
 
         {!isSidebarCollapsed && (
           <button
             type="button"
-            aria-label="Resize canvas sidebar"
+            aria-label={s.resizeSidebarAria}
             onPointerDown={handleSidebarDividerPointerDown}
             onKeyDown={handleSidebarDividerKeyDown}
             className="group flex w-[10px] cursor-col-resize items-center justify-center border-0 bg-muted/70 p-0"
@@ -656,10 +678,10 @@ export function App(): ReactElement {
           <aside className="flex min-h-0 flex-col overflow-hidden border-l bg-card text-xs">
             <div className="max-h-[min(280px,42%)] min-h-[7rem] shrink-0 overflow-auto border-b p-3">
               <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Selected
+                {s.selectedHeading}
               </h2>
               {selected === null ? (
-                <p className="text-muted-foreground">Click a node to inspect.</p>
+                <p className="text-muted-foreground">{s.clickNodeToInspect}</p>
               ) : selectedManifest !== null && selectedManifest.configFields.length > 0 ? (
                 <NodeConfigEditor
                   manifest={selectedManifest}
@@ -674,6 +696,7 @@ export function App(): ReactElement {
                     setConfigDraft((current) => ({ ...current, [key]: value }));
                   }}
                   onSubmit={handleApplySelectedConfig}
+                  {...(nodeConfigLabels === undefined ? {} : { labels: nodeConfigLabels })}
                 />
               ) : (
                 <pre className="overflow-auto rounded border bg-background p-2 font-mono text-[11px]">
@@ -685,7 +708,7 @@ export function App(): ReactElement {
             <div className="min-h-0 flex-1 overflow-auto p-3">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Palette
+                  {s.paletteHeading}
                 </h2>
                 <span className="rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
                   {paletteNodes.length}
@@ -694,7 +717,7 @@ export function App(): ReactElement {
               {paletteError !== null ? (
                 <p className="text-muted-foreground">{paletteError}</p>
               ) : paletteNodes.length === 0 ? (
-                <p className="text-muted-foreground">Loading node registry…</p>
+                <p className="text-muted-foreground">{s.loadingRegistry}</p>
               ) : (
                 <div className="flex flex-col gap-3">
                   {groupPalette(paletteNodes).map(([tag, nodes]) => (
@@ -715,11 +738,7 @@ export function App(): ReactElement {
                             onClick={() => {
                               handleAddNode(manifest);
                             }}
-                            title={
-                              engineUrl === null
-                                ? "Start the engine to add nodes"
-                                : "Click to append at the end, or drag onto the canvas to place between nodes"
-                            }
+                            title={engineUrl === null ? s.startEngineToAddNodes : s.appendOrDrag}
                             className="cursor-grab rounded border bg-background px-3 py-2 text-left transition-colors hover:bg-muted/70 active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             <div className="flex items-center justify-between gap-2">
@@ -745,13 +764,11 @@ export function App(): ReactElement {
               )}
 
               <h2 className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Execution events ({events.length})
+                {s.executionEvents.replace("{count}", String(events.length))}
               </h2>
               {events.length === 0 ? (
                 <p className="text-muted-foreground">
-                  {engineUrl === null
-                    ? "Start the engine to run pipelines."
-                    : "Click Run to dispatch this pipeline."}
+                  {engineUrl === null ? s.startEngineToRun : s.clickRunToDispatch}
                 </p>
               ) : (
                 <ul className="flex flex-col gap-1">
@@ -847,11 +864,12 @@ function buildGenerationStatus(metadata: {
   if (metadata.lastGenerationBackend === undefined && metadata.lastGeneratedAt === undefined) {
     return null;
   }
+  const backend = metadata.lastGenerationBackend ?? "template";
   if (metadata.lastGeneratedAt === undefined) {
-    return `Last generated via ${metadata.lastGenerationBackend ?? "template"}.`;
+    return s.generatedVia.replace("{backend}", backend);
   }
   const when = new Date(metadata.lastGeneratedAt).toLocaleString();
-  return `Last generated via ${metadata.lastGenerationBackend ?? "template"} at ${when}.`;
+  return s.generatedViaAt.replace("{backend}", backend).replace("{when}", when);
 }
 
 function renderEvent(event: EngineEvent): string {

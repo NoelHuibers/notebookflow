@@ -273,9 +273,15 @@ export class CanvasWebviewPanel {
     ].join("; ");
 
     html = html.replace(/<script\b/g, `<script nonce="${nonce}"`);
+    // Expose the VS Code display language so the webview can localize itself
+    // (read by webview/strings.ts). Injected after the nonce pass above so the
+    // nonce is not applied twice; the CSP's script-src allows it via the nonce.
+    const localeScript = `<script nonce="${nonce}">window.__NBF_LOCALE__=${JSON.stringify(
+      vscode.env.language,
+    )}</script>`;
     html = html.replace(
       /<head>/,
-      `<head><meta http-equiv="Content-Security-Policy" content="${csp}">`,
+      `<head><meta http-equiv="Content-Security-Policy" content="${csp}">${localeScript}`,
     );
 
     return html;
