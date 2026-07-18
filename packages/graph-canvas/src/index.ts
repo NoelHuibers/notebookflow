@@ -29,6 +29,7 @@ export {
   defaultNodeConfigLabels,
   type NodeConfigLabels,
 } from "./labels";
+export { canvasLocale, deCanvasLabels, deNodeConfigLabels } from "./labels.de";
 export { type RenderManifestTemplateParams, renderManifestTemplate } from "./manifestTemplate";
 export type {
   NodeConfigFieldDef,
