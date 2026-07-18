@@ -957,6 +957,9 @@ export function App(): ReactElement {
     replaceActiveOutputsByCell({});
     resetTransient();
     setFocusedCellIndex(0);
+    // Detach from any opened cloud record: the next "Save to cloud" should
+    // create a new one, not silently overwrite what was open before.
+    setCloudId(null);
     setError(null);
   }, [openFiles, snapshotActive, resetTransient, replaceActiveOutputsByCell]);
 
@@ -1828,9 +1831,13 @@ export function App(): ReactElement {
   ]);
 
   const handleDownloadAll = useCallback(async (): Promise<void> => {
-    await downloadWorkspaceZip(collectWorkspaceFiles());
-    setBaselineSources(notebook.cells.map((cell) => cell.source));
-  }, [collectWorkspaceFiles, notebook.cells]);
+    try {
+      await downloadWorkspaceZip(collectWorkspaceFiles());
+      setBaselineSources(notebook.cells.map((cell) => cell.source));
+    } catch (err: unknown) {
+      setError(t("app.errors.downloadFailed", { message: formatError(t, err) }));
+    }
+  }, [collectWorkspaceFiles, notebook.cells, t]);
 
   const handleDownloadWorkspace = useCallback((): void => {
     downloadWorkspaceDocument(serializeWorkspace(collectWorkspaceDocument()));
