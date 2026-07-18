@@ -5,38 +5,33 @@ import { useMemo } from "react";
 import { I18nextProvider, initReactI18next, useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
+import {
+  DEFAULT_LOCALE,
+  isLocale,
+  LOCALE_COOKIE,
+  LOCALE_COOKIE_MAX_AGE_SECONDS,
+  LOCALES,
+  type Locale,
+  resolveLocale,
+  serializeLocaleCookie,
+} from "./locale";
 import { de, en } from "./messages";
 
-export const LOCALES = ["en", "de"] as const;
-export type Locale = (typeof LOCALES)[number];
-export const DEFAULT_LOCALE: Locale = "en";
-/** Persisted locale cookie. Lax + long-lived so the SSR request can read it back. */
-export const LOCALE_COOKIE = "nf_locale";
+export {
+  DEFAULT_LOCALE,
+  isLocale,
+  LOCALE_COOKIE,
+  LOCALE_COOKIE_MAX_AGE_SECONDS,
+  LOCALES,
+  type Locale,
+  resolveLocale,
+  serializeLocaleCookie,
+};
 
 const resources = {
   en: { translation: en },
   de: { translation: de },
 };
-
-export function isLocale(value: unknown): value is Locale {
-  return value === "en" || value === "de";
-}
-
-/**
- * Resolve the active locale: an explicit cookie wins, then the first supported
- * Accept-Language primary subtag, otherwise the default. Pure, so both the SSR
- * request path and the client path call it with the same precedence.
- */
-export function resolveLocale(cookieValue?: string | null, acceptLanguage?: string | null): Locale {
-  if (isLocale(cookieValue)) return cookieValue;
-  if (acceptLanguage) {
-    for (const part of acceptLanguage.split(",")) {
-      const primary = part.trim().split(";")[0]?.split("-")[0]?.toLowerCase();
-      if (isLocale(primary)) return primary;
-    }
-  }
-  return DEFAULT_LOCALE;
-}
 
 /**
  * A fresh, fully-initialized i18next instance for one locale. A new instance per
@@ -87,8 +82,9 @@ export function useI18n() {
 
 function setLocaleCookie(locale: Locale): void {
   // 1 year, Lax — readable by the SSR request on the next navigation/reload.
+  // Add Secure on HTTPS while keeping local http:// development usable.
   // biome-ignore lint/suspicious/noDocumentCookie: a plain synchronous write is intended here; CookieStore is async and not universally supported.
-  document.cookie = `${LOCALE_COOKIE}=${locale};path=/;max-age=31536000;samesite=lax`;
+  document.cookie = serializeLocaleCookie(locale, window.location.protocol === "https:");
 }
 
 /**

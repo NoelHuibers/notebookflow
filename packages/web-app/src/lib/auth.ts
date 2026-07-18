@@ -40,6 +40,8 @@ const socialProviders = {
     : {}),
 };
 
+const AUTH_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
+
 // Origins allowed to hit state-changing auth routes (#82). BetterAuth already
 // trusts the baseURL origin; this adds the deploy URL explicitly plus any
 // extra origins (e.g. Vercel previews) via a comma-separated env override.
@@ -64,10 +66,19 @@ export const auth = betterAuth({
   socialProviders,
   plugins: [jwt()],
   trustedOrigins: trustedOrigins(),
+  // Pin the disclosed seven-day session lifetime instead of inheriting a
+  // BetterAuth default that could change during a dependency upgrade.
+  session: {
+    expiresIn: AUTH_SESSION_MAX_AGE_SECONDS,
+  },
   advanced: {
-    // Pin cookie posture explicitly instead of relying on defaults: Secure
-    // cookies in production, plain in local dev (http://localhost).
+    // Secure cookies in production, plain in local dev (http://localhost).
     useSecureCookies: NODE_ENV === "production",
+    defaultCookieAttributes: {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+    },
   },
   rateLimit: {
     // BetterAuth only enables rate limiting in production by default; keep it

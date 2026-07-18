@@ -1,14 +1,20 @@
 import { Link } from "@tanstack/react-router";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 
 import { Wordmark } from "@/components/Logo";
 import { LanguageSwitcher, useI18n } from "@/lib/i18n";
 
 export type LegalPage = "impressum" | "datenschutz" | "agb";
 
-// Shared shell for the legal pages. The heading is localized (DE/EN); the real
-// bilingual body content + operator details land in #76.
-export function LegalPlaceholder({ page }: { page: LegalPage }): ReactElement {
+// Shared shell for the legal pages. The full bilingual body content + operator
+// details land in #76; focused disclosures can use the shell in the meantime.
+export function LegalPageLayout({
+  page,
+  children,
+}: {
+  page: LegalPage;
+  children: ReactNode;
+}): ReactElement {
   const { t } = useI18n();
   return (
     <div className="min-h-screen bg-background font-sans text-foreground antialiased">
@@ -30,8 +36,17 @@ export function LegalPlaceholder({ page }: { page: LegalPage }): ReactElement {
       </header>
       <main className="mx-auto max-w-3xl px-5 py-12">
         <h1 className="text-2xl font-bold tracking-tight">{t(`legal.${page}`)}</h1>
-        <p className="mt-4 leading-relaxed text-muted-foreground">{t("legal.placeholder")}</p>
+        {children}
       </main>
     </div>
+  );
+}
+
+export function LegalPlaceholder({ page }: { page: LegalPage }): ReactElement {
+  const { t } = useI18n();
+  return (
+    <LegalPageLayout page={page}>
+      <p className="mt-4 leading-relaxed text-muted-foreground">{t("legal.placeholder")}</p>
+    </LegalPageLayout>
   );
 }
