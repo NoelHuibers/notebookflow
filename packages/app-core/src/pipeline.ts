@@ -6,7 +6,7 @@
 import type { GraphModel } from "@notebookflow/graph-canvas";
 import type { NotebookCell } from "@notebookflow/graph-canvas/sync";
 
-import type { PipelineDef } from "./EngineClient";
+import type { PipelineDef } from "./types";
 
 export function buildPipelineDef(
   graph: GraphModel,

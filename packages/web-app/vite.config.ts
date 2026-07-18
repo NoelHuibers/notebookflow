@@ -10,6 +10,7 @@ import { defineConfig, loadEnv, type Plugin } from "vite";
 import { sendWebResponse, toWebRequest } from "./src/server/http-bridge";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const appCoreSrc = path.resolve(here, "../app-core/src");
 const graphCanvasSrc = path.resolve(here, "../graph-canvas/src");
 const webAppSrc = path.resolve(here, "src");
 
@@ -88,6 +89,7 @@ export default defineConfig(({ mode }) => {
     ],
     resolve: {
       alias: [
+        { find: "@notebookflow/app-core", replacement: `${appCoreSrc}/index.ts` },
         { find: "@notebookflow/graph-canvas/sync", replacement: `${graphCanvasSrc}/sync/index.ts` },
         { find: "@notebookflow/graph-canvas", replacement: `${graphCanvasSrc}/index.ts` },
         { find: /^@\/(.*)$/, replacement: `${webAppSrc}/$1` },

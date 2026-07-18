@@ -7,14 +7,13 @@
  * lands, editing kicks in.
  */
 
+import { CellOutputs, type CellOutputsLabels } from "@notebookflow/app-core";
 import type { NotebookCell } from "@notebookflow/graph-canvas/sync";
 import type { ReactElement } from "react";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useMemo } from "react";
 
 import type { NbOutput } from "@/lib/EngineClient";
 import { useI18n } from "@/lib/i18n";
-
-import { CellOutputs } from "./CellOutputs";
 
 const CodeMirrorEditor = lazy(() => import("./CodeMirrorEditor"));
 
@@ -34,6 +33,16 @@ export function CellEditor({
   onChange,
 }: CellEditorProps): ReactElement {
   const { t } = useI18n();
+  // Translate the shared CellOutputs labels (component lives in app-core; the
+  // `cells` catalog here stays the translation source).
+  const outputsLabels = useMemo<CellOutputsLabels>(
+    () => ({
+      streaming: t("cells.streaming"),
+      streamingTitle: t("cells.streamingTitle"),
+      outputFigureAlt: t("cells.outputFigureAlt"),
+    }),
+    [t],
+  );
   const typeLabelKey =
     cell.cellType === "markdown"
       ? "cells.typeMarkdown"
@@ -53,7 +62,7 @@ export function CellEditor({
           onChange={onChange}
         />
       </Suspense>
-      <CellOutputs outputs={outputs} isStreaming={isStreaming} />
+      <CellOutputs outputs={outputs} isStreaming={isStreaming} labels={outputsLabels} />
     </div>
   );
 }

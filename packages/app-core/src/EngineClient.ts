@@ -1,0 +1,393 @@
+/**
+ * EngineClient — WebSocket client for the NotebookFlow engine's `/ws` endpoint.
+ *
+ * Single-shot: each `runPipeline` call opens a fresh WebSocket, sends a
+ * `run` message, forwards every server event to `onEvent`, and resolves
+ * when `pipelineCompleted` or `error` lands.
+ *
+ * Host-agnostic: the engine URL and bearer token are injected by the host
+ * (Vite env in the web app, settings in the extensions) — this module never
+ * reads `import.meta.env` or any other host environment itself.
+ */
+
+import type {
+  NodeManifestDef,
+  NodeSynthesisRequest,
+  NodeSynthesisResponse,
+} from "@notebookflow/graph-canvas";
+
+import type {
+  AskAnswer,
+  Credentials,
+  DataFile,
+  EngineEvent,
+  PipelineDef,
+  PipelineExplanation,
+  PipelineProposal,
+  RunOptions,
+  TriggerFiring,
+  TriggerSpec,
+} from "./types";
+
+export class EngineClient {
+  private readonly url: string;
+  private token: string;
+  // Bring-your-own-key context sent with each LLM request. Set from the
+  // web-app Settings; null means "let the engine use its env key / template".
+  private credentials: Credentials | null = null;
+
+  constructor(url: string, token = "") {
+    this.url = url;
+    this.token = token;
+  }
+
+  get baseUrl(): string {
+    return this.url;
+  }
+
+  /** Set (or clear) the per-request LLM credentials. */
+  setCredentials(credentials: Credentials | null): void {
+    this.credentials = credentials;
+  }
+
+  /**
+   * Set the bearer token presented to the engine (HTTP `Authorization` + WS
+   * `?token=`). Pass a BetterAuth JWT once signed in; pass "" to fall back to
+   * the static self-host token. Affects connections opened after the call.
+   */
+  setToken(token: string): void {
+    this.token = token;
+  }
+
+  /** The credential block to attach to an LLM request, or undefined to omit. */
+  private credentialBody(): Credentials | undefined {
+    return this.credentials !== null && this.credentials.apiKey !== ""
+      ? this.credentials
+      : undefined;
+  }
+
+  private authHeaders(): Record<string, string> {
+    return this.token === "" ? {} : { Authorization: `Bearer ${this.token}` };
+  }
+
+  private wsUrlWithToken(base: string): string {
+    if (this.token === "") {
+      return base;
+    }
+    const joiner = base.includes("?") ? "&" : "?";
+    return `${base}${joiner}token=${encodeURIComponent(this.token)}`;
+  }
+
+  runPipeline(opts: RunOptions): Promise<void> {
+    const wsUrl = this.wsUrlWithToken(opts.url ?? this.url);
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(wsUrl);
+
+      ws.addEventListener("open", () => {
+        ws.send(
+          JSON.stringify({
+            type: "run",
+            pipelineId: opts.pipelineId,
+            pipeline: opts.pipeline,
+          }),
+        );
+      });
+
+      ws.addEventListener("message", (event) => {
+        let parsed: EngineEvent;
+        try {
+          parsed = JSON.parse(event.data as string) as EngineEvent;
+        } catch {
+          return;
+        }
+        opts.onEvent(parsed);
+        if (parsed.type === "pipelineCompleted" || parsed.type === "error") {
+          ws.close();
+          resolve();
+        }
+      });
+
+      ws.addEventListener("error", () => {
+        reject(new Error(`EngineClient: WebSocket error connecting to ${wsUrl}`));
+      });
+
+      ws.addEventListener("close", (event) => {
+        if (!event.wasClean) {
+          reject(
+            new Error(`EngineClient: WebSocket closed uncleanly (code ${String(event.code)})`),
+          );
+        }
+      });
+    });
+  }
+
+  /** Lightweight liveness check via the engine's `/health` REST endpoint. */
+  async ping(): Promise<boolean> {
+    const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/health");
+    try {
+      const res = await fetch(httpUrl);
+      if (!res.ok) {
+        return false;
+      }
+      const body = (await res.json()) as { status?: string };
+      return body.status === "ok";
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Ask the engine to statically analyze cell sources and return, per cell,
+   * the names bound at module top level. Used to autocomplete port variable
+   * names on the canvas. Returns one entry per input cell, in order; falls
+   * back to empty arrays if the engine is unreachable.
+   */
+  async analyzeCells(sources: string[]): Promise<string[][]> {
+    const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/cells/analyze");
+    const empty = sources.map(() => []);
+    try {
+      const res = await fetch(httpUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...this.authHeaders() },
+        body: JSON.stringify({ cells: sources.map((source) => ({ source })) }),
+      });
+      if (!res.ok) {
+        return empty;
+      }
+      const body = (await res.json()) as { cells?: { definedNames?: string[] }[] };
+      const cells = body.cells ?? [];
+      return sources.map((_, idx) => cells[idx]?.definedNames ?? []);
+    } catch {
+      return empty;
+    }
+  }
+
+  /** Fetch the node registry for the manifest-driven add-node palette. */
+  async listNodes(): Promise<NodeManifestDef[]> {
+    const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/nodes");
+    const res = await fetch(httpUrl, { headers: this.authHeaders() });
+    if (!res.ok) {
+      throw new Error(`EngineClient.listNodes: ${res.status} ${res.statusText}`);
+    }
+    return (await res.json()) as NodeManifestDef[];
+  }
+
+  async synthesizeNode(request: NodeSynthesisRequest): Promise<NodeSynthesisResponse> {
+    const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/nodes/synthesize");
+    const credentials = this.credentialBody();
+    const body = credentials !== undefined ? { ...request, credentials } : request;
+    const res = await fetch(httpUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...this.authHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const message = await readErrorMessage(res);
+      throw new Error(`EngineClient.synthesizeNode: ${message}`);
+    }
+    return (await res.json()) as NodeSynthesisResponse;
+  }
+
+  /**
+   * Ask the engine for a literate prose walkthrough of the current pipeline.
+   * Runs through the user's configured provider (bring-your-own-key) when a key
+   * is set, an engine env key otherwise, and a deterministic template last.
+   */
+  async explainPipeline(pipeline: PipelineDef, instruction = ""): Promise<PipelineExplanation> {
+    const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/pipelines/explain");
+    const body: { pipeline: PipelineDef; instruction: string; credentials?: Credentials } = {
+      pipeline,
+      instruction,
+    };
+    const credentials = this.credentialBody();
+    if (credentials !== undefined) {
+      body.credentials = credentials;
+    }
+    const res = await fetch(httpUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...this.authHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const message = await readErrorMessage(res);
+      throw new Error(`EngineClient.explainPipeline: ${message}`);
+    }
+    return (await res.json()) as PipelineExplanation;
+  }
+
+  /**
+   * Free-form Q&A backing the Cmd/Ctrl+K command palette. Runs through the
+   * user's configured provider (bring-your-own-key) when a key is set; falls
+   * back to a keyword-driven template hint that nudges toward the right button.
+   */
+  async askLLM(prompt: string, pipeline?: PipelineDef): Promise<AskAnswer> {
+    const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/llm/ask");
+    const body: { prompt: string; pipeline?: PipelineDef; credentials?: Credentials } = { prompt };
+    if (pipeline !== undefined) {
+      body.pipeline = pipeline;
+    }
+    const credentials = this.credentialBody();
+    if (credentials !== undefined) {
+      body.credentials = credentials;
+    }
+    const res = await fetch(httpUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...this.authHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const message = await readErrorMessage(res);
+      throw new Error(`EngineClient.askLLM: ${message}`);
+    }
+    return (await res.json()) as AskAnswer;
+  }
+
+  /**
+   * Draft a fresh pipeline from a natural-language prompt. Backed by
+   * Anthropic when configured; falls back to a keyword-driven template
+   * draft otherwise.
+   */
+  async proposePipeline(prompt: string, notebookPath = ""): Promise<PipelineProposal> {
+    const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/pipelines/propose");
+    const body: { prompt: string; notebookPath?: string; credentials?: Credentials } = { prompt };
+    if (notebookPath !== "") {
+      body.notebookPath = notebookPath;
+    }
+    const credentials = this.credentialBody();
+    if (credentials !== undefined) {
+      body.credentials = credentials;
+    }
+    const res = await fetch(httpUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...this.authHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const message = await readErrorMessage(res);
+      throw new Error(`EngineClient.proposePipeline: ${message}`);
+    }
+    return (await res.json()) as PipelineProposal;
+  }
+
+  // ---------------------------------------------------------------------
+  // Data files (uploaded CSVs etc.). A pipeline reads them by name
+  // (`pd.read_csv("orders.csv")`); the engine stores them in its data dir
+  // and runs cells with that as the working directory.
+  // ---------------------------------------------------------------------
+
+  private filesUrl(name?: string): string {
+    const suffix = name === undefined ? "/files" : `/files/${encodeURIComponent(name)}`;
+    return this.url.replace(/^ws/, "http").replace(/\/ws$/, suffix);
+  }
+
+  async listDataFiles(): Promise<DataFile[]> {
+    const res = await fetch(this.filesUrl(), { headers: this.authHeaders() });
+    if (!res.ok) {
+      throw new Error(`EngineClient.listDataFiles: ${await readErrorMessage(res)}`);
+    }
+    return (await res.json()) as DataFile[];
+  }
+
+  async uploadDataFile(file: File): Promise<DataFile> {
+    const form = new FormData();
+    form.append("file", file);
+    // No Content-Type header — the browser sets the multipart boundary.
+    const res = await fetch(this.filesUrl(), {
+      method: "POST",
+      headers: this.authHeaders(),
+      body: form,
+    });
+    if (!res.ok) {
+      throw new Error(`EngineClient.uploadDataFile: ${await readErrorMessage(res)}`);
+    }
+    return (await res.json()) as DataFile;
+  }
+
+  async deleteDataFile(name: string): Promise<void> {
+    const res = await fetch(this.filesUrl(name), {
+      method: "DELETE",
+      headers: this.authHeaders(),
+    });
+    if (!res.ok) {
+      throw new Error(`EngineClient.deleteDataFile: ${await readErrorMessage(res)}`);
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Triggers (manual / cron / file_watch / webhook). Backs the Triggers
+  // dialog in the top bar; engine REST surface lives in server.py at
+  // /triggers, /triggers/{id}/fire, /triggers/{id}/firings.
+  // ---------------------------------------------------------------------
+
+  private httpBase(): string {
+    return this.url.replace(/^ws/, "http").replace(/\/ws$/, "");
+  }
+
+  async listTriggers(): Promise<TriggerSpec[]> {
+    const res = await fetch(`${this.httpBase()}/triggers`, {
+      headers: { ...this.authHeaders() },
+    });
+    if (!res.ok) {
+      throw new Error(`EngineClient.listTriggers: ${await readErrorMessage(res)}`);
+    }
+    return (await res.json()) as TriggerSpec[];
+  }
+
+  async registerTrigger(spec: TriggerSpec): Promise<TriggerSpec> {
+    const res = await fetch(`${this.httpBase()}/triggers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...this.authHeaders() },
+      body: JSON.stringify(spec),
+    });
+    if (!res.ok) {
+      throw new Error(`EngineClient.registerTrigger: ${await readErrorMessage(res)}`);
+    }
+    return (await res.json()) as TriggerSpec;
+  }
+
+  async unregisterTrigger(id: string): Promise<void> {
+    const res = await fetch(`${this.httpBase()}/triggers/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { ...this.authHeaders() },
+    });
+    if (!res.ok) {
+      throw new Error(`EngineClient.unregisterTrigger: ${await readErrorMessage(res)}`);
+    }
+  }
+
+  async fireTrigger(id: string, payload: Record<string, unknown> = {}): Promise<TriggerFiring> {
+    const res = await fetch(`${this.httpBase()}/triggers/${encodeURIComponent(id)}/fire`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...this.authHeaders() },
+      body: JSON.stringify({ payload }),
+    });
+    if (!res.ok) {
+      throw new Error(`EngineClient.fireTrigger: ${await readErrorMessage(res)}`);
+    }
+    return (await res.json()) as TriggerFiring;
+  }
+
+  async listFirings(id: string): Promise<TriggerFiring[]> {
+    const res = await fetch(`${this.httpBase()}/triggers/${encodeURIComponent(id)}/firings`, {
+      headers: { ...this.authHeaders() },
+    });
+    if (!res.ok) {
+      throw new Error(`EngineClient.listFirings: ${await readErrorMessage(res)}`);
+    }
+    return (await res.json()) as TriggerFiring[];
+  }
+
+  /** The ready-to-paste URL a third party hits to fire this trigger. */
+  webhookUrl(triggerId: string): string {
+    return `${this.httpBase()}/triggers/${encodeURIComponent(triggerId)}/fire`;
+  }
+}
+
+async function readErrorMessage(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { detail?: string };
+    return body.detail ?? `${response.status} ${response.statusText}`;
+  } catch {
+    return `${response.status} ${response.statusText}`;
+  }
+}

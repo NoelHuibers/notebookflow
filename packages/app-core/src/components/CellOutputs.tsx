@@ -5,52 +5,53 @@
  * (text/html preferred for tables, falls back to text/plain), and
  * error (ename + traceback). HTML is sanitized via DOMPurify with a
  * tight allowlist so pandas DataFrame _repr_html_ output renders as a
- * table without opening an XSS vector.
+ * table without opening an XSS vector (see ../outputHtml).
  *
  * When `isStreaming` is true (the matching node is mid-execution), the
  * component renders a blinking cursor inline with the last stream output
  * -- or as a standalone block when there are no outputs yet -- so the
  * cell view reads as "live" even before the engine flushes any data.
+ *
+ * i18n follows the app-core labels pattern: every user-facing string is a
+ * label with an English default, and a host overrides them via the optional
+ * `labels` prop. Rendering without one yields the exact English strings.
  */
 
-import DOMPurify from "dompurify";
 import type { ReactElement } from "react";
 import { useMemo } from "react";
 
-import type { NbOutput } from "@/lib/EngineClient";
-import { useI18n } from "@/lib/i18n";
+import { sanitizeOutputHtml } from "../outputHtml";
+import type { NbOutput } from "../types";
+
+export interface CellOutputsLabels {
+  /** aria-label of the blinking streaming cursor. */
+  streaming: string;
+  /** Tooltip of the blinking streaming cursor. */
+  streamingTitle: string;
+  /** alt text of a rendered image/png output (e.g. a matplotlib figure). */
+  outputFigureAlt: string;
+}
+
+// English defaults — must match the strings the web-app rendered before the
+// labels seam existed (its `cells` catalog remains the translation source).
+export const defaultCellOutputsLabels: CellOutputsLabels = {
+  streaming: "Streaming",
+  streamingTitle: "Node is executing — output streaming",
+  outputFigureAlt: "Cell output figure",
+};
 
 export interface CellOutputsProps {
   outputs: NbOutput[];
   isStreaming?: boolean;
+  labels?: Partial<CellOutputsLabels>;
 }
-
-const HTML_ALLOWED_TAGS = [
-  "table",
-  "thead",
-  "tbody",
-  "tfoot",
-  "tr",
-  "th",
-  "td",
-  "caption",
-  "colgroup",
-  "col",
-  "div",
-  "span",
-  "br",
-  "p",
-  "strong",
-  "em",
-  "code",
-];
-
-const HTML_ALLOWED_ATTR = ["class", "colspan", "rowspan", "scope", "title"];
 
 export function CellOutputs({
   outputs,
   isStreaming = false,
+  labels,
 }: CellOutputsProps): ReactElement | null {
+  const merged: CellOutputsLabels = { ...defaultCellOutputsLabels, ...labels };
   if (outputs.length === 0 && !isStreaming) {
     return null;
   }
@@ -66,24 +67,24 @@ export function CellOutputs({
           key={`output-${String(idx)}`}
           output={output}
           trailingCursor={inlineCursor && idx === lastIndex}
+          labels={merged}
         />
       ))}
       {isStreaming && !lastIsStream && (
         <pre className="whitespace-pre-wrap break-words font-mono text-muted-foreground">
-          <StreamingCursor />
+          <StreamingCursor labels={merged} />
         </pre>
       )}
     </div>
   );
 }
 
-function StreamingCursor(): ReactElement {
-  const { t } = useI18n();
+function StreamingCursor({ labels }: { labels: CellOutputsLabels }): ReactElement {
   return (
     <span
       role="img"
-      aria-label={t("cells.streaming")}
-      title={t("cells.streamingTitle")}
+      aria-label={labels.streaming}
+      title={labels.streamingTitle}
       className="ml-px inline-block h-[1em] w-[0.5em] translate-y-[0.15em] animate-pulse rounded-sm bg-current align-middle"
     />
   );
@@ -92,20 +93,21 @@ function StreamingCursor(): ReactElement {
 interface OutputBlockProps {
   output: NbOutput;
   trailingCursor?: boolean;
+  labels: CellOutputsLabels;
 }
 
-function OutputBlock({ output, trailingCursor = false }: OutputBlockProps): ReactElement {
+function OutputBlock({ output, trailingCursor = false, labels }: OutputBlockProps): ReactElement {
   if (output.output_type === "stream") {
     const colour = output.name === "stderr" ? "text-destructive" : "text-foreground";
     return (
       <pre className={`whitespace-pre-wrap break-words font-mono ${colour}`}>
         {output.text}
-        {trailingCursor && <StreamingCursor />}
+        {trailingCursor && <StreamingCursor labels={labels} />}
       </pre>
     );
   }
   if (output.output_type === "display_data" || output.output_type === "execute_result") {
-    return <RichOutput data={output.data} />;
+    return <RichOutput data={output.data} labels={labels} />;
   }
   return (
     <div className="rounded border border-destructive/40 bg-destructive/5 p-2 font-mono text-destructive">
@@ -119,17 +121,19 @@ function OutputBlock({ output, trailingCursor = false }: OutputBlockProps): Reac
   );
 }
 
-function RichOutput({ data }: { data: Record<string, string> }): ReactElement {
-  const { t } = useI18n();
+function RichOutput({
+  data,
+  labels,
+}: {
+  data: Record<string, string>;
+  labels: CellOutputsLabels;
+}): ReactElement {
   const html = data["text/html"];
   const sanitized = useMemo(() => {
     if (html === undefined) {
       return null;
     }
-    return DOMPurify.sanitize(html, {
-      ALLOWED_TAGS: HTML_ALLOWED_TAGS,
-      ALLOWED_ATTR: HTML_ALLOWED_ATTR,
-    });
+    return sanitizeOutputHtml(html);
   }, [html]);
 
   // Images (e.g. captured matplotlib figures) — the src is a controlled
@@ -139,7 +143,7 @@ function RichOutput({ data }: { data: Record<string, string> }): ReactElement {
     return (
       <img
         src={`data:image/png;base64,${png}`}
-        alt={t("cells.outputFigureAlt")}
+        alt={labels.outputFigureAlt}
         className="max-w-full rounded border bg-white"
       />
     );

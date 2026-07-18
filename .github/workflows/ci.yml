@@ -43,6 +43,9 @@ jobs:
       - name: Vitest (graph-canvas)
         run: pnpm --filter @notebookflow/graph-canvas test
 
+      - name: Vitest (app-core)
+        run: pnpm --filter @notebookflow/app-core test
+
   python:
     name: Python (pytest + ruff + ty)
     runs-on: ubuntu-latest
