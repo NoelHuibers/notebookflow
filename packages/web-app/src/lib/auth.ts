@@ -21,8 +21,15 @@ import * as schema from "./db/schema.js";
 
 // Destructured (not process.env.X) to satisfy both biome's literal-key rule and
 // tsc's noPropertyAccessFromIndexSignature.
-const { GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET } =
-  process.env;
+const {
+  GITHUB_CLIENT_ID,
+  GITHUB_CLIENT_SECRET,
+  GOOGLE_CLIENT_ID,
+  GOOGLE_CLIENT_SECRET,
+  BETTER_AUTH_URL,
+  NOTEBOOKFLOW_TRUSTED_ORIGINS,
+  NODE_ENV,
+} = process.env;
 
 const socialProviders = {
   ...(GITHUB_CLIENT_ID && GITHUB_CLIENT_SECRET
@@ -33,8 +40,49 @@ const socialProviders = {
     : {}),
 };
 
+// Origins allowed to hit state-changing auth routes (#82). BetterAuth already
+// trusts the baseURL origin; this adds the deploy URL explicitly plus any
+// extra origins (e.g. Vercel previews) via a comma-separated env override.
+function trustedOrigins(): string[] {
+  const origins: string[] = [];
+  if (BETTER_AUTH_URL) {
+    try {
+      origins.push(new URL(BETTER_AUTH_URL).origin);
+    } catch {
+      // Malformed BETTER_AUTH_URL — BetterAuth itself will complain about it.
+    }
+  }
+  for (const entry of NOTEBOOKFLOW_TRUSTED_ORIGINS?.split(",") ?? []) {
+    const origin = entry.trim();
+    if (origin) origins.push(origin);
+  }
+  return origins;
+}
+
 export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: "sqlite", schema }),
   socialProviders,
   plugins: [jwt()],
+  trustedOrigins: trustedOrigins(),
+  advanced: {
+    // Pin cookie posture explicitly instead of relying on defaults: Secure
+    // cookies in production, plain in local dev (http://localhost).
+    useSecureCookies: NODE_ENV === "production",
+  },
+  rateLimit: {
+    // BetterAuth only enables rate limiting in production by default; keep it
+    // on everywhere so limits are exercised in dev too.
+    enabled: true,
+    window: 60,
+    max: 30,
+    // Vercel functions are ephemeral, so the default in-memory store resets on
+    // every cold start. Persist counters in the auth DB (schema.rateLimit).
+    storage: "database",
+    customRules: {
+      // Brute-force surface: OAuth sign-in initiation.
+      "/sign-in/*": { window: 60, max: 10 },
+      // JWT minting for the engine — called per engine session, keep roomier.
+      "/token": { window: 60, max: 30 },
+    },
+  },
 });

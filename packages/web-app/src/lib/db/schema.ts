@@ -99,6 +99,19 @@ export const jwks = sqliteTable("jwks", {
   expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
 });
 
+// BetterAuth rate-limit counters (`rateLimit.storage: "database"` in
+// src/lib/auth.ts). The default in-memory store is useless on serverless
+// (resets every cold start), so counters live here instead. `key` is
+// BetterAuth's composite identity (ip/user + path), `lastRequest` a unix ms
+// timestamp. Export name must stay `rateLimit` — it is the BetterAuth model
+// name the drizzle adapter looks up.
+export const rateLimit = sqliteTable("rate_limit", {
+  id: text("id").primaryKey(),
+  key: text("key").notNull().unique(),
+  count: integer("count").notNull(),
+  lastRequest: integer("last_request").notNull(),
+});
+
 // NotebookFlow per-user persistence (#60). `content` is the serialized
 // workspace JSON ({ files: { name, json }[] }) — the same shape as the zip
 // export. Scoped to the owning user; cascade-deleted with the account.
