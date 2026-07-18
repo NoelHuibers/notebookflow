@@ -9,6 +9,7 @@
 import type { NotebookCell } from "@notebookflow/graph-canvas/sync";
 
 import type { NbOutput } from "./EngineClient";
+import { triggerDownload } from "./download";
 
 export interface IpynbCell {
   cell_type: string;
@@ -233,14 +234,8 @@ export function downloadNotebook(
 ): void {
   const json = serializeNotebook(cells, doc, outputsByCell);
   const blob = new Blob([json], { type: "application/x-ipynb+json" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename.endsWith(".ipynb") ? filename : `${filename}.ipynb`;
-  document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
-  URL.revokeObjectURL(url);
+  const name = filename.endsWith(".ipynb") ? filename : `${filename}.ipynb`;
+  triggerDownload(blob, name);
 }
 
 // Matches the first string literal passed to a common pandas reader (or a
