@@ -20,11 +20,7 @@ export function PrivacyStorageDisclosure(): ReactElement {
   const { t } = useI18n();
 
   return (
-    <div className="mt-6 space-y-10 leading-relaxed">
-      <p className="rounded-md border border-border/70 bg-muted/30 p-4 text-sm text-muted-foreground">
-        {t("legal.privacy.provisional")}
-      </p>
-
+    <div className="space-y-9 leading-relaxed">
       <section aria-labelledby="storage-heading">
         <h2 id="storage-heading" className="text-xl font-semibold tracking-tight">
           {t("legal.privacy.storageTitle")}
@@ -84,7 +80,7 @@ export function PrivacyStorageDisclosure(): ReactElement {
           {t("legal.privacy.consentTitle")}
         </h2>
         <p className="mt-2 text-sm text-muted-foreground">{t("legal.privacy.consentBody")}</p>
-        <p className="mt-3 text-sm text-muted-foreground">{t("legal.privacy.legalBasis")}</p>
+        <p className="mt-3 text-sm text-muted-foreground">{t("legal.privacy.storageLegalBasis")}</p>
       </section>
     </div>
   );

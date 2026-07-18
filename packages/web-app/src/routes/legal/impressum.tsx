@@ -1,7 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { LegalPlaceholder } from "@/components/LegalPlaceholder";
+import { LegalPageLayout } from "@/components/LegalPlaceholder";
+import { ImprintContent } from "@/components/legal/ImprintContent";
 
 export const Route = createFileRoute("/legal/impressum")({
-  component: () => <LegalPlaceholder page="impressum" />,
+  component: () => (
+    <LegalPageLayout page="impressum">
+      <ImprintContent />
+    </LegalPageLayout>
+  ),
 });

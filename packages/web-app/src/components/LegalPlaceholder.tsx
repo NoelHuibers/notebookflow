@@ -6,8 +6,7 @@ import { LanguageSwitcher, useI18n } from "@/lib/i18n";
 
 export type LegalPage = "impressum" | "datenschutz" | "agb";
 
-// Shared shell for the legal pages. The full bilingual body content + operator
-// details land in #76; focused disclosures can use the shell in the meantime.
+// Shared shell for the bilingual legal documents.
 export function LegalPageLayout({
   page,
   children,
@@ -39,14 +38,5 @@ export function LegalPageLayout({
         {children}
       </main>
     </div>
-  );
-}
-
-export function LegalPlaceholder({ page }: { page: LegalPage }): ReactElement {
-  const { t } = useI18n();
-  return (
-    <LegalPageLayout page={page}>
-      <p className="mt-4 leading-relaxed text-muted-foreground">{t("legal.placeholder")}</p>
-    </LegalPageLayout>
   );
 }
