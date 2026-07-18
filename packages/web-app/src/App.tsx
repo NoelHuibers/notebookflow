@@ -63,6 +63,7 @@ import { TriggersDialog } from "@/components/TriggersDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useCloudNotebooks } from "@/hooks/useCloudNotebooks";
 import { usePanelLayout } from "@/hooks/usePanelLayout";
 import { useWorkspaceExport } from "@/hooks/useWorkspaceExport";
 import { useWorkspaceFiles } from "@/hooks/useWorkspaceFiles";
@@ -84,16 +85,6 @@ import { pickSaveFileHandle, writeFileHandle } from "@/lib/fileSystemAccess";
 import { useI18n } from "@/lib/i18n";
 import type { IpynbDoc } from "@/lib/notebook";
 import { extractSourceFilename, serializeNotebook, toIpynbCell } from "@/lib/notebook";
-import {
-  createNotebook,
-  deleteNotebook,
-  getNotebook,
-  listNotebooks,
-  type NotebookSummary,
-  parseWorkspace,
-  serializeWorkspace,
-  updateNotebook,
-} from "@/lib/notebooksApi";
 import { sortPalette } from "@/lib/palette";
 import { buildPipelineDef, stripMarkerLine } from "@/lib/pipeline";
 import { deleteProviderKey, getProviderKey, saveProviderKey } from "@/lib/providerKeyApi";
@@ -210,12 +201,6 @@ export function App(): ReactElement {
   const [askError, setAskError] = useState<string | null>(null);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [isTriggersOpen, setIsTriggersOpen] = useState(false);
-  // Cloud notebooks (#60): the signed-in user's saved workspaces in Turso.
-  const [isCloudOpen, setIsCloudOpen] = useState(false);
-  const [cloudList, setCloudList] = useState<NotebookSummary[]>([]);
-  const [cloudId, setCloudId] = useState<string | null>(null);
-  const [cloudBusy, setCloudBusy] = useState(false);
-  const [cloudError, setCloudError] = useState<string | null>(null);
   // Server-side encrypted provider key (#61): "saved" once one exists in the account.
   const [accountKeyState, setAccountKeyState] = useState<"none" | "saved" | "saving">("none");
   const [triggers, setTriggers] = useState<TriggerSpec[]>([]);
@@ -348,8 +333,13 @@ export function App(): ReactElement {
     setFocusedCellIndex(0);
   }, []);
 
+  // Detach the cloud linkage when the workspace is replaced wholesale. The
+  // cloud state lives in useCloudNotebooks, which must run after
+  // useWorkspaceFiles (it needs collectWorkspaceDocument) — bridge the cycle
+  // with a stable ref that is (re)assigned once the cloud hook has returned.
+  const detachCloudRef = useRef<() => void>(() => {});
   const handleWorkspaceReplaced = useCallback((): void => {
-    setCloudId(null);
+    detachCloudRef.current();
   }, []);
 
   // Multi-file workspace core: the active notebook, open-file rail, frozen
@@ -1262,66 +1252,27 @@ export function App(): ReactElement {
     });
 
   // --- Cloud notebooks (#60): save/open/delete the user's workspaces in Turso.
-  const refreshCloudList = useCallback(async (): Promise<void> => {
-    try {
-      setCloudList(await listNotebooks());
-    } catch {
-      // signed out / offline — leave the list as-is.
-    }
-  }, []);
-
-  const handleSaveToCloud = useCallback(async (): Promise<void> => {
-    setCloudBusy(true);
-    setCloudError(null);
-    try {
-      const content = serializeWorkspace(collectWorkspaceDocument());
-      if (cloudId !== null) {
-        await updateNotebook(cloudId, { name: notebook.name, content });
-      } else {
-        setCloudId((await createNotebook(notebook.name, content)).id);
-      }
-      await refreshCloudList();
-    } catch (err) {
-      setCloudError(formatError(t, err, "app.errors.cloudSaveFailed"));
-    } finally {
-      setCloudBusy(false);
-    }
-  }, [collectWorkspaceDocument, cloudId, notebook.name, refreshCloudList, t]);
-
-  const handleOpenFromCloud = useCallback(
-    async (id: string): Promise<void> => {
-      setCloudBusy(true);
-      setCloudError(null);
-      try {
-        const record = await getNotebook(id);
-        applyWorkspaceDocument(parseWorkspace(record.content));
-        setCloudId(id);
-        setIsCloudOpen(false);
-      } catch (err) {
-        setCloudError(formatError(t, err, "app.errors.cloudOpenFailed"));
-      } finally {
-        setCloudBusy(false);
-      }
-    },
-    [applyWorkspaceDocument, t],
-  );
-
-  const handleDeleteFromCloud = useCallback(
-    async (id: string): Promise<void> => {
-      setCloudBusy(true);
-      setCloudError(null);
-      try {
-        await deleteNotebook(id);
-        if (cloudId === id) setCloudId(null);
-        await refreshCloudList();
-      } catch (err) {
-        setCloudError(formatError(t, err, "app.errors.cloudDeleteFailed"));
-      } finally {
-        setCloudBusy(false);
-      }
-    },
-    [cloudId, refreshCloudList, t],
-  );
+  const {
+    isCloudOpen,
+    setIsCloudOpen,
+    cloudList,
+    cloudId,
+    cloudBusy,
+    cloudError,
+    refreshCloudList,
+    handleSaveToCloud,
+    handleOpenFromCloud,
+    handleDeleteFromCloud,
+    detach: detachCloud,
+  } = useCloudNotebooks({
+    collectWorkspaceDocument,
+    applyWorkspaceDocument,
+    activeName: notebook.name,
+    t,
+  });
+  // Direct ref assignment during render keeps timing identical — the callback
+  // is only ever invoked from event handlers.
+  detachCloudRef.current = detachCloud;
 
   // Load the account's encrypted provider key on sign-in (#61). On a fresh
   // device (no local key) it populates Settings; otherwise it just marks
