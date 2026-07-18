@@ -76,3 +76,56 @@ jobs:
       - name: ty (type check)
         working-directory: engine
         run: uv run ty check
+
+  security:
+    name: Security (audits + secret scan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so gitleaks can scan every commit, not just HEAD.
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ADVISORY ONLY (does not fail CI): known transitive advisories exist
+      # today (shell-quote via concurrently; vite/ws/form-data via vitest and
+      # the vscode-extension build) that we can't fix from our own manifests.
+      # Watch this step's log; flip continue-on-error off once the tree is
+      # clean.
+      - name: pnpm audit (NON-BLOCKING — check the log for high/critical)
+        continue-on-error: true
+        run: pnpm audit --audit-level high
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: engine/uv.lock
+
+      # ADVISORY ONLY (does not fail CI): known transitive advisories exist
+      # today (idna, pillow, starlette). Same deal as pnpm audit above.
+      - name: pip-audit engine deps (NON-BLOCKING — check the log)
+        continue-on-error: true
+        working-directory: engine
+        run: |
+          uv export --no-dev --no-emit-project --format requirements-txt -o /tmp/nbf-requirements.txt
+          uv tool run pip-audit -r /tmp/nbf-requirements.txt --disable-pip
+
+      - name: Gitleaks secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
