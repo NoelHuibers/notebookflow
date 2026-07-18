@@ -37,6 +37,10 @@ export interface CanvasLabels {
   renameHint: string;
   renameNode: string;
   nodeMetaTitle: string;
+  statusTitle: string; // "Status: {status}" — {status} = one of the runtime status labels
+  lastRunTitle: string; // "Last run: {duration}"
+  unresolvedRefsTitle: string; // "Unresolved input refs:\n{refs}"
+  unresolvedShort: string; // "unresolved: {refs}"
   // Node runtime status badges
   statusIdle: string;
   statusQueued: string;
@@ -56,6 +60,9 @@ export interface CanvasLabels {
   addInput: string;
   addOutput: string;
   portClickToEdit: string;
+  removePort: string; // "Remove {port}"
+  portSourceAria: string;
+  portVariableAria: string;
   // Node group (notebook container)
   expandNotebook: string;
   collapseNotebook: string;
@@ -95,6 +102,10 @@ export const defaultCanvasLabels: CanvasLabels = {
   renameHint: "Double-click to rename",
   renameNode: "Rename node",
   nodeMetaTitle: "Input file · output rows",
+  statusTitle: "Status: {status}",
+  lastRunTitle: "Last run: {duration}",
+  unresolvedRefsTitle: "Unresolved input refs:\n{refs}",
+  unresolvedShort: "unresolved: {refs}",
   statusIdle: "idle",
   statusQueued: "queued",
   statusRunning: "running",
@@ -111,6 +122,9 @@ export const defaultCanvasLabels: CanvasLabels = {
   addInput: "Add input",
   addOutput: "Add output",
   portClickToEdit: "Click to edit",
+  removePort: "Remove {port}",
+  portSourceAria: "Input source",
+  portVariableAria: "Output variable",
   expandNotebook: "Expand notebook",
   collapseNotebook: "Collapse notebook",
 };

@@ -788,6 +788,7 @@ function PortChip(props: PortChipProps): ReactElement {
 
 function SidePortLabel(props: PortChipProps): ReactElement {
   const { kind, value, dimmed, onEdit, onRemove } = props;
+  const labels = useCanvasLabels();
   return (
     <span style={{ ...portChipStyles.sidesChip, opacity: dimmed ? 0.4 : 1 }}>
       <span style={portChipStyles.sidesChipLabelRegion}>
@@ -807,8 +808,8 @@ function SidePortLabel(props: PortChipProps): ReactElement {
         <button
           type="button"
           className="nodrag nopan"
-          aria-label={`Remove ${value}`}
-          title={`Remove ${value}`}
+          aria-label={labels.removePort.replace("{port}", value)}
+          title={labels.removePort.replace("{port}", value)}
           onClick={onRemove}
           style={portChipStyles.sidesChipRemove}
         >

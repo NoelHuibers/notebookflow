@@ -7,8 +7,9 @@
  */
 
 import type { NotebookCell } from "@notebookflow/graph-canvas/sync";
-
+import { triggerDownload } from "./download";
 import type { NbOutput } from "./EngineClient";
+import { LocalizableError } from "./errors";
 
 export interface IpynbCell {
   cell_type: string;
@@ -47,10 +48,10 @@ export function parseNotebook(text: string): ParsedNotebook {
     doc = JSON.parse(text) as IpynbDoc;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "unknown error";
-    throw new Error(`Not valid JSON: ${message}`);
+    throw new LocalizableError("app.errors.notValidJson", { message });
   }
   if (!Array.isArray(doc.cells)) {
-    throw new Error("Not an nbformat document (missing `cells` array)");
+    throw new LocalizableError("app.errors.notNbformat");
   }
   const cells = doc.cells.map(toNotebookCell);
   return { cells, doc };
@@ -233,14 +234,8 @@ export function downloadNotebook(
 ): void {
   const json = serializeNotebook(cells, doc, outputsByCell);
   const blob = new Blob([json], { type: "application/x-ipynb+json" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename.endsWith(".ipynb") ? filename : `${filename}.ipynb`;
-  document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
-  URL.revokeObjectURL(url);
+  const name = filename.endsWith(".ipynb") ? filename : `${filename}.ipynb`;
+  triggerDownload(blob, name);
 }
 
 // Matches the first string literal passed to a common pandas reader (or a

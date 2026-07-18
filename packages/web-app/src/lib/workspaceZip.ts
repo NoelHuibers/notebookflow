@@ -1,9 +1,16 @@
 import JSZip from "jszip";
 
+import { triggerDownload } from "./download";
+
 /** One open file's serialized notebook, ready to drop into the zip. */
 export interface WorkspaceFile {
   name: string;
   json: string;
+}
+
+/** Normalize a workspace file name into its zip entry name. */
+export function zipEntryName(name: string): string {
+  return name.endsWith(".ipynb") ? name : `${name}.ipynb`;
 }
 
 /**
@@ -17,31 +24,15 @@ export async function downloadWorkspaceZip(
 ): Promise<void> {
   const zip = new JSZip();
   for (const file of files) {
-    const entry = file.name.endsWith(".ipynb") ? file.name : `${file.name}.ipynb`;
-    zip.file(entry, file.json);
+    zip.file(zipEntryName(file.name), file.json);
   }
   const blob = await zip.generateAsync({ type: "blob" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = zipName;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
+  triggerDownload(blob, zipName);
 }
 
 export function downloadWorkspaceDocument(
   content: string,
   filename = "workspace.notebookflow.json",
 ): void {
-  const blob = new Blob([content], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
+  triggerDownload(new Blob([content], { type: "application/json" }), filename);
 }

@@ -11,11 +11,9 @@
  */
 
 import type {
-  CanvasGroupPosition,
   CanvasLabels,
   GraphModel,
   NodeManifestDef,
-  NodeModel,
   RunSummary,
   RuntimeState,
   WireModel,
@@ -34,33 +32,17 @@ import {
 import type { CellPatch, NotebookCell } from "@notebookflow/graph-canvas/sync";
 import { SyncEngine } from "@notebookflow/graph-canvas/sync";
 import {
-  Cloud,
-  Command,
-  Download,
-  ExternalLink,
   FilePlus,
-  Keyboard,
-  MoreHorizontal,
   PanelBottom,
   PanelBottomClose,
   PanelLeftOpen,
   PanelRight,
   PanelRightClose,
-  Play,
-  RotateCcw,
-  Save,
-  Settings as SettingsIcon,
-  Sparkles,
   Upload,
-  Wand2,
-  Zap,
 } from "lucide-react";
-import type {
-  ReactElement,
-  KeyboardEvent as ReactKeyboardEvent,
-  PointerEvent as ReactPointerEvent,
-} from "react";
+import type { ReactElement } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppHeader } from "@/components/AppHeader";
 import { AskPalette } from "@/components/AskPalette";
 import { CanvasSidebar } from "@/components/CanvasSidebar";
 import { CellList } from "@/components/CellList";
@@ -69,12 +51,10 @@ import type { CellKind } from "@/components/CellToolbar";
 import { CellToolbar } from "@/components/CellToolbar";
 import { CloudNotebooksDialog } from "@/components/CloudNotebooksDialog";
 import { ComposeDialog } from "@/components/ComposeDialog";
-import { EngineStatus } from "@/components/EngineStatus";
 import { ExplanationPanel } from "@/components/ExplanationPanel";
 import { FileDropZone } from "@/components/FileDropZone";
 import { FilesRail } from "@/components/FilesRail";
 import { InspectorPanel } from "@/components/InspectorPanel";
-import { Wordmark } from "@/components/Logo";
 import { PaneDivider } from "@/components/PaneDivider";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { ShortcutsDialog } from "@/components/ShortcutsDialog";
@@ -82,8 +62,12 @@ import { TriggersDialog } from "@/components/TriggersDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { type CanvasSelectionSync, useCanvasSelectionSync } from "@/hooks/useCanvasSelectionSync";
+import { useCloudNotebooks } from "@/hooks/useCloudNotebooks";
+import { usePanelLayout } from "@/hooks/usePanelLayout";
+import { useWorkspaceExport } from "@/hooks/useWorkspaceExport";
+import { useWorkspaceFiles } from "@/hooks/useWorkspaceFiles";
 import { authClient, useSession } from "@/lib/auth-client";
-import { bootstrapNotebookFixtures } from "@/lib/bootstrap";
 import { applyCellPatch } from "@/lib/cellPatch";
 import type {
   AskAnswer,
@@ -95,212 +79,27 @@ import type {
   TriggerSpec,
 } from "@/lib/EngineClient";
 import { EngineClient } from "@/lib/EngineClient";
+import { formatError } from "@/lib/errors";
 import { buildGenerationStatus, renderEvent } from "@/lib/events";
-import { canSaveInPlace, pickSaveFileHandle, writeFileHandle } from "@/lib/fileSystemAccess";
+import { pickSaveFileHandle, writeFileHandle } from "@/lib/fileSystemAccess";
 import { useI18n } from "@/lib/i18n";
-import { openInJupyterLab } from "@/lib/jupyter";
 import type { IpynbDoc } from "@/lib/notebook";
-import {
-  extractOutputsByCell,
-  extractSourceFilename,
-  parseNotebook,
-  serializeNotebook,
-  toIpynbCell,
-} from "@/lib/notebook";
-import {
-  createNotebook,
-  deleteNotebook,
-  getNotebook,
-  listNotebooks,
-  type NotebookSummary,
-  type ParsedWorkspace,
-  parseWorkspace,
-  serializeWorkspace,
-  updateNotebook,
-  type WorkspaceUiState,
-} from "@/lib/notebooksApi";
+import { extractSourceFilename, serializeNotebook, toIpynbCell } from "@/lib/notebook";
 import { sortPalette } from "@/lib/palette";
-import { PANEL_STORAGE_KEY, readPanelLayout } from "@/lib/panels";
 import { buildPipelineDef, stripMarkerLine } from "@/lib/pipeline";
 import { deleteProviderKey, getProviderKey, saveProviderKey } from "@/lib/providerKeyApi";
 import type { UserSettings } from "@/lib/settings";
 import { applyTheme, readUserSettings, SETTINGS_STORAGE_KEY } from "@/lib/settings";
-import { clamp, cn, isTypingTarget } from "@/lib/utils";
-import {
-  applyPatchToSnapshot,
-  resolveWorkspacePatchTarget,
-  type WorkspacePatchLookup,
-} from "@/lib/workspacePatches";
-import {
-  downloadWorkspaceDocument,
-  downloadWorkspaceZip,
-  type WorkspaceFile,
-} from "@/lib/workspaceZip";
-import type {
-  CellOutputsByCell,
-  DragState,
-  FileSnapshot,
-  LoadedNotebook,
-  OpenFileMeta,
-} from "@/types/workspace";
+import { cn, isTypingTarget } from "@/lib/utils";
+import { shiftOutputsAfterDelete, shiftOutputsAfterInsert } from "@/lib/workspaceFiles";
+import { applyPatchToSnapshot, resolveWorkspacePatchTarget } from "@/lib/workspacePatches";
 
 const EMPTY_GRAPH: GraphModel = { nodes: {}, groups: {}, wires: {} };
-const DIVIDER_SIZE_PX = 10;
 // Cell-patches inspector panel is a dev-only debugging view.
 const DEV_MODE = import.meta.env.DEV;
 
-const MIN_NOTEBOOK_WIDTH_PX = 280;
-const MIN_CANVAS_BODY_WIDTH_PX = 320;
-const MIN_SIDEBAR_WIDTH_PX = 240;
-const DEFAULT_SIDEBAR_WIDTH_PX = 288;
-const MIN_MAIN_HEIGHT_PX = 220;
-const MIN_INSPECTOR_HEIGHT_PX = 140;
-const DEFAULT_NOTEBOOK_RATIO = 50;
-const DEFAULT_MAIN_RATIO = 72;
-const KEYBOARD_RESIZE_STEP = 2;
-const DEFAULT_JUPYTER_URL = "http://localhost:8888";
-
-const JUPYTER_URL: string = (() => {
-  const raw = import.meta.env.VITE_NOTEBOOKFLOW_JUPYTER_URL;
-  // Undefined env var -> use default. Explicitly empty string -> opt-out, no button.
-  if (raw === undefined) {
-    return DEFAULT_JUPYTER_URL;
-  }
-  return raw.trim();
-})();
-
-function makeFileId(): string {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `file-${String(Math.floor(performance.now() * 1000))}`;
-}
-
-function uniqueUntitledNotebookName(files: OpenFileMeta[]): string {
-  const used = new Set(files.map((file) => file.name));
-  if (!used.has("Untitled.ipynb")) {
-    return "Untitled.ipynb";
-  }
-  let suffix = 2;
-  let candidate = `Untitled ${String(suffix)}.ipynb`;
-  while (used.has(candidate)) {
-    suffix += 1;
-    candidate = `Untitled ${String(suffix)}.ipynb`;
-  }
-  return candidate;
-}
-
-function createBlankNotebook(name: string): LoadedNotebook {
-  const cells: NotebookCell[] = [{ cellType: "code", source: "" }];
-  return {
-    name,
-    cells,
-    doc: {
-      cells: cells.map((cell) => toIpynbCell(cell)),
-      metadata: {
-        kernelspec: { display_name: "Python 3", language: "python", name: "python3" },
-      },
-      nbformat: 4,
-      nbformat_minor: 5,
-    },
-  };
-}
-
-interface InitialWorkspaceFile {
-  id: string;
-  notebook: LoadedNotebook;
-}
-
-function createInitialWorkspaceFiles(): InitialWorkspaceFile[] {
-  const notebooks = bootstrapNotebookFixtures();
-  if (notebooks.length === 0) {
-    return [{ id: makeFileId(), notebook: createBlankNotebook("preprocessing.ipynb") }];
-  }
-  return notebooks.map((notebook) => ({ id: makeFileId(), notebook }));
-}
-
-function firstInitialWorkspaceFile(files: InitialWorkspaceFile[]): InitialWorkspaceFile {
-  const first = files[0];
-  if (first === undefined) {
-    throw new Error("Initial workspace must contain at least one notebook");
-  }
-  return first;
-}
-
-function findNodeForCellIndex(
-  graph: GraphModel,
-  groupId: string,
-  cellIndex: number,
-): NodeModel | null {
-  for (const node of Object.values(graph.nodes)) {
-    if (node.groupId === groupId && node.cellIndices.includes(cellIndex)) {
-      return node;
-    }
-  }
-  return null;
-}
-
-function shiftOutputsAfterDelete(
-  outputs: CellOutputsByCell,
-  deletedIndex: number,
-): CellOutputsByCell {
-  const next: CellOutputsByCell = {};
-  for (const [key, value] of Object.entries(outputs)) {
-    const index = Number(key);
-    if (!Number.isInteger(index) || index === deletedIndex) {
-      continue;
-    }
-    next[index > deletedIndex ? index - 1 : index] = value;
-  }
-  return next;
-}
-
-function shiftOutputsAfterInsert(
-  outputs: CellOutputsByCell,
-  insertedIndex: number,
-): CellOutputsByCell {
-  const next: CellOutputsByCell = {};
-  for (const [key, value] of Object.entries(outputs)) {
-    const index = Number(key);
-    if (!Number.isInteger(index)) {
-      continue;
-    }
-    next[index >= insertedIndex ? index + 1 : index] = value;
-  }
-  return next;
-}
-
-function isLikelyWorkspaceFilename(name: string): boolean {
-  const lower = name.toLowerCase();
-  return (
-    lower.endsWith(".notebookflow.json") ||
-    lower.endsWith(".notebookflow") ||
-    lower.endsWith(".nfw")
-  );
-}
-
-function clampOptionalRatio(value: number | undefined, fallback: number): number {
-  return value === undefined ? fallback : clamp(value, 0, 100);
-}
-
-function clampSidebarWidthValue(value: number, host: HTMLElement | null): number {
-  if (host === null) {
-    return Math.max(MIN_SIDEBAR_WIDTH_PX, value);
-  }
-  const maxWidth = Math.max(
-    host.clientWidth - MIN_CANVAS_BODY_WIDTH_PX - DIVIDER_SIZE_PX,
-    MIN_SIDEBAR_WIDTH_PX,
-  );
-  return clamp(value, MIN_SIDEBAR_WIDTH_PX, maxWidth);
-}
-
 export function App(): ReactElement {
   const { t } = useI18n();
-  const initialWorkspaceRef = useRef<InitialWorkspaceFile[] | null>(null);
-  if (initialWorkspaceRef.current === null) {
-    initialWorkspaceRef.current = createInitialWorkspaceFiles();
-  }
-  const initialWorkspace = initialWorkspaceRef.current;
-  const firstInitialFile = firstInitialWorkspaceFile(initialWorkspace);
   // Translate the shared graph-canvas labels from the `canvas` namespace. Keys
   // mirror graph-canvas's CanvasLabels, so iterate the defaults and look each up.
   const canvasLabels = useMemo<CanvasLabels>(() => {
@@ -310,57 +109,39 @@ export function App(): ReactElement {
     }
     return out;
   }, [t]);
-  const [notebook, setNotebook] = useState<LoadedNotebook>(() => firstInitialFile.notebook);
-  // Multi-file workspace. The active file's live content is `notebook`; other
-  // open files freeze into snapshotsRef until switched back to.
-  const [openFiles, setOpenFiles] = useState<OpenFileMeta[]>(() => [
-    ...initialWorkspace.map(({ id, notebook: fileNotebook }) => ({
-      id,
-      name: fileNotebook.name,
-    })),
-  ]);
-  const [activeFileId, setActiveFileId] = useState<string>(() => firstInitialFile.id);
-  const [workspaceRevision, setWorkspaceRevision] = useState(0);
-  // Files list and code cells collapse independently — close files without
-  // closing code, and vice-versa.
-  const [isFilesCollapsed, setIsFilesCollapsed] = useState(() => readPanelLayout().filesCollapsed);
-  const [isCellsCollapsed, setIsCellsCollapsed] = useState(() => readPanelLayout().cellsCollapsed);
-  const snapshotsRef = useRef<Map<string, FileSnapshot>>(
-    new Map(
-      initialWorkspace.slice(1).map(({ id, notebook: fileNotebook }) => [
-        id,
-        {
-          cells: fileNotebook.cells,
-          doc: fileNotebook.doc,
-          baseline: fileNotebook.cells.map((cell) => cell.source),
-          fileHandle: null,
-          outputsByCell: extractOutputsByCell(fileNotebook.doc),
-        },
-      ]),
-    ),
-  );
-  const workspacePatchLookupRef = useRef<WorkspacePatchLookup>({
-    openFiles,
-    activeFileId,
-    activeNotebookName: notebook.name,
-    snapshots: snapshotsRef.current,
-  });
-  workspacePatchLookupRef.current = {
-    openFiles,
-    activeFileId,
-    activeNotebookName: notebook.name,
-    snapshots: snapshotsRef.current,
-  };
+  // Panel layout (split ratios, collapse flags, divider drag handlers, style
+  // memos) lives in usePanelLayout; App consumes what its JSX/callbacks need.
+  const {
+    isFilesCollapsed,
+    setIsFilesCollapsed,
+    isCellsCollapsed,
+    setIsCellsCollapsed,
+    isInspectorCollapsed,
+    setIsInspectorCollapsed,
+    isSidebarCollapsed,
+    setIsSidebarCollapsed,
+    showMinimap,
+    setShowMinimap,
+    contentRef,
+    topPaneRef,
+    canvasPaneRef,
+    canvasBodyRef,
+    contentStyle,
+    topPaneStyle,
+    canvasBodyStyle,
+    toggleSidebar,
+    handleVerticalDividerPointerDown,
+    handleVerticalDividerKeyDown,
+    handleHorizontalDividerPointerDown,
+    handleHorizontalDividerKeyDown,
+    handleSidebarDividerPointerDown,
+    handleSidebarDividerKeyDown,
+    applyWorkspaceUi,
+    collectUiState,
+  } = usePanelLayout();
   const [graph, setGraph] = useState<GraphModel>(EMPTY_GRAPH);
-  const [selected, setSelected] = useState<NodeModel | null>(null);
   const [patches, setPatches] = useState<CellPatch[]>([]);
   const [events, setEvents] = useState<EngineEvent[]>([]);
-  const [outputsByCell, setOutputsByCell] = useState<CellOutputsByCell>(() =>
-    extractOutputsByCell(firstInitialFile.notebook.doc),
-  );
-  const [canvasGroupPositionsByFileId, setCanvasGroupPositionsByFileId] = useState<
-    Record<string, CanvasGroupPosition>
-  >({});
   const [runtimeByNode, setRuntimeByNode] = useState<Record<string, RuntimeState>>({});
   // Post-run output row counts, keyed by node id. Merged with the static
   // filename map (derived from cell source) into the canvas meta line.
@@ -369,16 +150,8 @@ export function App(): ReactElement {
   const [streamingNotebookPath, setStreamingNotebookPath] = useState<string | null>(null);
   const [timingByNode, setTimingByNode] = useState<Record<string, number>>({});
   const [runSummary, setRunSummary] = useState<RunSummary | null>(null);
-  const [focusedCellIndex, setFocusedCellIndex] = useState<number | null>(null);
-  const [cellNavigationTarget, setCellNavigationTarget] = useState<{
-    index: number;
-    revision: number;
-  } | null>(null);
   const [cellClipboard, setCellClipboard] = useState<NotebookCell | null>(null);
   const [isAddCellMenuOpen, setIsAddCellMenuOpen] = useState(false);
-  const [baselineSources, setBaselineSources] = useState<string[]>(() =>
-    firstInitialFile.notebook.cells.map((cell) => cell.source),
-  );
   const [definedByCell, setDefinedByCell] = useState<string[][]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -393,14 +166,6 @@ export function App(): ReactElement {
   const [paletteTagFilter, setPaletteTagFilter] = useState<Set<NodeManifestDef["tag"]>>(
     () => new Set(),
   );
-  const [notebookRatio, setNotebookRatio] = useState(DEFAULT_NOTEBOOK_RATIO);
-  const [mainRatio, setMainRatio] = useState(DEFAULT_MAIN_RATIO);
-  // Right sidebar: selected node + node palette (Alt+A or the canvas toggle).
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(
-    () => readPanelLayout().sidebarCollapsed,
-  );
-  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH_PX);
-  const lastOpenSidebarWidthRef = useRef(DEFAULT_SIDEBAR_WIDTH_PX);
   const [settings, setSettings] = useState<UserSettings>(() => readUserSettings());
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [explanation, setExplanation] = useState<PipelineExplanation | null>(null);
@@ -415,25 +180,13 @@ export function App(): ReactElement {
   const [isAsking, setIsAsking] = useState(false);
   const [askResult, setAskResult] = useState<AskAnswer | null>(null);
   const [askError, setAskError] = useState<string | null>(null);
-  const [isOverflowOpen, setIsOverflowOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
-  const [showMinimap, setShowMinimap] = useState(false);
-  const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(
-    () => readPanelLayout().inspectorCollapsed,
-  );
   const [isTriggersOpen, setIsTriggersOpen] = useState(false);
-  // Cloud notebooks (#60): the signed-in user's saved workspaces in Turso.
-  const [isCloudOpen, setIsCloudOpen] = useState(false);
-  const [cloudList, setCloudList] = useState<NotebookSummary[]>([]);
-  const [cloudId, setCloudId] = useState<string | null>(null);
-  const [cloudBusy, setCloudBusy] = useState(false);
-  const [cloudError, setCloudError] = useState<string | null>(null);
   // Server-side encrypted provider key (#61): "saved" once one exists in the account.
   const [accountKeyState, setAccountKeyState] = useState<"none" | "saved" | "saving">("none");
   const [triggers, setTriggers] = useState<TriggerSpec[]>([]);
   const [triggersError, setTriggersError] = useState<string | null>(null);
   const [isLoadingTriggers, setIsLoadingTriggers] = useState(false);
-  const [dragState, setDragState] = useState<DragState | null>(null);
   const engineRef = useRef<SyncEngine | null>(null);
   const clientRef = useRef<EngineClient>(
     settings.engineUrlOverride === ""
@@ -529,136 +282,114 @@ export function App(): ReactElement {
     return () => {
       document.removeEventListener("keydown", onKeyDown);
     };
+  }, [setIsSidebarCollapsed, setShowMinimap]);
+
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+
+  // Selection state lives in useCanvasSelectionSync, which must run after
+  // useWorkspaceFiles (it needs openFiles / switchToFile) — the callbacks
+  // below reach it through a stable ref assigned once the hook has returned.
+  const selectionRef = useRef<CanvasSelectionSync | null>(null);
+
+  // Reset the ephemeral run / edit UI to a clean slate. Used whenever the
+  // active document changes (open a file, switch files, apply a draft).
+  const resetTransient = useCallback((): void => {
+    selectionRef.current?.reset();
+    setPatches([]);
+    setEvents([]);
+    setRuntimeByNode({});
+    setTimingByNode({});
+    setRowsByNode({});
+    setRunSummary(null);
+    setStreamingCellIndex(null);
+    setStreamingNotebookPath(null);
+    setExplanation(null);
+    setSaveStatus("idle");
   }, []);
+
+  const handleNotebookCreated = useCallback((): void => {
+    selectionRef.current?.setFocusedCellIndex(0);
+  }, []);
+
+  // Detach the cloud linkage when the workspace is replaced wholesale. The
+  // cloud state lives in useCloudNotebooks, which must run after
+  // useWorkspaceFiles (it needs collectWorkspaceDocument) — bridge the cycle
+  // with a stable ref that is (re)assigned once the cloud hook has returned.
+  const detachCloudRef = useRef<() => void>(() => {});
+  const handleWorkspaceReplaced = useCallback((): void => {
+    detachCloudRef.current();
+  }, []);
+
+  // Multi-file workspace core: the active notebook, open-file rail, frozen
+  // snapshots, per-cell outputs, canvas group positions, and file operations.
+  const {
+    notebook,
+    setNotebook,
+    openFiles,
+    activeFileId,
+    activeFileIdRef,
+    openFilesKey,
+    setWorkspaceRevision,
+    setBaselineSources,
+    snapshotsRef,
+    workspacePatchLookupRef,
+    fileHandleRef,
+    outputsByCell,
+    replaceActiveOutputsByCell,
+    updateOutputsForFile,
+    updateOutputsForNotebookPath,
+    clearOutputsForOpenFiles,
+    canvasGroupPositions,
+    canvasGroupPositionsByFileId,
+    handleGroupPositionChange,
+    cellsByPath,
+    applyWorkspaceDocument,
+    switchToFile,
+    handleFile,
+    handleCreateNotebook,
+    closeFile,
+    triggerOpenFile,
+    isDirty,
+  } = useWorkspaceFiles({
+    onDocumentChange: resetTransient,
+    onNotebookCreated: handleNotebookCreated,
+    applyUi: applyWorkspaceUi,
+    onError: setError,
+    onWorkspaceReplaced: handleWorkspaceReplaced,
+    t,
+  });
+
+  // Canvas <-> notebook selection sync: the selected node, focused cell, and
+  // scroll-to-cell navigation target.
+  const handleRevealCells = useCallback((): void => {
+    setIsCellsCollapsed(false);
+  }, [setIsCellsCollapsed]);
+  const selection = useCanvasSelectionSync({
+    graph,
+    activeName: notebook.name,
+    openFiles,
+    switchToFile,
+    onRevealCells: handleRevealCells,
+  });
+  const {
+    selected,
+    setSelected,
+    focusedCellIndex,
+    setFocusedCellIndex,
+    cellNavigationTarget,
+    handleFocusCell,
+    handleNodeSelect,
+  } = selection;
+  // Direct ref assignment during render keeps timing identical — the ref is
+  // only read from event handlers.
+  selectionRef.current = selection;
 
   // Selecting a node should surface its inspector in the right sidebar.
   useEffect(() => {
     if (selected !== null) {
       setIsSidebarCollapsed(false);
     }
-  }, [selected]);
-  const fileHandleRef = useRef<FileSystemFileHandle | null>(null);
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
-  const contentRef = useRef<HTMLDivElement | null>(null);
-  const topPaneRef = useRef<HTMLDivElement | null>(null);
-  const canvasPaneRef = useRef<HTMLDivElement | null>(null);
-  const canvasBodyRef = useRef<HTMLDivElement | null>(null);
-  const activeFileIdRef = useRef(activeFileId);
-  const openFilesRef = useRef(openFiles);
-  const outputsByCellRef = useRef(outputsByCell);
-  activeFileIdRef.current = activeFileId;
-  openFilesRef.current = openFiles;
-  outputsByCellRef.current = outputsByCell;
-
-  const replaceActiveOutputsByCell = useCallback((next: CellOutputsByCell): void => {
-    outputsByCellRef.current = next;
-    setOutputsByCell(next);
-  }, []);
-
-  const updateOutputsForFile = useCallback(
-    (fileId: string, update: (current: CellOutputsByCell) => CellOutputsByCell): void => {
-      if (fileId === activeFileIdRef.current) {
-        setOutputsByCell((current) => {
-          const next = update(current);
-          outputsByCellRef.current = next;
-          return next;
-        });
-        return;
-      }
-      const snapshot = snapshotsRef.current.get(fileId);
-      if (snapshot === undefined) {
-        return;
-      }
-      snapshotsRef.current.set(fileId, {
-        ...snapshot,
-        outputsByCell: update(snapshot.outputsByCell),
-      });
-    },
-    [],
-  );
-
-  const updateOutputsForNotebookPath = useCallback(
-    (notebookPath: string, update: (current: CellOutputsByCell) => CellOutputsByCell): void => {
-      const file = openFilesRef.current.find((candidate) => candidate.name === notebookPath);
-      if (file === undefined) {
-        return;
-      }
-      updateOutputsForFile(file.id, update);
-    },
-    [updateOutputsForFile],
-  );
-
-  const clearOutputsForOpenFiles = useCallback((): void => {
-    for (const file of openFilesRef.current) {
-      if (file.id === activeFileIdRef.current) {
-        continue;
-      }
-      const snapshot = snapshotsRef.current.get(file.id);
-      if (snapshot !== undefined) {
-        snapshotsRef.current.set(file.id, { ...snapshot, outputsByCell: {} });
-      }
-    }
-    replaceActiveOutputsByCell({});
-  }, [replaceActiveOutputsByCell]);
-
-  const canvasGroupPositions = useMemo<Record<string, CanvasGroupPosition>>(() => {
-    const positions: Record<string, CanvasGroupPosition> = {};
-    for (const file of openFiles) {
-      const position = canvasGroupPositionsByFileId[file.id];
-      if (position === undefined) {
-        continue;
-      }
-      positions[file.id === activeFileId ? notebook.name : file.name] = position;
-    }
-    return positions;
-  }, [openFiles, activeFileId, notebook.name, canvasGroupPositionsByFileId]);
-
-  const handleGroupPositionChange = useCallback(
-    (groupId: string, position: CanvasGroupPosition) => {
-      const activeFile = openFilesRef.current.find(
-        (candidate) => candidate.id === activeFileIdRef.current,
-      );
-      const file =
-        groupId === notebook.name && activeFile !== undefined
-          ? activeFile
-          : openFilesRef.current.find((candidate) => candidate.name === groupId);
-      if (file === undefined) {
-        return;
-      }
-      setCanvasGroupPositionsByFileId((current) => {
-        const previous = current[file.id];
-        if (previous?.x === position.x && previous.y === position.y) {
-          return current;
-        }
-        return { ...current, [file.id]: position };
-      });
-    },
-    [notebook.name],
-  );
-
-  // Cells of every open file, keyed by notebook path (= file name). The active
-  // file is live; inactive files come from their frozen snapshots. Drives both
-  // the workspace ingest and the composed pipeline's per-node source lookup.
-  const cellsByPath = useMemo<Map<string, NotebookCell[]>>(() => {
-    void workspaceRevision;
-    const map = new Map<string, NotebookCell[]>();
-    for (const file of openFiles) {
-      if (file.id === activeFileId) {
-        map.set(file.name, notebook.cells);
-      } else {
-        const snap = snapshotsRef.current.get(file.id);
-        if (snap !== undefined) {
-          map.set(file.name, snap.cells);
-        }
-      }
-    }
-    return map;
-    // A rename of the active file flows through openFiles, so it's covered here.
-  }, [openFiles, activeFileId, notebook.cells, workspaceRevision]);
-
-  // Identity of the open-file set; changes only when a file is opened/closed,
-  // not on edits or switches.
-  const openFilesKey = openFiles.map((f) => f.id).join("|");
+  }, [selected, setIsSidebarCollapsed]);
 
   // Construct the SyncEngine for the workspace. Re-created when the set of open
   // files changes so closed notebooks drop out of the union graph; the ingest
@@ -704,53 +435,6 @@ export function App(): ReactElement {
     }
   }, [openFiles, cellsByPath]);
 
-  // Keep the Files rail label in sync when the active notebook is renamed
-  // (e.g. applying a Compose draft swaps in a new filename).
-  useEffect(() => {
-    setOpenFiles((prev) =>
-      prev.map((f) =>
-        f.id === activeFileId && f.name !== notebook.name ? { ...f, name: notebook.name } : f,
-      ),
-    );
-  }, [notebook.name, activeFileId]);
-
-  useEffect(() => {
-    setSelected((current) => (current === null ? null : (graph.nodes[current.id] ?? null)));
-  }, [graph]);
-
-  const selectedCellIndexForActiveNotebook = useMemo(() => {
-    if (selected === null || selected.groupId !== notebook.name) {
-      return null;
-    }
-    return selected.cellIndices[0] ?? null;
-  }, [notebook.name, selected]);
-
-  useEffect(() => {
-    if (selectedCellIndexForActiveNotebook !== null) {
-      setFocusedCellIndex(selectedCellIndexForActiveNotebook);
-    }
-  }, [selectedCellIndexForActiveNotebook]);
-
-  // Persist panel collapse state so reloads keep the user's layout.
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    try {
-      window.localStorage.setItem(
-        PANEL_STORAGE_KEY,
-        JSON.stringify({
-          filesCollapsed: isFilesCollapsed,
-          cellsCollapsed: isCellsCollapsed,
-          inspectorCollapsed: isInspectorCollapsed,
-          sidebarCollapsed: isSidebarCollapsed,
-        }),
-      );
-    } catch {
-      // Quota / disabled storage -- silently keep working in-memory.
-    }
-  }, [isFilesCollapsed, isCellsCollapsed, isInspectorCollapsed, isSidebarCollapsed]);
-
   // Persist Settings dialog state (engine URL override + theme) and apply the
   // theme to the <html> element. "system" tracks prefers-color-scheme.
   useEffect(() => {
@@ -764,243 +448,6 @@ export function App(): ReactElement {
       // best-effort persistence
     }
   }, [settings]);
-
-  // Reset the ephemeral run / edit UI to a clean slate. Used whenever the
-  // active document changes (open a file, switch files, apply a draft).
-  const resetTransient = useCallback((): void => {
-    setSelected(null);
-    setPatches([]);
-    setEvents([]);
-    setRuntimeByNode({});
-    setTimingByNode({});
-    setRowsByNode({});
-    setRunSummary(null);
-    setStreamingCellIndex(null);
-    setStreamingNotebookPath(null);
-    setFocusedCellIndex(null);
-    setCellNavigationTarget(null);
-    setExplanation(null);
-    setSaveStatus("idle");
-  }, []);
-
-  const applyWorkspaceUi = useCallback((ui: WorkspaceUiState | undefined): void => {
-    if (ui === undefined) {
-      return;
-    }
-    setNotebookRatio((current) => clampOptionalRatio(ui.notebookRatio, current));
-    setMainRatio((current) => clampOptionalRatio(ui.mainRatio, current));
-    if (typeof ui.sidebarWidth === "number") {
-      const nextSidebarWidth = clampSidebarWidthValue(
-        ui.sidebarWidth,
-        canvasBodyRef.current ?? canvasPaneRef.current,
-      );
-      setSidebarWidth(nextSidebarWidth);
-      lastOpenSidebarWidthRef.current = nextSidebarWidth;
-    }
-    if (typeof ui.filesCollapsed === "boolean") {
-      setIsFilesCollapsed(ui.filesCollapsed);
-    }
-    if (typeof ui.cellsCollapsed === "boolean") {
-      setIsCellsCollapsed(ui.cellsCollapsed);
-    }
-    if (typeof ui.inspectorCollapsed === "boolean") {
-      setIsInspectorCollapsed(ui.inspectorCollapsed);
-    }
-    if (typeof ui.sidebarCollapsed === "boolean") {
-      setIsSidebarCollapsed(ui.sidebarCollapsed);
-    }
-    if (typeof ui.showMinimap === "boolean") {
-      setShowMinimap(ui.showMinimap);
-    }
-  }, []);
-
-  const applyWorkspaceDocument = useCallback(
-    (workspace: ParsedWorkspace): void => {
-      const parsed = workspace.files.map((file) => ({
-        id: makeFileId(),
-        name: file.name,
-        ...parseNotebook(file.json),
-      }));
-      const first = parsed[0];
-      if (first === undefined) {
-        throw new Error(t("app.errors.workspaceEmpty"));
-      }
-      const active =
-        workspace.activeFileName === undefined
-          ? first
-          : (parsed.find((file) => file.name === workspace.activeFileName) ?? first);
-      snapshotsRef.current.clear();
-      for (const file of parsed) {
-        if (file.id === active.id) {
-          continue;
-        }
-        snapshotsRef.current.set(file.id, {
-          cells: file.cells,
-          doc: file.doc,
-          baseline: file.cells.map((cell) => cell.source),
-          fileHandle: null,
-          outputsByCell: extractOutputsByCell(file.doc),
-        });
-      }
-      const positionsByFileId: Record<string, CanvasGroupPosition> = {};
-      const savedPositions = workspace.layout?.groupPositions ?? {};
-      for (const file of parsed) {
-        const position = savedPositions[file.name];
-        if (position !== undefined) {
-          positionsByFileId[file.id] = position;
-        }
-      }
-      setCanvasGroupPositionsByFileId(positionsByFileId);
-      setOpenFiles(parsed.map((file) => ({ id: file.id, name: file.name })));
-      setActiveFileId(active.id);
-      setNotebook({ name: active.name, cells: active.cells, doc: active.doc });
-      setBaselineSources(active.cells.map((cell) => cell.source));
-      fileHandleRef.current = null;
-      replaceActiveOutputsByCell(extractOutputsByCell(active.doc));
-      resetTransient();
-      applyWorkspaceUi(workspace.ui);
-    },
-    [applyWorkspaceUi, replaceActiveOutputsByCell, resetTransient, t],
-  );
-
-  // Freeze the active file's working state so it can be restored when the
-  // user switches back to it.
-  const snapshotActive = useCallback((): void => {
-    snapshotsRef.current.set(activeFileId, {
-      cells: notebook.cells,
-      doc: notebook.doc,
-      baseline: baselineSources,
-      fileHandle: fileHandleRef.current,
-      outputsByCell: outputsByCellRef.current,
-    });
-  }, [activeFileId, notebook, baselineSources]);
-
-  const switchToFile = useCallback(
-    (targetId: string): void => {
-      if (targetId === activeFileId) {
-        return;
-      }
-      snapshotActive();
-      const snap = snapshotsRef.current.get(targetId);
-      const targetName = openFiles.find((f) => f.id === targetId)?.name ?? "notebook.ipynb";
-      if (snap !== undefined) {
-        setNotebook({ name: targetName, cells: snap.cells, doc: snap.doc });
-        setBaselineSources(snap.baseline);
-        fileHandleRef.current = snap.fileHandle;
-        replaceActiveOutputsByCell(snap.outputsByCell);
-        snapshotsRef.current.delete(targetId);
-      }
-      resetTransient();
-      setActiveFileId(targetId);
-    },
-    [activeFileId, openFiles, snapshotActive, resetTransient, replaceActiveOutputsByCell],
-  );
-
-  const handleFile = useCallback(
-    (text: string, name: string): void => {
-      if (isLikelyWorkspaceFilename(name)) {
-        try {
-          applyWorkspaceDocument(parseWorkspace(text));
-          setCloudId(null);
-          setError(null);
-          return;
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : t("app.errors.unknown");
-          setError(t("app.errors.loadFailed", { name, message }));
-          return;
-        }
-      }
-      try {
-        const parsed = parseNotebook(text);
-        // Re-opening an already-open file just switches to it.
-        const existing = openFiles.find((f) => f.name === name);
-        if (existing !== undefined) {
-          switchToFile(existing.id);
-          return;
-        }
-        snapshotActive();
-        const id = makeFileId();
-        setOpenFiles((prev) => [...prev, { id, name }]);
-        setActiveFileId(id);
-        setNotebook({ name, cells: parsed.cells, doc: parsed.doc });
-        setBaselineSources(parsed.cells.map((cell) => cell.source));
-        fileHandleRef.current = null;
-        replaceActiveOutputsByCell(extractOutputsByCell(parsed.doc));
-        resetTransient();
-        setError(null);
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : t("app.errors.unknown");
-        setError(t("app.errors.loadFailed", { name, message }));
-      }
-    },
-    [
-      applyWorkspaceDocument,
-      openFiles,
-      snapshotActive,
-      switchToFile,
-      resetTransient,
-      replaceActiveOutputsByCell,
-      t,
-    ],
-  );
-
-  const handleCreateNotebook = useCallback((): void => {
-    snapshotActive();
-    const next = createBlankNotebook(uniqueUntitledNotebookName(openFiles));
-    const id = makeFileId();
-    setOpenFiles((prev) => [...prev, { id, name: next.name }]);
-    setActiveFileId(id);
-    setNotebook(next);
-    setBaselineSources(next.cells.map((cell) => cell.source));
-    fileHandleRef.current = null;
-    replaceActiveOutputsByCell({});
-    resetTransient();
-    setFocusedCellIndex(0);
-    setError(null);
-  }, [openFiles, snapshotActive, resetTransient, replaceActiveOutputsByCell]);
-
-  const closeFile = useCallback(
-    (id: string): void => {
-      if (openFiles.length <= 1) {
-        return; // keep at least one file open
-      }
-      if (id === activeFileId) {
-        const idx = openFiles.findIndex((f) => f.id === id);
-        const neighbor = openFiles[idx + 1] ?? openFiles[idx - 1];
-        if (neighbor !== undefined) {
-          switchToFile(neighbor.id);
-        }
-      }
-      snapshotsRef.current.delete(id);
-      setCanvasGroupPositionsByFileId((current) => {
-        if (current[id] === undefined) {
-          return current;
-        }
-        const next = { ...current };
-        delete next[id];
-        return next;
-      });
-      setOpenFiles((prev) => prev.filter((f) => f.id !== id));
-    },
-    [openFiles, activeFileId, switchToFile],
-  );
-
-  // Open the OS file picker and load the chosen notebook into the workspace.
-  const triggerOpenFile = useCallback((): void => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".ipynb,.notebookflow.json,.notebookflow,.nfw,application/json";
-    input.onchange = (): void => {
-      const file = input.files?.[0];
-      if (file === undefined) {
-        return;
-      }
-      void file.text().then((text) => {
-        handleFile(text, file.name);
-      });
-    };
-    input.click();
-  }, [handleFile]);
 
   // Uploaded data files (CSVs etc.) a pipeline can read by name. Lives on the
   // engine; the Files panel lists them.
@@ -1025,7 +472,7 @@ export function App(): ReactElement {
         .uploadDataFile(file)
         .then(() => refreshDataFiles())
         .catch((err: unknown) => {
-          setError(err instanceof Error ? err.message : t("app.errors.uploadFailed"));
+          setError(formatError(t, err, "app.errors.uploadFailed"));
         });
     };
     input.click();
@@ -1036,7 +483,7 @@ export function App(): ReactElement {
         .deleteDataFile(name)
         .then(() => refreshDataFiles())
         .catch((err: unknown) => {
-          setError(err instanceof Error ? err.message : t("app.errors.deleteFailed"));
+          setError(formatError(t, err, "app.errors.deleteFailed"));
         });
     },
     [refreshDataFiles, t],
@@ -1048,57 +495,25 @@ export function App(): ReactElement {
     void refreshDataFiles();
   }, [refreshDataFiles, settings.engineUrlOverride]);
 
-  const handleCellsChange = useCallback((next: NotebookCell[]): void => {
-    setNotebook((prev) => ({ ...prev, cells: next }));
-  }, []);
-
-  const handleFocusCell = useCallback(
-    (index: number): void => {
-      setFocusedCellIndex(index);
-      setSelected(findNodeForCellIndex(graph, notebook.name, index));
+  const handleCellsChange = useCallback(
+    (next: NotebookCell[]): void => {
+      setNotebook((prev) => ({ ...prev, cells: next }));
     },
-    [graph, notebook.name],
+    [setNotebook],
   );
 
-  const handleNodeSelect = useCallback(
-    (node: NodeModel | null): void => {
-      if (node === null) {
-        setSelected(null);
-        return;
-      }
-
-      const targetFile =
-        node.groupId === notebook.name
-          ? null
-          : openFiles.find((file) => file.name === node.groupId);
-      if (targetFile !== null && targetFile !== undefined) {
-        switchToFile(targetFile.id);
-      }
-
-      setSelected(node);
-      const cellIndex = node.cellIndices[0] ?? null;
-      const canNavigateToCell = node.groupId === notebook.name || targetFile !== undefined;
-      if (cellIndex !== null && canNavigateToCell) {
-        setIsCellsCollapsed(false);
-        setFocusedCellIndex(cellIndex);
-        setCellNavigationTarget((current) => ({
-          index: cellIndex,
-          revision: (current?.revision ?? 0) + 1,
-        }));
-      }
+  const handleAddCell = useCallback(
+    (kind: CellKind): void => {
+      const fresh: NotebookCell = { cellType: kind, source: "" };
+      setNotebook((prev) => {
+        const nextCells = [...prev.cells, fresh];
+        const nextDocCells = [...prev.doc.cells, toIpynbCell(fresh)];
+        setFocusedCellIndex(nextCells.length - 1);
+        return { ...prev, cells: nextCells, doc: { ...prev.doc, cells: nextDocCells } };
+      });
     },
-    [notebook.name, openFiles, switchToFile],
+    [setNotebook, setFocusedCellIndex],
   );
-
-  const handleAddCell = useCallback((kind: CellKind): void => {
-    const fresh: NotebookCell = { cellType: kind, source: "" };
-    setNotebook((prev) => {
-      const nextCells = [...prev.cells, fresh];
-      const nextDocCells = [...prev.doc.cells, toIpynbCell(fresh)];
-      setFocusedCellIndex(nextCells.length - 1);
-      return { ...prev, cells: nextCells, doc: { ...prev.doc, cells: nextDocCells } };
-    });
-  }, []);
 
   const handleDeleteFocusedCell = useCallback((): void => {
     if (focusedCellIndex === null) {
@@ -1118,7 +533,13 @@ export function App(): ReactElement {
       shiftOutputsAfterDelete(current, focusedCellIndex),
     );
     setFocusedCellIndex(null);
-  }, [focusedCellIndex, updateOutputsForFile]);
+  }, [
+    focusedCellIndex,
+    updateOutputsForFile,
+    activeFileIdRef.current,
+    setNotebook,
+    setFocusedCellIndex,
+  ]);
 
   const handleCopyFocusedCell = useCallback((): void => {
     if (focusedCellIndex === null) {
@@ -1151,7 +572,15 @@ export function App(): ReactElement {
       shiftOutputsAfterInsert(current, insertAt),
     );
     setFocusedCellIndex(insertAt);
-  }, [cellClipboard, focusedCellIndex, notebook.cells.length, updateOutputsForFile]);
+  }, [
+    cellClipboard,
+    focusedCellIndex,
+    notebook.cells.length,
+    updateOutputsForFile,
+    activeFileIdRef.current,
+    setNotebook,
+    setFocusedCellIndex,
+  ]);
 
   const handleChangeFocusedCellType = useCallback(
     (kind: CellKind): void => {
@@ -1181,7 +610,7 @@ export function App(): ReactElement {
         });
       }
     },
-    [focusedCellIndex, updateOutputsForFile],
+    [focusedCellIndex, updateOutputsForFile, setNotebook, activeFileIdRef.current],
   );
 
   const handleRename = useCallback((nodeId: string, nextName: string): void => {
@@ -1245,11 +674,11 @@ export function App(): ReactElement {
         notebookPath: targetPath,
         insertAtCellIndex,
         onSynthesisError: (err: unknown) => {
-          const message = err instanceof Error ? err.message : t("app.errors.unknown");
+          const message = formatError(t, err);
           setError(t("app.errors.addNodeNamed", { name: manifest.name, message }));
         },
       }).catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : t("app.errors.unknown");
+        const message = formatError(t, err);
         setError(t("app.errors.addNodeNamed", { name: manifest.name, message }));
       });
     },
@@ -1282,7 +711,7 @@ export function App(): ReactElement {
           Date.now(),
         )
         .catch((err: unknown) => {
-          setError(err instanceof Error ? err.message : t("app.errors.addNode"));
+          setError(formatError(t, err, "app.errors.addNode"));
         });
     },
     [notebook.name, t],
@@ -1348,7 +777,7 @@ export function App(): ReactElement {
         if (cancelled) {
           return;
         }
-        const message = err instanceof Error ? err.message : t("app.errors.unknown");
+        const message = formatError(t, err);
         setPaletteError(t("app.errors.loadRegistry", { message }));
       });
     return () => {
@@ -1436,7 +865,7 @@ export function App(): ReactElement {
       const result = await clientRef.current.explainPipeline(pipelineDef);
       setExplanation(result);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : t("app.errors.unknown");
+      const message = formatError(t, err);
       setError(t("app.errors.explainPipeline", { message }));
     } finally {
       setIsExplaining(false);
@@ -1454,7 +883,7 @@ export function App(): ReactElement {
       const result = await clientRef.current.proposePipeline(composePrompt.trim());
       setComposeResult(result);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : t("app.errors.unknown");
+      const message = formatError(t, err);
       setComposeError(t("app.errors.composePipeline", { message }));
     } finally {
       setIsComposing(false);
@@ -1468,7 +897,7 @@ export function App(): ReactElement {
       const list = await clientRef.current.listTriggers();
       setTriggers(list);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : t("app.errors.unknown");
+      const message = formatError(t, err);
       setTriggersError(t("app.errors.loadTriggers", { message }));
     } finally {
       setIsLoadingTriggers(false);
@@ -1497,7 +926,7 @@ export function App(): ReactElement {
       const result = await clientRef.current.askLLM(askPrompt.trim(), pipeline);
       setAskResult(result);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : t("app.errors.unknown");
+      const message = formatError(t, err);
       setAskError(t("app.errors.reachEngine", { message }));
     } finally {
       setIsAsking(false);
@@ -1541,7 +970,16 @@ export function App(): ReactElement {
     setComposeResult(null);
     setComposePrompt("");
     setComposeError(null);
-  }, [composeResult, notebook.doc, replaceActiveOutputsByCell]);
+  }, [
+    composeResult,
+    notebook.doc,
+    replaceActiveOutputsByCell,
+    setBaselineSources,
+    setNotebook,
+    fileHandleRef,
+    setSelected,
+    setFocusedCellIndex,
+  ]);
 
   const manifestById = useMemo(
     () => new Map(paletteNodes.map((manifest) => [manifest.id, manifest] as const)),
@@ -1663,7 +1101,7 @@ export function App(): ReactElement {
         setConfigStatus(buildGenerationStatus(readNotebookflowMetadata(metadata)));
       })
       .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : t("app.errors.unknown");
+        const message = formatError(t, err);
         setConfigError(t("app.errors.updateNode", { name: selected.name, message }));
       })
       .finally(() => {
@@ -1751,7 +1189,7 @@ export function App(): ReactElement {
         },
       })
       .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : t("app.errors.unknown");
+        const message = formatError(t, err);
         setError(t("app.errors.runFailed", { message }));
       })
       .finally(() => {
@@ -1761,142 +1199,44 @@ export function App(): ReactElement {
       });
   }, [isRunning, clearOutputsForOpenFiles, pipelineDef, graph, updateOutputsForNotebookPath, t]);
 
-  // Export every open file's .ipynb as one zip — a single "Download" is
-  // ambiguous once the workspace spans multiple files. The active file carries
-  // its live cells + run outputs; inactive files come from their snapshots.
-  // Serialize every open file's .ipynb — shared by zip export and cloud save.
-  const collectWorkspaceFiles = useCallback((): WorkspaceFile[] => {
-    return openFiles.map((file) => {
-      if (file.id === activeFileId) {
-        return {
-          name: notebook.name,
-          json: serializeNotebook(notebook.cells, notebook.doc, outputsByCell),
-        };
-      }
-      const snap = snapshotsRef.current.get(file.id);
-      return {
-        name: file.name,
-        json: serializeNotebook(
-          snap?.cells ?? [],
-          snap?.doc ?? notebook.doc,
-          snap?.outputsByCell ?? {},
-        ),
-      };
+  // Workspace export: collect the full workspace document and the two
+  // download handlers. The cloud save below reuses collectWorkspaceDocument.
+  const { collectWorkspaceDocument, handleDownloadAll, handleDownloadWorkspace } =
+    useWorkspaceExport({
+      openFiles,
+      activeFileId,
+      notebook,
+      outputsByCell,
+      snapshotsRef,
+      canvasGroupPositionsByFileId,
+      setBaselineSources,
+      collectUiState,
+      t,
+      setError,
     });
-  }, [openFiles, activeFileId, notebook, outputsByCell]);
-
-  const collectWorkspaceDocument = useCallback((): ParsedWorkspace => {
-    const groupPositions: Record<string, CanvasGroupPosition> = {};
-    for (const file of openFiles) {
-      const position = canvasGroupPositionsByFileId[file.id];
-      if (position !== undefined) {
-        groupPositions[file.id === activeFileId ? notebook.name : file.name] = position;
-      }
-    }
-    return {
-      files: collectWorkspaceFiles(),
-      activeFileName: notebook.name,
-      layout: {
-        groupPositions,
-      },
-      ui: {
-        notebookRatio,
-        mainRatio,
-        filesCollapsed: isFilesCollapsed,
-        cellsCollapsed: isCellsCollapsed,
-        inspectorCollapsed: isInspectorCollapsed,
-        sidebarCollapsed: isSidebarCollapsed,
-        sidebarWidth,
-        showMinimap,
-      },
-    };
-  }, [
-    openFiles,
-    activeFileId,
-    notebook.name,
-    canvasGroupPositionsByFileId,
-    collectWorkspaceFiles,
-    notebookRatio,
-    mainRatio,
-    isFilesCollapsed,
-    isCellsCollapsed,
-    isInspectorCollapsed,
-    isSidebarCollapsed,
-    sidebarWidth,
-    showMinimap,
-  ]);
-
-  const handleDownloadAll = useCallback(async (): Promise<void> => {
-    await downloadWorkspaceZip(collectWorkspaceFiles());
-    setBaselineSources(notebook.cells.map((cell) => cell.source));
-  }, [collectWorkspaceFiles, notebook.cells]);
-
-  const handleDownloadWorkspace = useCallback((): void => {
-    downloadWorkspaceDocument(serializeWorkspace(collectWorkspaceDocument()));
-    setBaselineSources(notebook.cells.map((cell) => cell.source));
-  }, [collectWorkspaceDocument, notebook.cells]);
 
   // --- Cloud notebooks (#60): save/open/delete the user's workspaces in Turso.
-  const refreshCloudList = useCallback(async (): Promise<void> => {
-    try {
-      setCloudList(await listNotebooks());
-    } catch {
-      // signed out / offline — leave the list as-is.
-    }
-  }, []);
-
-  const handleSaveToCloud = useCallback(async (): Promise<void> => {
-    setCloudBusy(true);
-    setCloudError(null);
-    try {
-      const content = serializeWorkspace(collectWorkspaceDocument());
-      if (cloudId !== null) {
-        await updateNotebook(cloudId, { name: notebook.name, content });
-      } else {
-        setCloudId((await createNotebook(notebook.name, content)).id);
-      }
-      await refreshCloudList();
-    } catch (err) {
-      setCloudError(err instanceof Error ? err.message : t("app.errors.cloudSaveFailed"));
-    } finally {
-      setCloudBusy(false);
-    }
-  }, [collectWorkspaceDocument, cloudId, notebook.name, refreshCloudList, t]);
-
-  const handleOpenFromCloud = useCallback(
-    async (id: string): Promise<void> => {
-      setCloudBusy(true);
-      setCloudError(null);
-      try {
-        const record = await getNotebook(id);
-        applyWorkspaceDocument(parseWorkspace(record.content));
-        setCloudId(id);
-        setIsCloudOpen(false);
-      } catch (err) {
-        setCloudError(err instanceof Error ? err.message : t("app.errors.cloudOpenFailed"));
-      } finally {
-        setCloudBusy(false);
-      }
-    },
-    [applyWorkspaceDocument, t],
-  );
-
-  const handleDeleteFromCloud = useCallback(
-    async (id: string): Promise<void> => {
-      setCloudBusy(true);
-      setCloudError(null);
-      try {
-        await deleteNotebook(id);
-        if (cloudId === id) setCloudId(null);
-        await refreshCloudList();
-      } catch (err) {
-        setCloudError(err instanceof Error ? err.message : t("app.errors.cloudDeleteFailed"));
-      } finally {
-        setCloudBusy(false);
-      }
-    },
-    [cloudId, refreshCloudList, t],
-  );
+  const {
+    isCloudOpen,
+    setIsCloudOpen,
+    cloudList,
+    cloudId,
+    cloudBusy,
+    cloudError,
+    refreshCloudList,
+    handleSaveToCloud,
+    handleOpenFromCloud,
+    handleDeleteFromCloud,
+    detach: detachCloud,
+  } = useCloudNotebooks({
+    collectWorkspaceDocument,
+    applyWorkspaceDocument,
+    activeName: notebook.name,
+    t,
+  });
+  // Direct ref assignment during render keeps timing identical — the callback
+  // is only ever invoked from event handlers.
+  detachCloudRef.current = detachCloud;
 
   // Load the account's encrypted provider key on sign-in (#61). On a fresh
   // device (no local key) it populates Settings; otherwise it just marks
@@ -1989,10 +1329,10 @@ export function App(): ReactElement {
       if (err instanceof Error && err.name === "AbortError") {
         return;
       }
-      const message = err instanceof Error ? err.message : t("app.errors.unknown");
+      const message = formatError(t, err);
       setError(t("app.errors.saveFailed", { message }));
     }
-  }, [notebook, outputsByCell, t]);
+  }, [notebook, outputsByCell, t, setBaselineSources, fileHandleRef.current, fileHandleRef]);
 
   const handleReingest = useCallback((): void => {
     const engine = engineRef.current;
@@ -2003,455 +1343,50 @@ export function App(): ReactElement {
     void engine.ingestNotebook(notebook.name, notebook.cells, Date.now());
   }, [notebook]);
 
-  const isDirty = useMemo(() => {
-    if (notebook.cells.length !== baselineSources.length) {
-      return true;
-    }
-    for (let i = 0; i < notebook.cells.length; i++) {
-      if (notebook.cells[i]?.source !== baselineSources[i]) {
-        return true;
-      }
-    }
-    return false;
-  }, [notebook.cells, baselineSources]);
-  const clampNotebookRatio = useCallback((value: number): number => {
-    const host = topPaneRef.current;
-    if (host === null) {
-      return clamp(value, 0, 100);
-    }
-    const availableWidth = Math.max(host.clientWidth - DIVIDER_SIZE_PX, 1);
-    const minRatio = Math.min((MIN_NOTEBOOK_WIDTH_PX / availableWidth) * 100, 50);
-    const maxRatio = Math.max(100 - (MIN_CANVAS_BODY_WIDTH_PX / availableWidth) * 100, 50);
-    return clamp(value, minRatio, maxRatio);
-  }, []);
-
-  const clampMainRatio = useCallback((value: number): number => {
-    const host = contentRef.current;
-    if (host === null) {
-      return clamp(value, 0, 100);
-    }
-    const availableHeight = Math.max(host.clientHeight - DIVIDER_SIZE_PX, 1);
-    const minRatio = Math.min((MIN_MAIN_HEIGHT_PX / availableHeight) * 100, 50);
-    const maxRatio = Math.max(100 - (MIN_INSPECTOR_HEIGHT_PX / availableHeight) * 100, 50);
-    return clamp(value, minRatio, maxRatio);
-  }, []);
-
-  useEffect(() => {
-    if (dragState === null) {
-      return;
-    }
-
-    const handlePointerMove = (event: PointerEvent): void => {
-      if (dragState.axis === "vertical") {
-        const host = topPaneRef.current;
-        if (host === null) {
-          return;
-        }
-        const availableWidth = Math.max(host.clientWidth - DIVIDER_SIZE_PX, 1);
-        const deltaRatio = ((event.clientX - dragState.startCoord) / availableWidth) * 100;
-        setNotebookRatio(clampNotebookRatio(dragState.startRatio + deltaRatio));
-        return;
-      }
-
-      const host = contentRef.current;
-      if (host === null) {
-        return;
-      }
-      const availableHeight = Math.max(host.clientHeight - DIVIDER_SIZE_PX, 1);
-      const deltaRatio = ((event.clientY - dragState.startCoord) / availableHeight) * 100;
-      setMainRatio(clampMainRatio(dragState.startRatio + deltaRatio));
-    };
-
-    const handlePointerUp = (): void => {
-      setDragState(null);
-    };
-
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = dragState.axis === "vertical" ? "col-resize" : "row-resize";
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-
-    return () => {
-      document.body.style.userSelect = "";
-      document.body.style.cursor = "";
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-    };
-  }, [clampMainRatio, clampNotebookRatio, dragState]);
-
-  const handleVerticalDividerPointerDown = useCallback(
-    (event: ReactPointerEvent<HTMLButtonElement>): void => {
-      event.preventDefault();
-      setDragState({
-        axis: "vertical",
-        startCoord: event.clientX,
-        startRatio: notebookRatio,
-      });
-    },
-    [notebookRatio],
-  );
-
-  const handleHorizontalDividerPointerDown = useCallback(
-    (event: ReactPointerEvent<HTMLButtonElement>): void => {
-      event.preventDefault();
-      setDragState({
-        axis: "horizontal",
-        startCoord: event.clientY,
-        startRatio: mainRatio,
-      });
-    },
-    [mainRatio],
-  );
-
-  const handleVerticalDividerKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLButtonElement>): void => {
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        setNotebookRatio((current) => clampNotebookRatio(current - KEYBOARD_RESIZE_STEP));
-      } else if (event.key === "ArrowRight") {
-        event.preventDefault();
-        setNotebookRatio((current) => clampNotebookRatio(current + KEYBOARD_RESIZE_STEP));
-      } else if (event.key === "Home") {
-        event.preventDefault();
-        setNotebookRatio(() => clampNotebookRatio(0));
-      } else if (event.key === "End") {
-        event.preventDefault();
-        setNotebookRatio(() => clampNotebookRatio(100));
-      }
-    },
-    [clampNotebookRatio],
-  );
-
-  const handleHorizontalDividerKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLButtonElement>): void => {
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setMainRatio((current) => clampMainRatio(current - KEYBOARD_RESIZE_STEP));
-      } else if (event.key === "ArrowDown") {
-        event.preventDefault();
-        setMainRatio((current) => clampMainRatio(current + KEYBOARD_RESIZE_STEP));
-      } else if (event.key === "Home") {
-        event.preventDefault();
-        setMainRatio(() => clampMainRatio(0));
-      } else if (event.key === "End") {
-        event.preventDefault();
-        setMainRatio(() => clampMainRatio(100));
-      }
-    },
-    [clampMainRatio],
-  );
-
-  const [sidebarDragState, setSidebarDragState] = useState<{
-    startCoord: number;
-    startWidth: number;
-  } | null>(null);
-
-  const clampSidebarWidth = useCallback((value: number): number => {
-    return clampSidebarWidthValue(value, canvasBodyRef.current ?? canvasPaneRef.current);
-  }, []);
-
-  const toggleSidebar = useCallback((): void => {
-    setIsSidebarCollapsed((collapsed) => {
-      if (collapsed) {
-        setSidebarWidth(clampSidebarWidth(lastOpenSidebarWidthRef.current));
-        return false;
-      }
-      lastOpenSidebarWidthRef.current = sidebarWidth;
-      return true;
-    });
-  }, [clampSidebarWidth, sidebarWidth]);
-
-  useEffect(() => {
-    if (!isSidebarCollapsed) {
-      lastOpenSidebarWidthRef.current = sidebarWidth;
-    }
-  }, [isSidebarCollapsed, sidebarWidth]);
-
-  useEffect(() => {
-    if (sidebarDragState === null) {
-      return;
-    }
-
-    const handlePointerMove = (event: PointerEvent): void => {
-      const nextWidth = sidebarDragState.startWidth - (event.clientX - sidebarDragState.startCoord);
-      setSidebarWidth(clampSidebarWidth(nextWidth));
-    };
-
-    const handlePointerUp = (): void => {
-      setSidebarDragState(null);
-    };
-
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = "col-resize";
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-
-    return () => {
-      document.body.style.userSelect = "";
-      document.body.style.cursor = "";
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-    };
-  }, [clampSidebarWidth, sidebarDragState]);
-
-  useEffect(() => {
-    const handleResize = (): void => {
-      if (!isSidebarCollapsed) {
-        setSidebarWidth((current) => clampSidebarWidth(current));
-      }
-    };
-
-    window.addEventListener("resize", handleResize);
-    return () => {
-      window.removeEventListener("resize", handleResize);
-    };
-  }, [clampSidebarWidth, isSidebarCollapsed]);
-
-  const handleSidebarDividerPointerDown = useCallback(
-    (event: ReactPointerEvent<HTMLButtonElement>): void => {
-      event.preventDefault();
-      setSidebarDragState({ startCoord: event.clientX, startWidth: sidebarWidth });
-    },
-    [sidebarWidth],
-  );
-
-  const handleSidebarDividerKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLButtonElement>): void => {
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        setSidebarWidth((current) => clampSidebarWidth(current + KEYBOARD_RESIZE_STEP * 8));
-      } else if (event.key === "ArrowRight") {
-        event.preventDefault();
-        setSidebarWidth((current) => clampSidebarWidth(current - KEYBOARD_RESIZE_STEP * 8));
-      }
-    },
-    [clampSidebarWidth],
-  );
-
-  const contentStyle = useMemo(
-    () =>
-      isInspectorCollapsed
-        ? { gridTemplateRows: "minmax(0, 1fr)" }
-        : {
-            gridTemplateRows: `minmax(${MIN_MAIN_HEIGHT_PX}px, ${mainRatio}%) ${DIVIDER_SIZE_PX}px minmax(${MIN_INSPECTOR_HEIGHT_PX}px, calc(${100 - mainRatio}% - ${DIVIDER_SIZE_PX}px))`,
-          },
-    [isInspectorCollapsed, mainRatio],
-  );
-
-  const topPaneStyle = useMemo(
-    () =>
-      isCellsCollapsed
-        ? // Code collapsed: a slim strip (wide enough for the expand button)
-          // plus the canvas.
-          { gridTemplateColumns: `2.25rem minmax(${MIN_CANVAS_BODY_WIDTH_PX}px, 1fr)` }
-        : {
-            gridTemplateColumns: `minmax(${MIN_NOTEBOOK_WIDTH_PX}px, ${notebookRatio}%) ${DIVIDER_SIZE_PX}px minmax(${MIN_CANVAS_BODY_WIDTH_PX}px, calc(${100 - notebookRatio}% - ${DIVIDER_SIZE_PX}px))`,
-          },
-    [isCellsCollapsed, notebookRatio],
-  );
-
-  const canvasBodyStyle = useMemo(
-    () =>
-      isSidebarCollapsed
-        ? { gridTemplateColumns: "minmax(0, 1fr)" }
-        : {
-            gridTemplateColumns: `minmax(0, 1fr) ${DIVIDER_SIZE_PX}px ${sidebarWidth}px`,
-          },
-    [isSidebarCollapsed, sidebarWidth],
-  );
-
   return (
     <FileDropZone onFile={handleFile}>
       <div className="flex h-screen overflow-hidden flex-col bg-background text-foreground font-sans">
-        <header className="flex items-center gap-3 border-b bg-card px-4 py-2.5">
-          <Wordmark />
-          <EngineStatus client={clientRef.current} />
-          <div className="ml-auto flex items-center gap-2">
-            {canSaveInPlace && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  void handleSave();
-                }}
-                disabled={saveStatus === "saving"}
-                title={
-                  fileHandleRef.current === null
-                    ? t("app.toolbar.saveTitleFirst")
-                    : t("app.toolbar.saveTitleAgain")
-                }
-              >
-                <Save className="mr-1.5 size-3.5" />
-                {saveStatus === "saving"
-                  ? t("app.toolbar.saving")
-                  : saveStatus === "saved"
-                    ? t("app.toolbar.saved")
-                    : t("app.toolbar.save")}
-              </Button>
-            )}
-            {session.data && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setIsCloudOpen(true);
-                  void refreshCloudList();
-                }}
-                title={t("app.toolbar.cloudTitle")}
-              >
-                <Cloud className="mr-1.5 size-3.5" />
-                {t("app.toolbar.cloud")}
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setIsTriggersOpen(true);
-              }}
-              title={t("app.toolbar.triggersTitle")}
-            >
-              <Zap className="mr-1.5 size-3.5" />
-              {t("app.toolbar.triggers")}
-              {triggers.length > 0 && (
-                <Badge variant="outline" className="ml-2 px-1 font-mono text-[10px]">
-                  {triggers.length}
-                </Badge>
-              )}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                void handleExplain();
-              }}
-              disabled={isExplaining}
-              title={t("app.toolbar.explainTitle")}
-            >
-              <Sparkles className="mr-1.5 size-3.5" />
-              {isExplaining ? t("app.toolbar.explaining") : t("app.toolbar.explain")}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setIsComposeOpen(true);
-              }}
-              title={t("app.toolbar.composeTitle")}
-            >
-              <Wand2 className="mr-1.5 size-3.5" />
-              {t("app.toolbar.compose")}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setIsAskOpen(true);
-              }}
-              title={t("app.toolbar.askAiTitle")}
-            >
-              <Command className="mr-1.5 size-3.5" />
-              {t("app.toolbar.askAi")}
-              <Badge variant="outline" className="ml-2 px-1 font-mono text-[10px]">
-                ⌘K
-              </Badge>
-            </Button>
-            <Button variant="default" size="sm" onClick={handleRun} disabled={isRunning}>
-              <Play className="mr-1.5 size-3.5" />
-              {isRunning ? t("app.toolbar.running") : t("app.toolbar.runPipeline")}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="px-2"
-              title={t("app.toolbar.shortcutsTitle")}
-              aria-label={t("app.toolbar.shortcuts")}
-              onClick={() => {
-                setIsShortcutsOpen((open) => !open);
-              }}
-            >
-              <Keyboard className="size-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="px-2"
-              title={t("app.toolbar.settings")}
-              aria-label={t("app.toolbar.settings")}
-              onClick={() => {
-                setIsSettingsOpen((open) => !open);
-              }}
-            >
-              <SettingsIcon className="size-4" />
-            </Button>
-            <div className="relative">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="px-2"
-                onClick={() => {
-                  setIsOverflowOpen((open) => !open);
-                }}
-                title={t("app.toolbar.moreActions")}
-                aria-label={t("app.toolbar.moreActions")}
-              >
-                <MoreHorizontal className="size-3.5" />
-              </Button>
-              {isOverflowOpen && (
-                <div className="absolute right-0 top-full z-30 mt-1 w-52 rounded-md border bg-popover text-popover-foreground shadow-md">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleDownloadWorkspace();
-                      setIsOverflowOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/70"
-                  >
-                    <Download className="size-3.5" />
-                    {t("app.toolbar.downloadWorkspace")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleDownloadAll();
-                      setIsOverflowOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/70"
-                  >
-                    <Download className="size-3.5" />
-                    {t("app.toolbar.downloadAllZip")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleReingest();
-                      setIsOverflowOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/70"
-                  >
-                    <RotateCcw className="size-3.5" />
-                    {t("app.toolbar.reingest")}
-                  </button>
-                  {JUPYTER_URL !== "" && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        openInJupyterLab(JUPYTER_URL, notebook.name);
-                        setIsOverflowOpen(false);
-                      }}
-                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/70"
-                    >
-                      <ExternalLink className="size-3.5" />
-                      {t("app.toolbar.editInJupyter")}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </header>
+        <AppHeader
+          engineClient={clientRef.current}
+          saveStatus={saveStatus}
+          hasSaveTarget={fileHandleRef.current !== null}
+          onSave={() => {
+            void handleSave();
+          }}
+          isSignedIn={Boolean(session.data)}
+          onOpenCloud={() => {
+            setIsCloudOpen(true);
+            void refreshCloudList();
+          }}
+          triggersCount={triggers.length}
+          onOpenTriggers={() => {
+            setIsTriggersOpen(true);
+          }}
+          isExplaining={isExplaining}
+          onExplain={() => {
+            void handleExplain();
+          }}
+          onOpenCompose={() => {
+            setIsComposeOpen(true);
+          }}
+          onOpenAsk={() => {
+            setIsAskOpen(true);
+          }}
+          isRunning={isRunning}
+          onRun={handleRun}
+          onToggleShortcuts={() => {
+            setIsShortcutsOpen((open) => !open);
+          }}
+          onToggleSettings={() => {
+            setIsSettingsOpen((open) => !open);
+          }}
+          notebookName={notebook.name}
+          onDownloadWorkspace={handleDownloadWorkspace}
+          onDownloadAll={() => {
+            void handleDownloadAll();
+          }}
+          onReingest={handleReingest}
+        />
 
         {isSettingsOpen && (
           <SettingsDialog
