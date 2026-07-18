@@ -65,8 +65,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { usePanelLayout } from "@/hooks/usePanelLayout";
+import { useWorkspaceFiles } from "@/hooks/useWorkspaceFiles";
 import { authClient, useSession } from "@/lib/auth-client";
-import { bootstrapNotebookFixtures } from "@/lib/bootstrap";
 import { applyCellPatch } from "@/lib/cellPatch";
 import type {
   AskAnswer,
@@ -83,13 +83,7 @@ import { buildGenerationStatus, renderEvent } from "@/lib/events";
 import { pickSaveFileHandle, writeFileHandle } from "@/lib/fileSystemAccess";
 import { useI18n } from "@/lib/i18n";
 import type { IpynbDoc } from "@/lib/notebook";
-import {
-  extractOutputsByCell,
-  extractSourceFilename,
-  parseNotebook,
-  serializeNotebook,
-  toIpynbCell,
-} from "@/lib/notebook";
+import { extractSourceFilename, serializeNotebook, toIpynbCell } from "@/lib/notebook";
 import {
   createNotebook,
   deleteNotebook,
@@ -107,83 +101,17 @@ import { deleteProviderKey, getProviderKey, saveProviderKey } from "@/lib/provid
 import type { UserSettings } from "@/lib/settings";
 import { applyTheme, readUserSettings, SETTINGS_STORAGE_KEY } from "@/lib/settings";
 import { cn, isTypingTarget } from "@/lib/utils";
-import {
-  applyPatchToSnapshot,
-  resolveWorkspacePatchTarget,
-  type WorkspacePatchLookup,
-} from "@/lib/workspacePatches";
+import { shiftOutputsAfterDelete, shiftOutputsAfterInsert } from "@/lib/workspaceFiles";
+import { applyPatchToSnapshot, resolveWorkspacePatchTarget } from "@/lib/workspacePatches";
 import {
   downloadWorkspaceDocument,
   downloadWorkspaceZip,
   type WorkspaceFile,
 } from "@/lib/workspaceZip";
-import type {
-  CellOutputsByCell,
-  FileSnapshot,
-  LoadedNotebook,
-  OpenFileMeta,
-} from "@/types/workspace";
 
 const EMPTY_GRAPH: GraphModel = { nodes: {}, groups: {}, wires: {} };
 // Cell-patches inspector panel is a dev-only debugging view.
 const DEV_MODE = import.meta.env.DEV;
-
-function makeFileId(): string {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `file-${String(Math.floor(performance.now() * 1000))}`;
-}
-
-function uniqueUntitledNotebookName(files: OpenFileMeta[]): string {
-  const used = new Set(files.map((file) => file.name));
-  if (!used.has("Untitled.ipynb")) {
-    return "Untitled.ipynb";
-  }
-  let suffix = 2;
-  let candidate = `Untitled ${String(suffix)}.ipynb`;
-  while (used.has(candidate)) {
-    suffix += 1;
-    candidate = `Untitled ${String(suffix)}.ipynb`;
-  }
-  return candidate;
-}
-
-function createBlankNotebook(name: string): LoadedNotebook {
-  const cells: NotebookCell[] = [{ cellType: "code", source: "" }];
-  return {
-    name,
-    cells,
-    doc: {
-      cells: cells.map((cell) => toIpynbCell(cell)),
-      metadata: {
-        kernelspec: { display_name: "Python 3", language: "python", name: "python3" },
-      },
-      nbformat: 4,
-      nbformat_minor: 5,
-    },
-  };
-}
-
-interface InitialWorkspaceFile {
-  id: string;
-  notebook: LoadedNotebook;
-}
-
-function createInitialWorkspaceFiles(): InitialWorkspaceFile[] {
-  const notebooks = bootstrapNotebookFixtures();
-  if (notebooks.length === 0) {
-    return [{ id: makeFileId(), notebook: createBlankNotebook("preprocessing.ipynb") }];
-  }
-  return notebooks.map((notebook) => ({ id: makeFileId(), notebook }));
-}
-
-function firstInitialWorkspaceFile(files: InitialWorkspaceFile[]): InitialWorkspaceFile {
-  const first = files[0];
-  if (first === undefined) {
-    throw new Error("Initial workspace must contain at least one notebook");
-  }
-  return first;
-}
 
 function findNodeForCellIndex(
   graph: GraphModel,
@@ -198,53 +126,8 @@ function findNodeForCellIndex(
   return null;
 }
 
-function shiftOutputsAfterDelete(
-  outputs: CellOutputsByCell,
-  deletedIndex: number,
-): CellOutputsByCell {
-  const next: CellOutputsByCell = {};
-  for (const [key, value] of Object.entries(outputs)) {
-    const index = Number(key);
-    if (!Number.isInteger(index) || index === deletedIndex) {
-      continue;
-    }
-    next[index > deletedIndex ? index - 1 : index] = value;
-  }
-  return next;
-}
-
-function shiftOutputsAfterInsert(
-  outputs: CellOutputsByCell,
-  insertedIndex: number,
-): CellOutputsByCell {
-  const next: CellOutputsByCell = {};
-  for (const [key, value] of Object.entries(outputs)) {
-    const index = Number(key);
-    if (!Number.isInteger(index)) {
-      continue;
-    }
-    next[index >= insertedIndex ? index + 1 : index] = value;
-  }
-  return next;
-}
-
-function isLikelyWorkspaceFilename(name: string): boolean {
-  const lower = name.toLowerCase();
-  return (
-    lower.endsWith(".notebookflow.json") ||
-    lower.endsWith(".notebookflow") ||
-    lower.endsWith(".nfw")
-  );
-}
-
 export function App(): ReactElement {
   const { t } = useI18n();
-  const initialWorkspaceRef = useRef<InitialWorkspaceFile[] | null>(null);
-  if (initialWorkspaceRef.current === null) {
-    initialWorkspaceRef.current = createInitialWorkspaceFiles();
-  }
-  const initialWorkspace = initialWorkspaceRef.current;
-  const firstInitialFile = firstInitialWorkspaceFile(initialWorkspace);
   // Translate the shared graph-canvas labels from the `canvas` namespace. Keys
   // mirror graph-canvas's CanvasLabels, so iterate the defaults and look each up.
   const canvasLabels = useMemo<CanvasLabels>(() => {
@@ -254,17 +137,6 @@ export function App(): ReactElement {
     }
     return out;
   }, [t]);
-  const [notebook, setNotebook] = useState<LoadedNotebook>(() => firstInitialFile.notebook);
-  // Multi-file workspace. The active file's live content is `notebook`; other
-  // open files freeze into snapshotsRef until switched back to.
-  const [openFiles, setOpenFiles] = useState<OpenFileMeta[]>(() => [
-    ...initialWorkspace.map(({ id, notebook: fileNotebook }) => ({
-      id,
-      name: fileNotebook.name,
-    })),
-  ]);
-  const [activeFileId, setActiveFileId] = useState<string>(() => firstInitialFile.id);
-  const [workspaceRevision, setWorkspaceRevision] = useState(0);
   // Panel layout (split ratios, collapse flags, divider drag handlers, style
   // memos) lives in usePanelLayout; App consumes what its JSX/callbacks need.
   const {
@@ -295,42 +167,10 @@ export function App(): ReactElement {
     applyWorkspaceUi,
     collectUiState,
   } = usePanelLayout();
-  const snapshotsRef = useRef<Map<string, FileSnapshot>>(
-    new Map(
-      initialWorkspace.slice(1).map(({ id, notebook: fileNotebook }) => [
-        id,
-        {
-          cells: fileNotebook.cells,
-          doc: fileNotebook.doc,
-          baseline: fileNotebook.cells.map((cell) => cell.source),
-          fileHandle: null,
-          outputsByCell: extractOutputsByCell(fileNotebook.doc),
-        },
-      ]),
-    ),
-  );
-  const workspacePatchLookupRef = useRef<WorkspacePatchLookup>({
-    openFiles,
-    activeFileId,
-    activeNotebookName: notebook.name,
-    snapshots: snapshotsRef.current,
-  });
-  workspacePatchLookupRef.current = {
-    openFiles,
-    activeFileId,
-    activeNotebookName: notebook.name,
-    snapshots: snapshotsRef.current,
-  };
   const [graph, setGraph] = useState<GraphModel>(EMPTY_GRAPH);
   const [selected, setSelected] = useState<NodeModel | null>(null);
   const [patches, setPatches] = useState<CellPatch[]>([]);
   const [events, setEvents] = useState<EngineEvent[]>([]);
-  const [outputsByCell, setOutputsByCell] = useState<CellOutputsByCell>(() =>
-    extractOutputsByCell(firstInitialFile.notebook.doc),
-  );
-  const [canvasGroupPositionsByFileId, setCanvasGroupPositionsByFileId] = useState<
-    Record<string, CanvasGroupPosition>
-  >({});
   const [runtimeByNode, setRuntimeByNode] = useState<Record<string, RuntimeState>>({});
   // Post-run output row counts, keyed by node id. Merged with the static
   // filename map (derived from cell source) into the canvas meta line.
@@ -346,9 +186,6 @@ export function App(): ReactElement {
   } | null>(null);
   const [cellClipboard, setCellClipboard] = useState<NotebookCell | null>(null);
   const [isAddCellMenuOpen, setIsAddCellMenuOpen] = useState(false);
-  const [baselineSources, setBaselineSources] = useState<string[]>(() =>
-    firstInitialFile.notebook.cells.map((cell) => cell.source),
-  );
   const [definedByCell, setDefinedByCell] = useState<string[][]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -493,124 +330,72 @@ export function App(): ReactElement {
       setIsSidebarCollapsed(false);
     }
   }, [selected, setIsSidebarCollapsed]);
-  const fileHandleRef = useRef<FileSystemFileHandle | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
-  const activeFileIdRef = useRef(activeFileId);
-  const openFilesRef = useRef(openFiles);
-  const outputsByCellRef = useRef(outputsByCell);
-  activeFileIdRef.current = activeFileId;
-  openFilesRef.current = openFiles;
-  outputsByCellRef.current = outputsByCell;
 
-  const replaceActiveOutputsByCell = useCallback((next: CellOutputsByCell): void => {
-    outputsByCellRef.current = next;
-    setOutputsByCell(next);
+  // Reset the ephemeral run / edit UI to a clean slate. Used whenever the
+  // active document changes (open a file, switch files, apply a draft).
+  const resetTransient = useCallback((): void => {
+    setSelected(null);
+    setPatches([]);
+    setEvents([]);
+    setRuntimeByNode({});
+    setTimingByNode({});
+    setRowsByNode({});
+    setRunSummary(null);
+    setStreamingCellIndex(null);
+    setStreamingNotebookPath(null);
+    setFocusedCellIndex(null);
+    setCellNavigationTarget(null);
+    setExplanation(null);
+    setSaveStatus("idle");
   }, []);
 
-  const updateOutputsForFile = useCallback(
-    (fileId: string, update: (current: CellOutputsByCell) => CellOutputsByCell): void => {
-      if (fileId === activeFileIdRef.current) {
-        setOutputsByCell((current) => {
-          const next = update(current);
-          outputsByCellRef.current = next;
-          return next;
-        });
-        return;
-      }
-      const snapshot = snapshotsRef.current.get(fileId);
-      if (snapshot === undefined) {
-        return;
-      }
-      snapshotsRef.current.set(fileId, {
-        ...snapshot,
-        outputsByCell: update(snapshot.outputsByCell),
-      });
-    },
-    [],
-  );
+  const handleNotebookCreated = useCallback((): void => {
+    setFocusedCellIndex(0);
+  }, []);
 
-  const updateOutputsForNotebookPath = useCallback(
-    (notebookPath: string, update: (current: CellOutputsByCell) => CellOutputsByCell): void => {
-      const file = openFilesRef.current.find((candidate) => candidate.name === notebookPath);
-      if (file === undefined) {
-        return;
-      }
-      updateOutputsForFile(file.id, update);
-    },
-    [updateOutputsForFile],
-  );
+  const handleWorkspaceReplaced = useCallback((): void => {
+    setCloudId(null);
+  }, []);
 
-  const clearOutputsForOpenFiles = useCallback((): void => {
-    for (const file of openFilesRef.current) {
-      if (file.id === activeFileIdRef.current) {
-        continue;
-      }
-      const snapshot = snapshotsRef.current.get(file.id);
-      if (snapshot !== undefined) {
-        snapshotsRef.current.set(file.id, { ...snapshot, outputsByCell: {} });
-      }
-    }
-    replaceActiveOutputsByCell({});
-  }, [replaceActiveOutputsByCell]);
-
-  const canvasGroupPositions = useMemo<Record<string, CanvasGroupPosition>>(() => {
-    const positions: Record<string, CanvasGroupPosition> = {};
-    for (const file of openFiles) {
-      const position = canvasGroupPositionsByFileId[file.id];
-      if (position === undefined) {
-        continue;
-      }
-      positions[file.id === activeFileId ? notebook.name : file.name] = position;
-    }
-    return positions;
-  }, [openFiles, activeFileId, notebook.name, canvasGroupPositionsByFileId]);
-
-  const handleGroupPositionChange = useCallback(
-    (groupId: string, position: CanvasGroupPosition) => {
-      const activeFile = openFilesRef.current.find(
-        (candidate) => candidate.id === activeFileIdRef.current,
-      );
-      const file =
-        groupId === notebook.name && activeFile !== undefined
-          ? activeFile
-          : openFilesRef.current.find((candidate) => candidate.name === groupId);
-      if (file === undefined) {
-        return;
-      }
-      setCanvasGroupPositionsByFileId((current) => {
-        const previous = current[file.id];
-        if (previous?.x === position.x && previous.y === position.y) {
-          return current;
-        }
-        return { ...current, [file.id]: position };
-      });
-    },
-    [notebook.name],
-  );
-
-  // Cells of every open file, keyed by notebook path (= file name). The active
-  // file is live; inactive files come from their frozen snapshots. Drives both
-  // the workspace ingest and the composed pipeline's per-node source lookup.
-  const cellsByPath = useMemo<Map<string, NotebookCell[]>>(() => {
-    void workspaceRevision;
-    const map = new Map<string, NotebookCell[]>();
-    for (const file of openFiles) {
-      if (file.id === activeFileId) {
-        map.set(file.name, notebook.cells);
-      } else {
-        const snap = snapshotsRef.current.get(file.id);
-        if (snap !== undefined) {
-          map.set(file.name, snap.cells);
-        }
-      }
-    }
-    return map;
-    // A rename of the active file flows through openFiles, so it's covered here.
-  }, [openFiles, activeFileId, notebook.cells, workspaceRevision]);
-
-  // Identity of the open-file set; changes only when a file is opened/closed,
-  // not on edits or switches.
-  const openFilesKey = openFiles.map((f) => f.id).join("|");
+  // Multi-file workspace core: the active notebook, open-file rail, frozen
+  // snapshots, per-cell outputs, canvas group positions, and file operations.
+  const {
+    notebook,
+    setNotebook,
+    openFiles,
+    activeFileId,
+    activeFileIdRef,
+    openFilesKey,
+    setWorkspaceRevision,
+    setBaselineSources,
+    snapshotsRef,
+    workspacePatchLookupRef,
+    fileHandleRef,
+    outputsByCell,
+    replaceActiveOutputsByCell,
+    updateOutputsForFile,
+    updateOutputsForNotebookPath,
+    clearOutputsForOpenFiles,
+    canvasGroupPositions,
+    canvasGroupPositionsByFileId,
+    handleGroupPositionChange,
+    cellsByPath,
+    applyWorkspaceDocument,
+    switchToFile,
+    handleFile,
+    handleCreateNotebook,
+    closeFile,
+    triggerOpenFile,
+    isDirty,
+  } = useWorkspaceFiles({
+    onDocumentChange: resetTransient,
+    onNotebookCreated: handleNotebookCreated,
+    applyUi: applyWorkspaceUi,
+    onError: setError,
+    onWorkspaceReplaced: handleWorkspaceReplaced,
+    t,
+  });
 
   // Construct the SyncEngine for the workspace. Re-created when the set of open
   // files changes so closed notebooks drop out of the union graph; the ingest
@@ -656,16 +441,6 @@ export function App(): ReactElement {
     }
   }, [openFiles, cellsByPath]);
 
-  // Keep the Files rail label in sync when the active notebook is renamed
-  // (e.g. applying a Compose draft swaps in a new filename).
-  useEffect(() => {
-    setOpenFiles((prev) =>
-      prev.map((f) =>
-        f.id === activeFileId && f.name !== notebook.name ? { ...f, name: notebook.name } : f,
-      ),
-    );
-  }, [notebook.name, activeFileId]);
-
   useEffect(() => {
     setSelected((current) => (current === null ? null : (graph.nodes[current.id] ?? null)));
   }, [graph]);
@@ -696,215 +471,6 @@ export function App(): ReactElement {
       // best-effort persistence
     }
   }, [settings]);
-
-  // Reset the ephemeral run / edit UI to a clean slate. Used whenever the
-  // active document changes (open a file, switch files, apply a draft).
-  const resetTransient = useCallback((): void => {
-    setSelected(null);
-    setPatches([]);
-    setEvents([]);
-    setRuntimeByNode({});
-    setTimingByNode({});
-    setRowsByNode({});
-    setRunSummary(null);
-    setStreamingCellIndex(null);
-    setStreamingNotebookPath(null);
-    setFocusedCellIndex(null);
-    setCellNavigationTarget(null);
-    setExplanation(null);
-    setSaveStatus("idle");
-  }, []);
-
-  const applyWorkspaceDocument = useCallback(
-    (workspace: ParsedWorkspace): void => {
-      const parsed = workspace.files.map((file) => ({
-        id: makeFileId(),
-        name: file.name,
-        ...parseNotebook(file.json),
-      }));
-      const first = parsed[0];
-      if (first === undefined) {
-        throw new Error(t("app.errors.workspaceEmpty"));
-      }
-      const active =
-        workspace.activeFileName === undefined
-          ? first
-          : (parsed.find((file) => file.name === workspace.activeFileName) ?? first);
-      snapshotsRef.current.clear();
-      for (const file of parsed) {
-        if (file.id === active.id) {
-          continue;
-        }
-        snapshotsRef.current.set(file.id, {
-          cells: file.cells,
-          doc: file.doc,
-          baseline: file.cells.map((cell) => cell.source),
-          fileHandle: null,
-          outputsByCell: extractOutputsByCell(file.doc),
-        });
-      }
-      const positionsByFileId: Record<string, CanvasGroupPosition> = {};
-      const savedPositions = workspace.layout?.groupPositions ?? {};
-      for (const file of parsed) {
-        const position = savedPositions[file.name];
-        if (position !== undefined) {
-          positionsByFileId[file.id] = position;
-        }
-      }
-      setCanvasGroupPositionsByFileId(positionsByFileId);
-      setOpenFiles(parsed.map((file) => ({ id: file.id, name: file.name })));
-      setActiveFileId(active.id);
-      setNotebook({ name: active.name, cells: active.cells, doc: active.doc });
-      setBaselineSources(active.cells.map((cell) => cell.source));
-      fileHandleRef.current = null;
-      replaceActiveOutputsByCell(extractOutputsByCell(active.doc));
-      resetTransient();
-      applyWorkspaceUi(workspace.ui);
-    },
-    [applyWorkspaceUi, replaceActiveOutputsByCell, resetTransient, t],
-  );
-
-  // Freeze the active file's working state so it can be restored when the
-  // user switches back to it.
-  const snapshotActive = useCallback((): void => {
-    snapshotsRef.current.set(activeFileId, {
-      cells: notebook.cells,
-      doc: notebook.doc,
-      baseline: baselineSources,
-      fileHandle: fileHandleRef.current,
-      outputsByCell: outputsByCellRef.current,
-    });
-  }, [activeFileId, notebook, baselineSources]);
-
-  const switchToFile = useCallback(
-    (targetId: string): void => {
-      if (targetId === activeFileId) {
-        return;
-      }
-      snapshotActive();
-      const snap = snapshotsRef.current.get(targetId);
-      const targetName = openFiles.find((f) => f.id === targetId)?.name ?? "notebook.ipynb";
-      if (snap !== undefined) {
-        setNotebook({ name: targetName, cells: snap.cells, doc: snap.doc });
-        setBaselineSources(snap.baseline);
-        fileHandleRef.current = snap.fileHandle;
-        replaceActiveOutputsByCell(snap.outputsByCell);
-        snapshotsRef.current.delete(targetId);
-      }
-      resetTransient();
-      setActiveFileId(targetId);
-    },
-    [activeFileId, openFiles, snapshotActive, resetTransient, replaceActiveOutputsByCell],
-  );
-
-  const handleFile = useCallback(
-    (text: string, name: string): void => {
-      if (isLikelyWorkspaceFilename(name)) {
-        try {
-          applyWorkspaceDocument(parseWorkspace(text));
-          setCloudId(null);
-          setError(null);
-          return;
-        } catch (err: unknown) {
-          const message = formatError(t, err);
-          setError(t("app.errors.loadFailed", { name, message }));
-          return;
-        }
-      }
-      try {
-        const parsed = parseNotebook(text);
-        // Re-opening an already-open file just switches to it.
-        const existing = openFiles.find((f) => f.name === name);
-        if (existing !== undefined) {
-          switchToFile(existing.id);
-          return;
-        }
-        snapshotActive();
-        const id = makeFileId();
-        setOpenFiles((prev) => [...prev, { id, name }]);
-        setActiveFileId(id);
-        setNotebook({ name, cells: parsed.cells, doc: parsed.doc });
-        setBaselineSources(parsed.cells.map((cell) => cell.source));
-        fileHandleRef.current = null;
-        replaceActiveOutputsByCell(extractOutputsByCell(parsed.doc));
-        resetTransient();
-        setError(null);
-      } catch (err: unknown) {
-        const message = formatError(t, err);
-        setError(t("app.errors.loadFailed", { name, message }));
-      }
-    },
-    [
-      applyWorkspaceDocument,
-      openFiles,
-      snapshotActive,
-      switchToFile,
-      resetTransient,
-      replaceActiveOutputsByCell,
-      t,
-    ],
-  );
-
-  const handleCreateNotebook = useCallback((): void => {
-    snapshotActive();
-    const next = createBlankNotebook(uniqueUntitledNotebookName(openFiles));
-    const id = makeFileId();
-    setOpenFiles((prev) => [...prev, { id, name: next.name }]);
-    setActiveFileId(id);
-    setNotebook(next);
-    setBaselineSources(next.cells.map((cell) => cell.source));
-    fileHandleRef.current = null;
-    replaceActiveOutputsByCell({});
-    resetTransient();
-    setFocusedCellIndex(0);
-    // Detach from any opened cloud record: the next "Save to cloud" should
-    // create a new one, not silently overwrite what was open before.
-    setCloudId(null);
-    setError(null);
-  }, [openFiles, snapshotActive, resetTransient, replaceActiveOutputsByCell]);
-
-  const closeFile = useCallback(
-    (id: string): void => {
-      if (openFiles.length <= 1) {
-        return; // keep at least one file open
-      }
-      if (id === activeFileId) {
-        const idx = openFiles.findIndex((f) => f.id === id);
-        const neighbor = openFiles[idx + 1] ?? openFiles[idx - 1];
-        if (neighbor !== undefined) {
-          switchToFile(neighbor.id);
-        }
-      }
-      snapshotsRef.current.delete(id);
-      setCanvasGroupPositionsByFileId((current) => {
-        if (current[id] === undefined) {
-          return current;
-        }
-        const next = { ...current };
-        delete next[id];
-        return next;
-      });
-      setOpenFiles((prev) => prev.filter((f) => f.id !== id));
-    },
-    [openFiles, activeFileId, switchToFile],
-  );
-
-  // Open the OS file picker and load the chosen notebook into the workspace.
-  const triggerOpenFile = useCallback((): void => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".ipynb,.notebookflow.json,.notebookflow,.nfw,application/json";
-    input.onchange = (): void => {
-      const file = input.files?.[0];
-      if (file === undefined) {
-        return;
-      }
-      void file.text().then((text) => {
-        handleFile(text, file.name);
-      });
-    };
-    input.click();
-  }, [handleFile]);
 
   // Uploaded data files (CSVs etc.) a pipeline can read by name. Lives on the
   // engine; the Files panel lists them.
@@ -952,9 +518,12 @@ export function App(): ReactElement {
     void refreshDataFiles();
   }, [refreshDataFiles, settings.engineUrlOverride]);
 
-  const handleCellsChange = useCallback((next: NotebookCell[]): void => {
-    setNotebook((prev) => ({ ...prev, cells: next }));
-  }, []);
+  const handleCellsChange = useCallback(
+    (next: NotebookCell[]): void => {
+      setNotebook((prev) => ({ ...prev, cells: next }));
+    },
+    [setNotebook],
+  );
 
   const handleFocusCell = useCallback(
     (index: number): void => {
@@ -994,15 +563,18 @@ export function App(): ReactElement {
     [notebook.name, openFiles, switchToFile, setIsCellsCollapsed],
   );
 
-  const handleAddCell = useCallback((kind: CellKind): void => {
-    const fresh: NotebookCell = { cellType: kind, source: "" };
-    setNotebook((prev) => {
-      const nextCells = [...prev.cells, fresh];
-      const nextDocCells = [...prev.doc.cells, toIpynbCell(fresh)];
-      setFocusedCellIndex(nextCells.length - 1);
-      return { ...prev, cells: nextCells, doc: { ...prev.doc, cells: nextDocCells } };
-    });
-  }, []);
+  const handleAddCell = useCallback(
+    (kind: CellKind): void => {
+      const fresh: NotebookCell = { cellType: kind, source: "" };
+      setNotebook((prev) => {
+        const nextCells = [...prev.cells, fresh];
+        const nextDocCells = [...prev.doc.cells, toIpynbCell(fresh)];
+        setFocusedCellIndex(nextCells.length - 1);
+        return { ...prev, cells: nextCells, doc: { ...prev.doc, cells: nextDocCells } };
+      });
+    },
+    [setNotebook],
+  );
 
   const handleDeleteFocusedCell = useCallback((): void => {
     if (focusedCellIndex === null) {
@@ -1022,7 +594,7 @@ export function App(): ReactElement {
       shiftOutputsAfterDelete(current, focusedCellIndex),
     );
     setFocusedCellIndex(null);
-  }, [focusedCellIndex, updateOutputsForFile]);
+  }, [focusedCellIndex, updateOutputsForFile, activeFileIdRef.current, setNotebook]);
 
   const handleCopyFocusedCell = useCallback((): void => {
     if (focusedCellIndex === null) {
@@ -1055,7 +627,14 @@ export function App(): ReactElement {
       shiftOutputsAfterInsert(current, insertAt),
     );
     setFocusedCellIndex(insertAt);
-  }, [cellClipboard, focusedCellIndex, notebook.cells.length, updateOutputsForFile]);
+  }, [
+    cellClipboard,
+    focusedCellIndex,
+    notebook.cells.length,
+    updateOutputsForFile,
+    activeFileIdRef.current,
+    setNotebook,
+  ]);
 
   const handleChangeFocusedCellType = useCallback(
     (kind: CellKind): void => {
@@ -1085,7 +664,7 @@ export function App(): ReactElement {
         });
       }
     },
-    [focusedCellIndex, updateOutputsForFile],
+    [focusedCellIndex, updateOutputsForFile, setNotebook, activeFileIdRef.current],
   );
 
   const handleRename = useCallback((nodeId: string, nextName: string): void => {
@@ -1445,7 +1024,14 @@ export function App(): ReactElement {
     setComposeResult(null);
     setComposePrompt("");
     setComposeError(null);
-  }, [composeResult, notebook.doc, replaceActiveOutputsByCell]);
+  }, [
+    composeResult,
+    notebook.doc,
+    replaceActiveOutputsByCell,
+    setBaselineSources,
+    setNotebook,
+    fileHandleRef,
+  ]);
 
   const manifestById = useMemo(
     () => new Map(paletteNodes.map((manifest) => [manifest.id, manifest] as const)),
@@ -1687,7 +1273,7 @@ export function App(): ReactElement {
         ),
       };
     });
-  }, [openFiles, activeFileId, notebook, outputsByCell]);
+  }, [openFiles, activeFileId, notebook, outputsByCell, snapshotsRef.current.get]);
 
   const collectWorkspaceDocument = useCallback((): ParsedWorkspace => {
     const groupPositions: Record<string, CanvasGroupPosition> = {};
@@ -1721,12 +1307,12 @@ export function App(): ReactElement {
     } catch (err: unknown) {
       setError(t("app.errors.downloadFailed", { message: formatError(t, err) }));
     }
-  }, [collectWorkspaceFiles, notebook.cells, t]);
+  }, [collectWorkspaceFiles, notebook.cells, t, setBaselineSources]);
 
   const handleDownloadWorkspace = useCallback((): void => {
     downloadWorkspaceDocument(serializeWorkspace(collectWorkspaceDocument()));
     setBaselineSources(notebook.cells.map((cell) => cell.source));
-  }, [collectWorkspaceDocument, notebook.cells]);
+  }, [collectWorkspaceDocument, notebook.cells, setBaselineSources]);
 
   // --- Cloud notebooks (#60): save/open/delete the user's workspaces in Turso.
   const refreshCloudList = useCallback(async (): Promise<void> => {
@@ -1884,7 +1470,7 @@ export function App(): ReactElement {
       const message = formatError(t, err);
       setError(t("app.errors.saveFailed", { message }));
     }
-  }, [notebook, outputsByCell, t]);
+  }, [notebook, outputsByCell, t, setBaselineSources, fileHandleRef.current, fileHandleRef]);
 
   const handleReingest = useCallback((): void => {
     const engine = engineRef.current;
@@ -1894,18 +1480,6 @@ export function App(): ReactElement {
     setPatches([]);
     void engine.ingestNotebook(notebook.name, notebook.cells, Date.now());
   }, [notebook]);
-
-  const isDirty = useMemo(() => {
-    if (notebook.cells.length !== baselineSources.length) {
-      return true;
-    }
-    for (let i = 0; i < notebook.cells.length; i++) {
-      if (notebook.cells[i]?.source !== baselineSources[i]) {
-        return true;
-      }
-    }
-    return false;
-  }, [notebook.cells, baselineSources]);
 
   return (
     <FileDropZone onFile={handleFile}>
