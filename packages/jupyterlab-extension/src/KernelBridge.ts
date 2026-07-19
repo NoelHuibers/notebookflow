@@ -13,8 +13,8 @@
  */
 
 import type { Kernel, KernelMessage } from "@jupyterlab/services";
+import type { EngineEvent, NbOutput, PipelineDef } from "@notebookflow/app-core";
 
-import type { EngineEvent, NbOutput, PipelineDef } from "./EngineClient";
 import { buildIdIndex, resolveInputBindings, wrapIsolatedCellCode } from "./isolatedExecution";
 
 type IOPubMessage =

@@ -1,7 +1,7 @@
 import type { Kernel, KernelMessage } from "@jupyterlab/services";
+import type { EngineEvent, PipelineDef } from "@notebookflow/app-core";
 import { describe, expect, it, vi } from "vitest";
 
-import type { EngineEvent, PipelineDef } from "./EngineClient";
 import { extractCellSourceFromWrapper } from "./isolatedExecution";
 import { KernelBridge } from "./KernelBridge";
 
@@ -85,6 +85,7 @@ function linearPipeline(): PipelineDef {
         inputs: [],
         outputs: ["df"],
         source: "df = 1\n",
+        alias: "",
         notebookPath: "",
         cellIndices: [0],
       },
@@ -95,6 +96,7 @@ function linearPipeline(): PipelineDef {
         inputs: ["df<-A.df"],
         outputs: ["clean"],
         source: "clean = df + 1\n",
+        alias: "",
         notebookPath: "",
         cellIndices: [1],
       },
@@ -247,6 +249,7 @@ describe("KernelBridge", () => {
           inputs: ["x<-B.x"],
           outputs: [],
           source: "code_c",
+          alias: "",
           notebookPath: "",
           cellIndices: [2],
         },
@@ -257,6 +260,7 @@ describe("KernelBridge", () => {
           inputs: [],
           outputs: ["x"],
           source: "code_a",
+          alias: "",
           notebookPath: "",
           cellIndices: [0],
         },
@@ -267,6 +271,7 @@ describe("KernelBridge", () => {
           inputs: ["x<-A.x"],
           outputs: ["x"],
           source: "code_b",
+          alias: "",
           notebookPath: "",
           cellIndices: [1],
         },
@@ -296,6 +301,7 @@ describe("KernelBridge", () => {
           inputs: [],
           outputs: [],
           source: "",
+          alias: "",
           notebookPath: "",
           cellIndices: [],
         },

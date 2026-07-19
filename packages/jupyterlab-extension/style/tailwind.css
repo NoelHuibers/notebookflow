@@ -1,0 +1,83 @@
+/*
+ * Tailwind source for the JupyterLab surface. Compiled to style/index.css via
+ * `pnpm build:css` (@tailwindcss/cli); the generated file is committed so the
+ * labextension webpack build works from a clean checkout without Node tooling.
+ *
+ * Scans the shared app-core components (AskPalette, ComposeDialog,
+ * ExplanationPanel, CellOutputs + shadcn ui primitives) and this package's own
+ * sources, and maps the shadcn design-token slots onto JupyterLab's --jp-*
+ * theme variables so the shared components inherit the Lab theme (light and
+ * dark alike).
+ */
+
+/* Import Tailwind WITHOUT preflight: this stylesheet loads into the whole
+ * JupyterLab page (no iframe/webview isolation), and preflight's element
+ * resets would restyle the rest of the Lab UI. Scoped base rules below
+ * replicate the pieces the utilities rely on inside our widget only. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@source "../../app-core/src/**/*.{ts,tsx}";
+@source "../src/**/*.{ts,tsx}";
+
+/* Map JupyterLab theme tokens into the shadcn / Tailwind design-token slots. */
+:root {
+  --background: var(--jp-layout-color1, #ffffff);
+  --foreground: var(--jp-ui-font-color1, #111827);
+  --card: var(--jp-layout-color1, #ffffff);
+  --card-foreground: var(--jp-ui-font-color1, #111827);
+  --popover: var(--jp-layout-color1, #ffffff);
+  --popover-foreground: var(--jp-ui-font-color1, #111827);
+  --muted: var(--jp-layout-color2, #f3f4f6);
+  --muted-foreground: var(--jp-ui-font-color2, #6b7280);
+  --border: var(--jp-border-color2, #d1d5db);
+  --input: var(--jp-border-color1, #9ca3af);
+  --ring: var(--jp-brand-color1, #2563eb);
+  --primary: var(--jp-brand-color1, #2563eb);
+  --primary-foreground: #ffffff;
+  --secondary: var(--jp-layout-color2, #f3f4f6);
+  --secondary-foreground: var(--jp-ui-font-color1, #111827);
+  --accent: var(--jp-layout-color2, #f3f4f6);
+  --accent-foreground: var(--jp-ui-font-color1, #111827);
+  --destructive: var(--jp-error-color1, #dc2626);
+  --radius: 0.375rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+}
+
+/* Preflight replacement, scoped to the NotebookFlow widget: border reset +
+ * default border colour (Tailwind's `border` utilities only set widths) and
+ * border-box sizing, without touching the surrounding JupyterLab UI. */
+@layer base {
+  .notebookflow-split-view *,
+  .notebookflow-split-view *::before,
+  .notebookflow-split-view *::after {
+    box-sizing: border-box;
+    border-width: 0;
+    border-style: solid;
+    border-color: var(--color-border);
+  }
+}

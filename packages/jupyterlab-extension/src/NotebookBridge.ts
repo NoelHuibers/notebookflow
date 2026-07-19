@@ -11,9 +11,8 @@ import type * as nbformat from "@jupyterlab/nbformat";
 import type { NotebookPanel } from "@jupyterlab/notebook";
 import type { IDisposable } from "@lumino/disposable";
 import { Signal } from "@lumino/signaling";
+import type { NbOutput } from "@notebookflow/app-core";
 import type { CellPatch, NotebookCell } from "@notebookflow/graph-canvas/sync";
-
-import type { NbOutput } from "./EngineClient";
 
 export class NotebookBridge implements IDisposable {
   private readonly panel: NotebookPanel;

@@ -7,5 +7,5 @@
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"],
-  "references": [{ "path": "../graph-canvas" }]
+  "references": [{ "path": "../app-core" }, { "path": "../graph-canvas" }]
 }
