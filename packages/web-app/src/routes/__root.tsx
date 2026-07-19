@@ -14,7 +14,7 @@ import {
 import "reactflow/dist/style.css";
 import "../index.css";
 
-const SITE_ORIGIN = "https://notebookflow.vercel.app";
+const SITE_ORIGIN = "https://notebookflow.app";
 const PAGE_TITLE = "NotebookFlow | Visual pipelines for notebooks";
 const PAGE_DESCRIPTION =
   "Wire notebooks and cell groups into visual pipelines on a canvas, with AI assistance, bring-your-own-key models, and bidirectional sync.";
