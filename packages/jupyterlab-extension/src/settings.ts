@@ -77,7 +77,11 @@ function readSettings(settings: ISettingRegistry.ISettings | null): Notebookflow
     llmProvider: readString(settings, "llmProvider", DEFAULT_SETTINGS.llmProvider),
     llmModel: readString(settings, "llmModel", DEFAULT_SETTINGS.llmModel),
     llmApiKey: readString(settings, "llmApiKey", DEFAULT_SETTINGS.llmApiKey),
-    engineUrlOverride: readString(settings, "engineUrlOverride", DEFAULT_SETTINGS.engineUrlOverride),
+    engineUrlOverride: readString(
+      settings,
+      "engineUrlOverride",
+      DEFAULT_SETTINGS.engineUrlOverride,
+    ),
   };
 }
 

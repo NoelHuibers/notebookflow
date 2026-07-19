@@ -24,9 +24,8 @@ import { INotebookTracker as NotebookTrackerToken } from "@jupyterlab/notebook";
 import { ISettingRegistry } from "@jupyterlab/settingregistry";
 import type { IDisposable } from "@lumino/disposable";
 import { DisposableDelegate } from "@lumino/disposable";
-
-import { createSettingsAccessor } from "./settings";
 import { SplitView } from "./SplitView";
+import { createSettingsAccessor } from "./settings";
 
 const COMMAND_ID = "notebookflow:open-canvas";
 const CATEGORY = "NotebookFlow";

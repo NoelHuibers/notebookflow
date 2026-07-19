@@ -7,6 +7,20 @@
  * this component stays platform-agnostic.
  */
 
+import type {
+  AskAnswer,
+  EngineEvent,
+  PipelineDef,
+  PipelineExplanation,
+  PipelineProposal,
+} from "@notebookflow/app-core";
+import {
+  AskPalette,
+  buildPipelineDef,
+  ComposeDialog,
+  ExplanationPanel,
+  stripMarkerLine,
+} from "@notebookflow/app-core";
 import type { GraphModel, NodeManifestDef, NodeModel, WireModel } from "@notebookflow/graph-canvas";
 import {
   addManifestNode,
@@ -30,9 +44,14 @@ import type {
 } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { EngineEvent, PipelineDef } from "./EngineClient";
 import type { NotebookBridge } from "./NotebookBridge";
-import { resolveLocale, resolveStrings } from "./strings";
+import {
+  deAskPaletteLabels,
+  deComposeDialogLabels,
+  deExplanationPanelLabels,
+  resolveLocale,
+  resolveStrings,
+} from "./strings";
 
 export interface AppProps {
   bridge: NotebookBridge;
@@ -46,6 +65,9 @@ export interface AppProps {
     config: Record<string, string>;
     currentSource: string;
   }) => Promise<{ source: string; backend: string; warnings: string[] }>;
+  onAsk: (prompt: string, pipeline?: PipelineDef) => Promise<AskAnswer>;
+  onCompose: (prompt: string) => Promise<PipelineProposal>;
+  onExplain: (pipeline: PipelineDef) => Promise<PipelineExplanation>;
 }
 
 // JupyterLab's UI language is fixed for the page's lifetime, so resolve the
@@ -55,6 +77,11 @@ const locale = resolveLocale();
 const s = resolveStrings();
 const canvasLabels = locale === "de" ? deCanvasLabels : undefined;
 const nodeConfigLabels = locale === "de" ? deNodeConfigLabels : undefined;
+// The app-core AI dialogs fall back to their English defaults when no labels
+// are passed, so `undefined` is the correct EN value here too.
+const askLabels = locale === "de" ? deAskPaletteLabels : undefined;
+const composeLabels = locale === "de" ? deComposeDialogLabels : undefined;
+const explanationLabels = locale === "de" ? deExplanationPanelLabels : undefined;
 
 const EMPTY_GRAPH: GraphModel = { nodes: {}, groups: {}, wires: {} };
 const DIVIDER_SIZE_PX = 10;
@@ -69,7 +96,15 @@ interface DragState {
   startWidth: number;
 }
 
-export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps): ReactElement {
+export function App({
+  bridge,
+  onRun,
+  onListNodes,
+  onSynthesizeNode,
+  onAsk,
+  onCompose,
+  onExplain,
+}: AppProps): ReactElement {
   const [graph, setGraph] = useState<GraphModel>(EMPTY_GRAPH);
   const [selected, setSelected] = useState<NodeModel | null>(null);
   const [events, setEvents] = useState<EngineEvent[]>([]);
@@ -84,6 +119,18 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH_PX);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [explanation, setExplanation] = useState<PipelineExplanation | null>(null);
+  const [isExplaining, setIsExplaining] = useState(false);
+  const [isComposeOpen, setIsComposeOpen] = useState(false);
+  const [composePrompt, setComposePrompt] = useState("");
+  const [isComposing, setIsComposing] = useState(false);
+  const [composeResult, setComposeResult] = useState<PipelineProposal | null>(null);
+  const [composeError, setComposeError] = useState<string | null>(null);
+  const [isAskOpen, setIsAskOpen] = useState(false);
+  const [askPrompt, setAskPrompt] = useState("");
+  const [isAsking, setIsAsking] = useState(false);
+  const [askResult, setAskResult] = useState<AskAnswer | null>(null);
+  const [askError, setAskError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const lastOpenSidebarWidthRef = useRef(DEFAULT_SIDEBAR_WIDTH_PX);
 
@@ -298,11 +345,128 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
       });
   }, [bridge, configDraft, engine, onSynthesizeNode, selected, selectedManifest]);
 
+  const pushErrorEvent = useCallback((message: string): void => {
+    setEvents((prev) => [...prev, { type: "error", message }]);
+  }, []);
+
+  const buildCurrentPipeline = useCallback(
+    (): PipelineDef =>
+      buildPipelineDef(graph, new Map([[bridge.notebookPath, bridge.readCells()]])),
+    [bridge, graph],
+  );
+
+  // Ask the engine for a prose walkthrough of the current pipeline. Runs
+  // through the user's BYOK provider when a key is set (Jupyter settings);
+  // template fallback otherwise. Mirrors the web-app's handleExplain.
+  const handleExplain = useCallback(async (): Promise<void> => {
+    if (isExplaining) {
+      return;
+    }
+    setIsExplaining(true);
+    try {
+      setExplanation(await onExplain(buildCurrentPipeline()));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "unknown error";
+      pushErrorEvent(s.explainFailed.replace("{message}", message));
+    } finally {
+      setIsExplaining(false);
+    }
+  }, [buildCurrentPipeline, isExplaining, onExplain, pushErrorEvent]);
+
+  const handleCompose = useCallback(async (): Promise<void> => {
+    if (composePrompt.trim() === "") {
+      setComposeError(s.composeEmpty);
+      return;
+    }
+    setIsComposing(true);
+    setComposeError(null);
+    try {
+      setComposeResult(await onCompose(composePrompt.trim()));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "unknown error";
+      setComposeError(s.composeFailed.replace("{message}", message));
+    } finally {
+      setIsComposing(false);
+    }
+  }, [composePrompt, onCompose]);
+
+  const handleAsk = useCallback(async (): Promise<void> => {
+    if (askPrompt.trim() === "") {
+      setAskError(s.askEmpty);
+      return;
+    }
+    setIsAsking(true);
+    setAskError(null);
+    try {
+      // Pass the current pipeline as context so the answer can reference
+      // specific node names; omit it when the canvas is empty — the engine
+      // treats absent pipelines as a general Q&A.
+      const pipeline = buildCurrentPipeline();
+      setAskResult(await onAsk(askPrompt.trim(), pipeline.nodes.length > 0 ? pipeline : undefined));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "unknown error";
+      setAskError(s.askFailed.replace("{message}", message));
+    } finally {
+      setIsAsking(false);
+    }
+  }, [askPrompt, buildCurrentPipeline, onAsk]);
+
+  // Replace the notebook with the drafted cells through the NotebookBridge's
+  // patch surface: delete every current cell (highest index first so indices
+  // stay valid), then insert the drafted cells in order. Every mutation fires
+  // the bridge's `changed` signal, so the SyncEngine re-ingests and the graph
+  // converges on its own.
+  const handleApplyProposal = useCallback((): void => {
+    if (composeResult === null || composeResult.cellSources.length === 0) {
+      return;
+    }
+    const notebookPath = bridge.notebookPath;
+    try {
+      for (let cellIndex = bridge.readCells().length - 1; cellIndex >= 0; cellIndex -= 1) {
+        bridge.applyPatch({ notebookPath, cellIndex, operation: "delete", newSource: null });
+      }
+      composeResult.cellSources.forEach((source, cellIndex) => {
+        bridge.applyPatch({
+          notebookPath,
+          cellIndex,
+          operation: "insert",
+          newSource: source,
+          cellType: "code",
+        });
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "unknown error";
+      pushErrorEvent(s.applyProposalFailed.replace("{message}", message));
+      return;
+    }
+    setSelected(null);
+    setEvents([]);
+    setExplanation(null);
+    setIsComposeOpen(false);
+    setComposeResult(null);
+    setComposePrompt("");
+    setComposeError(null);
+  }, [bridge, composeResult, pushErrorEvent]);
+
+  // Cmd/Ctrl+K toggles the Ask AI palette, mirroring the web app + VS Code.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if ((event.metaKey || event.ctrlKey) && (event.key === "k" || event.key === "K")) {
+        event.preventDefault();
+        setIsAskOpen((open) => !open);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
+
   const handleRun = (): void => {
     if (isRunning) {
       return;
     }
-    const pipeline = buildPipelineDef(graph, bridge.readCells(), bridge.notebookPath);
+    const pipeline = buildCurrentPipeline();
     const outputCellIndices = Array.from(
       new Set(
         pipeline.nodes
@@ -474,6 +638,37 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
             .replace("{path}", bridge.notebookPath)}
         </span>
         <div style={headerActionsStyle}>
+          <button
+            type="button"
+            style={secondaryButtonStyle}
+            onClick={() => {
+              void handleExplain();
+            }}
+            disabled={isExplaining}
+            title={s.explainTitle}
+          >
+            {isExplaining ? s.explaining : s.explain}
+          </button>
+          <button
+            type="button"
+            style={secondaryButtonStyle}
+            onClick={() => {
+              setIsComposeOpen(true);
+            }}
+            title={s.composeTitle}
+          >
+            {s.compose}
+          </button>
+          <button
+            type="button"
+            style={secondaryButtonStyle}
+            onClick={() => {
+              setIsAskOpen(true);
+            }}
+            title={s.askAiTitle}
+          >
+            {s.askAi}
+          </button>
           <button type="button" style={secondaryButtonStyle} onClick={toggleSidebar}>
             {isSidebarCollapsed ? s.showSidebar : s.hideSidebar}
           </button>
@@ -482,6 +677,15 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
           </button>
         </div>
       </header>
+      {explanation !== null && (
+        <ExplanationPanel
+          explanation={explanation}
+          onClose={() => {
+            setExplanation(null);
+          }}
+          {...(explanationLabels === undefined ? {} : { labels: explanationLabels })}
+        />
+      )}
       <div ref={bodyRef} style={bodyLayoutStyle}>
         <main style={canvasStyle}>
           <Canvas
@@ -593,48 +797,45 @@ export function App({ bridge, onRun, onListNodes, onSynthesizeNode }: AppProps):
           </aside>
         )}
       </div>
+
+      {isComposeOpen && (
+        <ComposeDialog
+          prompt={composePrompt}
+          isComposing={isComposing}
+          result={composeResult}
+          errorMessage={composeError}
+          onPromptChange={setComposePrompt}
+          onSubmit={() => {
+            void handleCompose();
+          }}
+          onApply={handleApplyProposal}
+          onClose={() => {
+            setIsComposeOpen(false);
+            setComposeResult(null);
+            setComposeError(null);
+          }}
+          {...(composeLabels === undefined ? {} : { labels: composeLabels })}
+        />
+      )}
+
+      {isAskOpen && (
+        <AskPalette
+          prompt={askPrompt}
+          isAsking={isAsking}
+          result={askResult}
+          errorMessage={askError}
+          onPromptChange={setAskPrompt}
+          onSubmit={() => {
+            void handleAsk();
+          }}
+          onClose={() => {
+            setIsAskOpen(false);
+          }}
+          {...(askLabels === undefined ? {} : { labels: askLabels })}
+        />
+      )}
     </div>
   );
-}
-
-function buildPipelineDef(
-  graph: GraphModel,
-  cells: { source: string }[],
-  notebookPath: string,
-): PipelineDef {
-  const nodes = Object.values(graph.nodes).map((node) => {
-    const cellIndex = node.cellIndices[0] ?? 0;
-    const source = cells[cellIndex]?.source ?? "";
-    return {
-      id: node.id,
-      name: node.name,
-      tag: node.tag,
-      inputs: node.inputs,
-      outputs: node.outputs,
-      source: stripMarkerLine(source),
-      notebookPath,
-      cellIndices: node.cellIndices,
-    };
-  });
-  const edges = Object.values(graph.wires).map((wire) => ({
-    sourceNodeId: wire.sourceNodeId,
-    sourcePort: wire.sourcePort,
-    targetNodeId: wire.targetNodeId,
-    targetPort: wire.targetPort,
-  }));
-  return { nodes, edges };
-}
-
-function stripMarkerLine(source: string): string {
-  const newline = source.indexOf("\n");
-  if (newline === -1) {
-    return "";
-  }
-  const firstLine = source.slice(0, newline).trim();
-  if (firstLine.startsWith("# @node:")) {
-    return source.slice(newline + 1);
-  }
-  return source;
 }
 
 function buildGenerationStatus(metadata: {

@@ -5,17 +5,29 @@
  * React mount/unmount lifecycle for us; this class just wires a fresh
  * NotebookBridge + EngineClient pair into the App component and sets the
  * shell-side metadata Lumino needs (icon, title, id).
+ *
+ * The engine client is the shared app-core EngineClient. Its URL resolves
+ * through jupyter-server-proxy (or the ``engineUrlOverride`` setting), and the
+ * BYOK credentials from the plugin settings are applied on construction and
+ * re-applied whenever the settings change.
  */
 
 import { ReactWidget } from "@jupyterlab/apputils";
 import type { NotebookPanel } from "@jupyterlab/notebook";
+import type {
+  AskAnswer,
+  EngineEvent,
+  PipelineDef,
+  PipelineExplanation,
+  PipelineProposal,
+} from "@notebookflow/app-core";
+import { EngineClient } from "@notebookflow/app-core";
 import type { NodeManifestDef } from "@notebookflow/graph-canvas";
 import type { ReactElement } from "react";
 import { createElement } from "react";
 
 import { App } from "./App";
-import type { EngineEvent, PipelineDef } from "./EngineClient";
-import { EngineClient } from "./EngineClient";
+import { resolveEngineUrl } from "./engineUrl";
 import { KernelBridge } from "./KernelBridge";
 import { NotebookBridge } from "./NotebookBridge";
 import type { SettingsAccessor } from "./settings";
@@ -25,10 +37,12 @@ let widgetCounter = 0;
 export class SplitView extends ReactWidget {
   private readonly panel: NotebookPanel;
   private readonly bridge: NotebookBridge;
-  private readonly engine: EngineClient;
   private readonly kernel: KernelBridge;
   /** Plugin settings seam (BYOK credentials + engine URL override). */
   readonly settings: SettingsAccessor;
+  private engineClient: EngineClient;
+  private engineUrl: string;
+  private readonly unsubscribeSettings: () => void;
 
   constructor(panel: NotebookPanel, settings: SettingsAccessor) {
     super();
@@ -41,7 +55,12 @@ export class SplitView extends ReactWidget {
     this.panel = panel;
     this.settings = settings;
     this.bridge = new NotebookBridge(panel);
-    this.engine = new EngineClient();
+    this.engineUrl = resolveEngineUrl(settings.get().engineUrlOverride);
+    this.engineClient = new EngineClient(this.engineUrl);
+    this.applyCredentials();
+    this.unsubscribeSettings = settings.subscribe(() => {
+      this.refreshEngine();
+    });
     // Resolve fresh on each call: the active kernel can change (restart,
     // shutdown, swap) over the lifetime of the SplitView.
     this.kernel = new KernelBridge((): ReturnType<typeof this.activeKernel> => this.activeKernel());
@@ -49,6 +68,30 @@ export class SplitView extends ReactWidget {
     panel.disposed.connect(() => {
       this.dispose();
     });
+  }
+
+  /** The current engine client (recreated when the URL override changes). */
+  private get engine(): EngineClient {
+    return this.engineClient;
+  }
+
+  /** Re-resolve the engine URL and re-apply BYOK credentials from settings. */
+  private refreshEngine(): void {
+    const url = resolveEngineUrl(this.settings.get().engineUrlOverride);
+    if (url !== this.engineUrl) {
+      this.engineUrl = url;
+      this.engineClient = new EngineClient(url);
+    }
+    this.applyCredentials();
+  }
+
+  private applyCredentials(): void {
+    const { llmProvider, llmModel, llmApiKey } = this.settings.get();
+    this.engineClient.setCredentials(
+      llmApiKey.trim() === ""
+        ? null
+        : { provider: llmProvider, model: llmModel, apiKey: llmApiKey },
+    );
   }
 
   private activeKernel(): NonNullable<
@@ -80,6 +123,12 @@ export class SplitView extends ReactWidget {
       },
       onListNodes: (): Promise<NodeManifestDef[]> => this.engine.listNodes(),
       onSynthesizeNode: (request) => this.engine.synthesizeNode(request),
+      onAsk: (prompt: string, pipeline?: PipelineDef): Promise<AskAnswer> =>
+        this.engine.askLLM(prompt, pipeline),
+      onCompose: (prompt: string): Promise<PipelineProposal> =>
+        this.engine.proposePipeline(prompt, this.bridge.notebookPath),
+      onExplain: (pipeline: PipelineDef): Promise<PipelineExplanation> =>
+        this.engine.explainPipeline(pipeline),
     });
   }
 
@@ -87,6 +136,7 @@ export class SplitView extends ReactWidget {
     if (this.isDisposed) {
       return;
     }
+    this.unsubscribeSettings();
     this.bridge.dispose();
     super.dispose();
   }
