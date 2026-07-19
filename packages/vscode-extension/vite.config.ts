@@ -7,6 +7,7 @@ import { defineConfig } from "vite";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const graphCanvasSrc = path.resolve(here, "../graph-canvas/src");
+const appCoreSrc = path.resolve(here, "../app-core/src");
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -28,6 +29,7 @@ export default defineConfig({
     alias: [
       { find: "@notebookflow/graph-canvas/sync", replacement: `${graphCanvasSrc}/sync/index.ts` },
       { find: "@notebookflow/graph-canvas", replacement: `${graphCanvasSrc}/index.ts` },
+      { find: "@notebookflow/app-core", replacement: `${appCoreSrc}/index.ts` },
     ],
   },
 });

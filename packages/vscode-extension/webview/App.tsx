@@ -16,13 +16,22 @@
  */
 
 import type {
-  GraphModel,
-  NodeManifestDef,
-  NodeModel,
-  NodeSynthesisRequest,
-  NodeSynthesisResponse,
-  WireModel,
-} from "@notebookflow/graph-canvas";
+  AskAnswer,
+  Credentials,
+  EngineEvent,
+  PipelineExplanation,
+  PipelineProposal,
+} from "@notebookflow/app-core";
+import {
+  AskPalette,
+  buildPipelineDef,
+  ComposeDialog,
+  EngineClient,
+  ExplanationPanel,
+  renderEvent,
+  stripMarkerLine,
+} from "@notebookflow/app-core";
+import type { GraphModel, NodeManifestDef, NodeModel, WireModel } from "@notebookflow/graph-canvas";
 import {
   addManifestNode,
   Canvas,
@@ -39,6 +48,7 @@ import {
 } from "@notebookflow/graph-canvas";
 import type { CellPatch, NotebookCell } from "@notebookflow/graph-canvas/sync";
 import { SyncEngine } from "@notebookflow/graph-canvas/sync";
+import { Command, Sparkles, Wand2 } from "lucide-react";
 import type {
   ReactElement,
   KeyboardEvent as ReactKeyboardEvent,
@@ -46,7 +56,13 @@ import type {
 } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { resolveLocale, resolveStrings } from "./strings";
+import {
+  deAskPaletteLabels,
+  deComposeDialogLabels,
+  deExplanationPanelLabels,
+  resolveLocale,
+  resolveStrings,
+} from "./strings";
 
 declare global {
   interface VsCodeApi {
@@ -66,6 +82,11 @@ const locale = resolveLocale();
 const s = resolveStrings();
 const canvasLabels = locale === "de" ? deCanvasLabels : undefined;
 const nodeConfigLabels = locale === "de" ? deNodeConfigLabels : undefined;
+// The app-core AI dialogs fall back to their English defaults when no labels
+// are passed, so `undefined` is the correct EN value here too.
+const askLabels = locale === "de" ? deAskPaletteLabels : undefined;
+const composeLabels = locale === "de" ? deComposeDialogLabels : undefined;
+const explanationLabels = locale === "de" ? deExplanationPanelLabels : undefined;
 
 interface IngestMessage {
   type: "ingest";
@@ -84,53 +105,14 @@ interface EngineDownMessage {
   reason?: string;
 }
 
-type HostMessage = IngestMessage | EngineUrlMessage | EngineDownMessage;
-
-interface NodeDef {
-  id: string;
-  name: string;
-  tag: string;
-  inputs: string[];
-  outputs: string[];
-  source: string;
-  notebookPath: string;
-  cellIndices: number[];
+interface CredentialsMessage {
+  type: "credentials";
+  provider: string;
+  model: string;
+  apiKey: string;
 }
 
-interface EdgeDef {
-  sourceNodeId: string;
-  sourcePort: string;
-  targetNodeId: string;
-  targetPort: string;
-}
-
-type NbOutput =
-  | { output_type: "stream"; name: "stdout" | "stderr"; text: string }
-  | {
-      output_type: "display_data";
-      data: Record<string, string>;
-      metadata: Record<string, unknown>;
-    }
-  | {
-      output_type: "execute_result";
-      data: Record<string, string>;
-      metadata: Record<string, unknown>;
-    }
-  | { output_type: "error"; ename: string; evalue: string; traceback: string[] };
-
-interface ExecutionResultMsg {
-  nodeId: string;
-  status: string;
-  error: string | null;
-  durationMs: number;
-  outputs: NbOutput[];
-}
-
-type EngineEvent =
-  | { type: "executionStarted"; pipelineId: string }
-  | { type: "nodeCompleted"; pipelineId: string; result: ExecutionResultMsg }
-  | { type: "pipelineCompleted"; pipelineId: string; results: ExecutionResultMsg[] }
-  | { type: "error"; pipelineId?: string; message: string };
+type HostMessage = IngestMessage | EngineUrlMessage | EngineDownMessage | CredentialsMessage;
 
 const EMPTY_GRAPH: GraphModel = { nodes: {}, groups: {}, wires: {} };
 const DIVIDER_SIZE_PX = 10;
@@ -163,10 +145,26 @@ export function App(): ReactElement {
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH_PX);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [explanation, setExplanation] = useState<PipelineExplanation | null>(null);
+  const [isExplaining, setIsExplaining] = useState(false);
+  const [isComposeOpen, setIsComposeOpen] = useState(false);
+  const [composePrompt, setComposePrompt] = useState("");
+  const [isComposing, setIsComposing] = useState(false);
+  const [composeResult, setComposeResult] = useState<PipelineProposal | null>(null);
+  const [composeError, setComposeError] = useState<string | null>(null);
+  const [isAskOpen, setIsAskOpen] = useState(false);
+  const [askPrompt, setAskPrompt] = useState("");
+  const [isAsking, setIsAsking] = useState(false);
+  const [askResult, setAskResult] = useState<AskAnswer | null>(null);
+  const [askError, setAskError] = useState<string | null>(null);
   const engineRef = useRef<SyncEngine | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const lastOpenSidebarWidthRef = useRef(DEFAULT_SIDEBAR_WIDTH_PX);
+  // Engine REST client (app-core). Recreated when the engine URL changes; the
+  // latest BYOK credentials live in a ref so a fresh client never loses them.
+  const clientRef = useRef<EngineClient | null>(null);
+  const credentialsRef = useRef<Credentials | null>(null);
 
   useEffect(() => {
     const engine = new SyncEngine({
@@ -192,9 +190,24 @@ export function App(): ReactElement {
         setNotebookPath(msg.path);
         void engine.ingestNotebook(msg.path, msg.cells, msg.timestamp);
       } else if (msg.type === "engineUrl") {
+        // EngineClient expects the WS endpoint and derives REST URLs from it.
+        // Token "" — the local engine subprocess is trusted (loopback only).
+        const client = new EngineClient(`${msg.url.replace(/^http/, "ws")}/ws`);
+        client.setCredentials(credentialsRef.current);
+        clientRef.current = client;
         setEngineUrl(msg.url);
       } else if (msg.type === "engineDown") {
+        clientRef.current = null;
         setEngineUrl(null);
+      } else if (msg.type === "credentials") {
+        // BYOK credentials from the extension host (settings + SecretStorage).
+        // An empty key clears them so the engine falls back to its env key.
+        const credentials =
+          msg.apiKey.trim() === ""
+            ? null
+            : { provider: msg.provider, model: msg.model, apiKey: msg.apiKey };
+        credentialsRef.current = credentials;
+        clientRef.current?.setCredentials(credentials);
       }
     };
     window.addEventListener("message", handler);
@@ -252,7 +265,8 @@ export function App(): ReactElement {
   const handleAddNode = useCallback(
     (manifest: NodeManifestDef, options?: { insertAtCellIndex?: number }): void => {
       const engine = engineRef.current;
-      if (notebookPath === "" || engineUrl === null || engine === null) {
+      const client = clientRef.current;
+      if (notebookPath === "" || engineUrl === null || engine === null || client === null) {
         setEvents((prev) => [
           ...prev,
           {
@@ -263,7 +277,7 @@ export function App(): ReactElement {
         return;
       }
       const insertAtCellIndex = options?.insertAtCellIndex ?? cells.length;
-      void addManifestNode(engine, (request) => synthesizeNode(engineUrl, request), {
+      void addManifestNode(engine, (request) => client.synthesizeNode(request), {
         manifest,
         notebookPath,
         insertAtCellIndex,
@@ -308,20 +322,16 @@ export function App(): ReactElement {
   );
 
   useEffect(() => {
-    if (engineUrl === null) {
+    const client = clientRef.current;
+    if (engineUrl === null || client === null) {
       setPaletteNodes([]);
       setPaletteError(s.startEngineToLoadPalette);
       return;
     }
 
     let cancelled = false;
-    void fetch(`${engineUrl}/nodes`)
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`${response.status} ${response.statusText}`);
-        }
-        return (await response.json()) as NodeManifestDef[];
-      })
+    void client
+      .listNodes()
       .then((nodes) => {
         if (cancelled) {
           return;
@@ -389,7 +399,14 @@ export function App(): ReactElement {
 
   const handleApplySelectedConfig = useCallback((): void => {
     const engine = engineRef.current;
-    if (engine === null || engineUrl === null || selected === null || selectedManifest === null) {
+    const client = clientRef.current;
+    if (
+      engine === null ||
+      client === null ||
+      engineUrl === null ||
+      selected === null ||
+      selectedManifest === null
+    ) {
       return;
     }
 
@@ -399,14 +416,15 @@ export function App(): ReactElement {
     setConfigWarnings([]);
     setIsConfigSubmitting(true);
 
-    void synthesizeNode(engineUrl, {
-      manifestId: selectedManifest.id,
-      nodeName: selected.name,
-      inputs: selected.inputs,
-      outputs: selected.outputs,
-      config: nextConfig,
-      currentSource,
-    })
+    void client
+      .synthesizeNode({
+        manifestId: selectedManifest.id,
+        nodeName: selected.name,
+        inputs: selected.inputs,
+        outputs: selected.outputs,
+        config: nextConfig,
+        currentSource,
+      })
       .then(async (result) => {
         const metadata = writeNotebookflowMetadata(selected.metadata, {
           manifestId: selectedManifest.id,
@@ -546,7 +564,129 @@ export function App(): ReactElement {
     [clampSidebarWidth, collapseSidebar],
   );
 
-  const pipelineDef = useMemo(() => buildPipelineDef(graph, cells), [graph, cells]);
+  const pipelineDef = useMemo(
+    () => buildPipelineDef(graph, new Map([[notebookPath, cells]])),
+    [graph, cells, notebookPath],
+  );
+
+  const pushErrorEvent = useCallback((message: string): void => {
+    setEvents((prev) => [...prev, { type: "error", message }]);
+  }, []);
+
+  // Ask the engine for a prose walkthrough of the current pipeline. Runs
+  // through the user's BYOK provider when a key is set; template fallback
+  // otherwise. Mirrors the web-app's handleExplain.
+  const handleExplain = useCallback(async (): Promise<void> => {
+    const client = clientRef.current;
+    if (isExplaining) {
+      return;
+    }
+    if (client === null) {
+      pushErrorEvent(s.startEngineToUseAi);
+      return;
+    }
+    setIsExplaining(true);
+    try {
+      setExplanation(await client.explainPipeline(pipelineDef));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "unknown error";
+      pushErrorEvent(s.explainFailed.replace("{message}", message));
+    } finally {
+      setIsExplaining(false);
+    }
+  }, [isExplaining, pipelineDef, pushErrorEvent]);
+
+  const handleCompose = useCallback(async (): Promise<void> => {
+    const client = clientRef.current;
+    if (composePrompt.trim() === "") {
+      setComposeError(s.composeEmpty);
+      return;
+    }
+    if (client === null) {
+      setComposeError(s.startEngineToUseAi);
+      return;
+    }
+    setIsComposing(true);
+    setComposeError(null);
+    try {
+      setComposeResult(await client.proposePipeline(composePrompt.trim()));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "unknown error";
+      setComposeError(s.composeFailed.replace("{message}", message));
+    } finally {
+      setIsComposing(false);
+    }
+  }, [composePrompt]);
+
+  const handleAsk = useCallback(async (): Promise<void> => {
+    const client = clientRef.current;
+    if (askPrompt.trim() === "") {
+      setAskError(s.askEmpty);
+      return;
+    }
+    if (client === null) {
+      setAskError(s.startEngineToUseAi);
+      return;
+    }
+    setIsAsking(true);
+    setAskError(null);
+    try {
+      // Pass the current pipeline as context so the answer can reference
+      // specific node names; omit it when the canvas is empty — the engine
+      // treats absent pipelines as a general Q&A.
+      const pipeline = pipelineDef.nodes.length > 0 ? pipelineDef : undefined;
+      setAskResult(await client.askLLM(askPrompt.trim(), pipeline));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "unknown error";
+      setAskError(s.askFailed.replace("{message}", message));
+    } finally {
+      setIsAsking(false);
+    }
+  }, [askPrompt, pipelineDef]);
+
+  // Replace the notebook with the drafted cells through the existing
+  // webview→host patch protocol: delete every current cell (highest index
+  // first so indices stay valid), then insert the drafted cells in order.
+  // The host applies each patch as a WorkspaceEdit (undo-friendly) and
+  // re-ingests after every change, so graph state converges on its own.
+  const handleApplyProposal = useCallback((): void => {
+    if (composeResult === null || composeResult.cellSources.length === 0) {
+      return;
+    }
+    for (let cellIndex = cells.length - 1; cellIndex >= 0; cellIndex -= 1) {
+      vscode.postMessage({ type: "patch", cellIndex, operation: "delete", newSource: null });
+    }
+    composeResult.cellSources.forEach((source, cellIndex) => {
+      vscode.postMessage({
+        type: "patch",
+        cellIndex,
+        operation: "insert",
+        newSource: source,
+        cellType: "code",
+      });
+    });
+    setSelected(null);
+    setEvents([]);
+    setExplanation(null);
+    setIsComposeOpen(false);
+    setComposeResult(null);
+    setComposePrompt("");
+    setComposeError(null);
+  }, [cells.length, composeResult]);
+
+  // Cmd/Ctrl+K toggles the Ask AI palette, mirroring the web app.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if ((event.metaKey || event.ctrlKey) && (event.key === "k" || event.key === "K")) {
+        event.preventDefault();
+        setIsAskOpen((open) => !open);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
 
   const bodyStyle = useMemo(
     () => ({
@@ -630,6 +770,40 @@ export function App(): ReactElement {
           </span>
           <button
             type="button"
+            onClick={() => {
+              void handleExplain();
+            }}
+            disabled={engineUrl === null || isExplaining}
+            title={s.explainTitle}
+            className="flex items-center gap-1 rounded border border-border bg-background px-3 py-1 disabled:opacity-50"
+          >
+            <Sparkles className="size-3" />
+            {isExplaining ? s.explaining : s.explain}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setIsComposeOpen(true);
+            }}
+            title={s.composeTitle}
+            className="flex items-center gap-1 rounded border border-border bg-background px-3 py-1 disabled:opacity-50"
+          >
+            <Wand2 className="size-3" />
+            {s.compose}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setIsAskOpen(true);
+            }}
+            title={s.askAiTitle}
+            className="flex items-center gap-1 rounded border border-border bg-background px-3 py-1 disabled:opacity-50"
+          >
+            <Command className="size-3" />
+            {s.askAi}
+          </button>
+          <button
+            type="button"
             onClick={toggleSidebar}
             className="rounded border border-border bg-background px-3 py-1 disabled:opacity-50"
           >
@@ -645,6 +819,15 @@ export function App(): ReactElement {
           </button>
         </div>
       </header>
+      {explanation !== null && (
+        <ExplanationPanel
+          explanation={explanation}
+          onClose={() => {
+            setExplanation(null);
+          }}
+          {...(explanationLabels === undefined ? {} : { labels: explanationLabels })}
+        />
+      )}
       <div ref={bodyRef} className="grid min-h-0 flex-1 overflow-hidden" style={bodyStyle}>
         <main className="relative min-h-0 min-w-0">
           <Canvas
@@ -786,75 +969,45 @@ export function App(): ReactElement {
           </aside>
         )}
       </div>
+
+      {isComposeOpen && (
+        <ComposeDialog
+          prompt={composePrompt}
+          isComposing={isComposing}
+          result={composeResult}
+          errorMessage={composeError}
+          onPromptChange={setComposePrompt}
+          onSubmit={() => {
+            void handleCompose();
+          }}
+          onApply={handleApplyProposal}
+          onClose={() => {
+            setIsComposeOpen(false);
+            setComposeResult(null);
+            setComposeError(null);
+          }}
+          {...(composeLabels === undefined ? {} : { labels: composeLabels })}
+        />
+      )}
+
+      {isAskOpen && (
+        <AskPalette
+          prompt={askPrompt}
+          isAsking={isAsking}
+          result={askResult}
+          errorMessage={askError}
+          onPromptChange={setAskPrompt}
+          onSubmit={() => {
+            void handleAsk();
+          }}
+          onClose={() => {
+            setIsAskOpen(false);
+          }}
+          {...(askLabels === undefined ? {} : { labels: askLabels })}
+        />
+      )}
     </div>
   );
-}
-
-function buildPipelineDef(
-  graph: GraphModel,
-  cells: NotebookCell[],
-): { nodes: NodeDef[]; edges: EdgeDef[] } {
-  const nodes: NodeDef[] = Object.values(graph.nodes).map((node) => {
-    const cellIndex = node.cellIndices[0] ?? 0;
-    const cell = cells[cellIndex];
-    const source = cell?.source ?? "";
-    const group = graph.groups[node.groupId];
-    return {
-      id: node.id,
-      name: node.name,
-      tag: node.tag,
-      inputs: node.inputs,
-      outputs: node.outputs,
-      source: stripMarkerLine(source),
-      notebookPath: group?.notebookPath ?? "",
-      cellIndices: node.cellIndices,
-    };
-  });
-  const edges: EdgeDef[] = Object.values(graph.wires).map((wire) => ({
-    sourceNodeId: wire.sourceNodeId,
-    sourcePort: wire.sourcePort,
-    targetNodeId: wire.targetNodeId,
-    targetPort: wire.targetPort,
-  }));
-  return { nodes, edges };
-}
-
-/** Drop the leading `# @node: …` marker line — it's metadata, not code to exec. */
-function stripMarkerLine(source: string): string {
-  const newline = source.indexOf("\n");
-  if (newline === -1) {
-    return "";
-  }
-  const firstLine = source.slice(0, newline).trim();
-  if (firstLine.startsWith("# @node:")) {
-    return source.slice(newline + 1);
-  }
-  return source;
-}
-
-async function synthesizeNode(
-  engineUrl: string,
-  request: NodeSynthesisRequest,
-): Promise<NodeSynthesisResponse> {
-  const response = await fetch(`${engineUrl}/nodes/synthesize`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request),
-  });
-  if (!response.ok) {
-    const message = await readErrorMessage(response);
-    throw new Error(message);
-  }
-  return (await response.json()) as NodeSynthesisResponse;
-}
-
-async function readErrorMessage(response: Response): Promise<string> {
-  try {
-    const body = (await response.json()) as { detail?: string };
-    return body.detail ?? `${response.status} ${response.statusText}`;
-  } catch {
-    return `${response.status} ${response.statusText}`;
-  }
 }
 
 function buildGenerationStatus(metadata: {
@@ -870,32 +1023,6 @@ function buildGenerationStatus(metadata: {
   }
   const when = new Date(metadata.lastGeneratedAt).toLocaleString();
   return s.generatedViaAt.replace("{backend}", backend).replace("{when}", when);
-}
-
-function renderEvent(event: EngineEvent): string {
-  switch (event.type) {
-    case "executionStarted":
-      return `▶ started ${event.pipelineId}`;
-    case "nodeCompleted":
-      return `${statusGlyph(event.result.status)} ${event.result.nodeId} · ${event.result.status}${event.result.error ? ` — ${event.result.error}` : ""}`;
-    case "pipelineCompleted":
-      return `✓ completed (${String(event.results.length)} nodes)`;
-    case "error":
-      return `✗ error: ${event.message}`;
-  }
-}
-
-function statusGlyph(status: string): string {
-  if (status === "ok") {
-    return "✓";
-  }
-  if (status === "error") {
-    return "✗";
-  }
-  if (status === "skipped") {
-    return "↷";
-  }
-  return "•";
 }
 
 function groupPalette(
