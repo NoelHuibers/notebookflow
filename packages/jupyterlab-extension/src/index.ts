@@ -28,6 +28,7 @@ import { INotebookTracker as NotebookTrackerToken } from "@jupyterlab/notebook";
 import { ISettingRegistry } from "@jupyterlab/settingregistry";
 import type { IDisposable } from "@lumino/disposable";
 import { DisposableDelegate } from "@lumino/disposable";
+import { registerCloudCommands } from "./cloud";
 import { SplitView } from "./SplitView";
 import { createSettingsAccessor } from "./settings";
 
@@ -75,6 +76,16 @@ const plugin: JupyterFrontEndPlugin<void> = {
       console.error("NotebookFlow: failed to load plugin settings", err);
     });
 
+    // Optional NotebookFlow Cloud account (#88): sign in/out, open/save
+    // cloud notebooks. Additive — everything else works signed-out.
+    const cloud = registerCloudCommands({
+      app,
+      tracker,
+      palette,
+      settings,
+      contents: app.serviceManager.contents,
+    });
+
     app.commands.addCommand(COMMAND_ID, {
       label: "NotebookFlow: Open Canvas",
       caption: "Open the NotebookFlow canvas alongside the active notebook.",
@@ -86,7 +97,12 @@ const plugin: JupyterFrontEndPlugin<void> = {
         }
         // Contents manager for the notebook-directory data uploads (kernel
         // runs use the notebook's directory as their working directory).
-        const widget = new SplitView(panel, settings, app.serviceManager.contents);
+        const widget = new SplitView(
+          panel,
+          settings,
+          app.serviceManager.contents,
+          cloud.openCloudMenu,
+        );
         app.shell.add(widget, "main", { mode: "split-right" });
         app.shell.activateById(widget.id);
       },

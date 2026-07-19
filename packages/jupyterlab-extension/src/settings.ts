@@ -17,6 +17,8 @@ export interface NotebookflowSettings {
   llmModel: string;
   llmApiKey: string;
   engineUrlOverride: string;
+  cloudBaseUrl: string;
+  cloudToken: string;
 }
 
 export const DEFAULT_SETTINGS: NotebookflowSettings = {
@@ -24,6 +26,8 @@ export const DEFAULT_SETTINGS: NotebookflowSettings = {
   llmModel: "",
   llmApiKey: "",
   engineUrlOverride: "",
+  cloudBaseUrl: "https://notebookflow.app",
+  cloudToken: "",
 };
 
 export interface SettingsAccessor {
@@ -31,6 +35,11 @@ export interface SettingsAccessor {
   get(): NotebookflowSettings;
   /** Subscribe to settings changes. Returns an unsubscribe function. */
   subscribe(listener: () => void): () => void;
+  /**
+   * Write one setting into the user's settings (awaits the registry load;
+   * rejects if the registry failed to load or the write fails).
+   */
+  set(key: keyof NotebookflowSettings, value: string): Promise<void>;
 }
 
 /**
@@ -66,6 +75,10 @@ export function createSettingsAccessor(
         listeners.delete(listener);
       };
     },
+    set: async (key: keyof NotebookflowSettings, value: string): Promise<void> => {
+      const loaded = await loading;
+      await loaded.set(key, value);
+    },
   };
 }
 
@@ -82,6 +95,8 @@ function readSettings(settings: ISettingRegistry.ISettings | null): Notebookflow
       "engineUrlOverride",
       DEFAULT_SETTINGS.engineUrlOverride,
     ),
+    cloudBaseUrl: readString(settings, "cloudBaseUrl", DEFAULT_SETTINGS.cloudBaseUrl),
+    cloudToken: readString(settings, "cloudToken", DEFAULT_SETTINGS.cloudToken),
   };
 }
 

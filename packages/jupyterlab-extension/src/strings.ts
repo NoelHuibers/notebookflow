@@ -60,6 +60,33 @@ export const en = {
   deleteDataFile: "Delete {name}",
   uploadDataFailed: "Upload failed: {message}",
   deleteDataFailed: "Delete failed: {message}",
+  cloud: "Cloud",
+  cloudTitle: "NotebookFlow Cloud account (optional): sign in, open or save cloud notebooks",
+  cloudMenuTitle: "NotebookFlow Cloud",
+  cloudMenuLabel: "Action",
+  cloudMenuSignIn: "Sign in…",
+  cloudMenuOpen: "Open cloud notebook…",
+  cloudMenuSave: "Save notebook to cloud",
+  cloudMenuSignOut: "Sign out",
+  cloudSignInTitle: "Sign in to NotebookFlow Cloud",
+  cloudSignInBody:
+    "Your sign-in code is {code}. Approve the sign-in in the browser window — JupyterLab keeps polling until you do.",
+  cloudOpenBrowser: "Open Browser",
+  cloudWaiting: "NotebookFlow: waiting for browser approval…",
+  cloudSignedIn: "Signed in to NotebookFlow Cloud.",
+  cloudSignedOut: "Signed out of NotebookFlow Cloud.",
+  cloudSignInFailed: "Cloud sign-in failed: {message}",
+  cloudSignInExpired: "The sign-in code expired before it was approved. Try again.",
+  cloudSignInDenied: "The sign-in was denied in the browser.",
+  cloudSignInRequired:
+    "Sign in to NotebookFlow Cloud first (command: NotebookFlow: Sign in to NotebookFlow Cloud).",
+  cloudSessionExpired: "Your cloud session expired — sign in again.",
+  cloudRequestFailed: "Cloud request failed: {message}",
+  cloudNoNotebooks: "No cloud notebooks saved yet.",
+  cloudPickNotebook: "Cloud notebook",
+  cloudOpened: "Opened cloud notebook {name}.",
+  cloudSaved: "Saved to NotebookFlow Cloud as {name}.",
+  cloudNoNotebookOpen: "Open a notebook before saving it to the cloud.",
 };
 
 export const de: typeof en = {
@@ -110,6 +137,35 @@ export const de: typeof en = {
   deleteDataFile: "{name} löschen",
   uploadDataFailed: "Hochladen fehlgeschlagen: {message}",
   deleteDataFailed: "Löschen fehlgeschlagen: {message}",
+  cloud: "Cloud",
+  cloudTitle:
+    "NotebookFlow-Cloud-Konto (optional): anmelden, Cloud-Notebooks öffnen oder speichern",
+  cloudMenuTitle: "NotebookFlow Cloud",
+  cloudMenuLabel: "Aktion",
+  cloudMenuSignIn: "Anmelden…",
+  cloudMenuOpen: "Cloud-Notebook öffnen…",
+  cloudMenuSave: "Notebook in der Cloud speichern",
+  cloudMenuSignOut: "Abmelden",
+  cloudSignInTitle: "Bei NotebookFlow Cloud anmelden",
+  cloudSignInBody:
+    "Dein Anmeldecode ist {code}. Bestätige die Anmeldung im Browserfenster — JupyterLab fragt so lange nach, bis du es tust.",
+  cloudOpenBrowser: "Browser öffnen",
+  cloudWaiting: "NotebookFlow: Warten auf die Bestätigung im Browser…",
+  cloudSignedIn: "Bei NotebookFlow Cloud angemeldet.",
+  cloudSignedOut: "Von NotebookFlow Cloud abgemeldet.",
+  cloudSignInFailed: "Cloud-Anmeldung fehlgeschlagen: {message}",
+  cloudSignInExpired:
+    "Der Anmeldecode ist abgelaufen, bevor er bestätigt wurde. Versuche es erneut.",
+  cloudSignInDenied: "Die Anmeldung wurde im Browser abgelehnt.",
+  cloudSignInRequired:
+    "Melde dich zuerst bei NotebookFlow Cloud an (Befehl: NotebookFlow: Sign in to NotebookFlow Cloud).",
+  cloudSessionExpired: "Deine Cloud-Sitzung ist abgelaufen — melde dich erneut an.",
+  cloudRequestFailed: "Cloud-Anfrage fehlgeschlagen: {message}",
+  cloudNoNotebooks: "Noch keine Cloud-Notebooks gespeichert.",
+  cloudPickNotebook: "Cloud-Notebook",
+  cloudOpened: "Cloud-Notebook {name} geöffnet.",
+  cloudSaved: "In NotebookFlow Cloud als {name} gespeichert.",
+  cloudNoNotebookOpen: "Öffne ein Notebook, bevor du es in der Cloud speicherst.",
 };
 
 // DE label tables for the shared app-core AI dialogs. Key sets mirror the

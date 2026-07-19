@@ -90,6 +90,12 @@ export interface AppProps {
    * the host has no analyzer (engine offline).
    */
   onAnalyzeCells?: (sources: string[]) => Promise<string[][]>;
+  /**
+   * Open the optional NotebookFlow Cloud menu (#88: sign in, open/save
+   * cloud notebooks). Optional: no button is rendered when the host does
+   * not provide it, keeping the surface fully usable signed-out.
+   */
+  onCloudMenu?: () => void;
 }
 
 // JupyterLab's UI language is fixed for the page's lifetime, so resolve the
@@ -131,6 +137,7 @@ export function App({
   onUploadDataFile,
   onDeleteDataFile,
   onAnalyzeCells,
+  onCloudMenu,
 }: AppProps): ReactElement {
   const [graph, setGraph] = useState<GraphModel>(EMPTY_GRAPH);
   const [cells, setCells] = useState<NotebookCell[]>([]);
@@ -927,6 +934,16 @@ export function App({
             .replace("{path}", bridge.notebookPath)}
         </span>
         <div style={headerActionsStyle}>
+          {onCloudMenu !== undefined && (
+            <button
+              type="button"
+              style={secondaryButtonStyle}
+              onClick={onCloudMenu}
+              title={s.cloudTitle}
+            >
+              {s.cloud}
+            </button>
+          )}
           <button
             type="button"
             style={secondaryButtonStyle}
