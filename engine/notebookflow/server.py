@@ -19,6 +19,7 @@ import ast
 import hashlib
 import json
 import os
+import shutil
 import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -38,6 +39,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
@@ -425,6 +427,15 @@ def _data_dir(app_ref: FastAPI, user_id: str | None = None) -> Path:
     return tenant
 
 
+def _tenant_data_dir(app_ref: FastAPI, user_id: str) -> Path:
+    """Return a tenant path without creating it.
+
+    Account deletion uses this form so deleting an already-empty account stays
+    idempotent and does not recreate the directory it just removed.
+    """
+    return _base_data_dir(app_ref) / _tenant_key(user_id)
+
+
 def _data_quota() -> tuple[int, int]:
     """(max files, max total bytes) allowed per store; 0 disables a limit."""
     max_files = int(os.environ.get("NOTEBOOKFLOW_MAX_DATA_FILES", "50"))
@@ -705,6 +716,19 @@ async def upload_data_file(
     return DataFileModel(name=name, size=len(contents))
 
 
+@app.get("/files/{name}", response_class=FileResponse)
+async def download_data_file(
+    name: str,
+    principal: Annotated[AuthPrincipal, Depends(require_auth)],
+) -> FileResponse:
+    """Download one file from the caller's tenant store for a data export."""
+    safe_name = _safe_data_name(name)
+    target = _data_dir(app, principal.user_id) / safe_name
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="data file not found")
+    return FileResponse(target, media_type="application/octet-stream", filename=safe_name)
+
+
 @app.delete("/files/{name}")
 async def delete_data_file(
     name: str,
@@ -713,6 +737,23 @@ async def delete_data_file(
     target = _data_dir(app, principal.user_id) / _safe_data_name(name)
     if target.is_file():
         target.unlink()
+    return {"status": "ok"}
+
+
+@app.delete("/account-data")
+async def delete_account_data(
+    principal: Annotated[AuthPrincipal, Depends(require_auth)],
+) -> dict[str, str]:
+    """Purge every uploaded file owned by the authenticated hosted user.
+
+    Static-token/open self-host requests have no tenant identity and must never
+    be allowed to erase the shared data directory wholesale.
+    """
+    if principal.user_id is None:
+        raise HTTPException(status_code=403, detail="a signed-in user is required")
+    tenant_dir = _tenant_data_dir(app, principal.user_id)
+    if tenant_dir.is_dir():
+        shutil.rmtree(tenant_dir)
     return {"status": "ok"}
 
 

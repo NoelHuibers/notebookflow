@@ -25,5 +25,10 @@ export async function handleApi(request: Request): Promise<Response | null> {
     return handleProviderKeyRequest(request);
   }
 
+  if (pathname === "/api/account/export") {
+    const { handleAccountRequest } = await import("./account.js");
+    return handleAccountRequest(request);
+  }
+
   return null;
 }

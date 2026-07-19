@@ -81,6 +81,7 @@ import { useCloudNotebooks } from "@/hooks/useCloudNotebooks";
 import { usePanelLayout } from "@/hooks/usePanelLayout";
 import { useWorkspaceExport } from "@/hooks/useWorkspaceExport";
 import { useWorkspaceFiles } from "@/hooks/useWorkspaceFiles";
+import { deleteAccount as deleteRemoteAccount, downloadAccountData } from "@/lib/accountDataApi";
 import { authClient, useSession } from "@/lib/auth-client";
 import { applyCellPatch } from "@/lib/cellPatch";
 import type {
@@ -1330,6 +1331,21 @@ export function App(): ReactElement {
     }
   }, []);
 
+  const handleExportAccountData = useCallback(async (): Promise<void> => {
+    await downloadAccountData(clientRef.current);
+  }, []);
+
+  const handleDeleteAccount = useCallback(async (): Promise<void> => {
+    // Purge the engine while the current JWT is still valid. Only after that
+    // succeeds do we remove the auth/database account and revoke its sessions.
+    await clientRef.current.deleteAccountData();
+    await deleteRemoteAccount();
+    setDataFiles([]);
+    setAccountKeyState("none");
+    setSettings((current) => ({ ...current, llmApiKey: "" }));
+    window.location.assign("/");
+  }, []);
+
   const handleSave = useCallback(async (): Promise<void> => {
     setSaveStatus("saving");
     try {
@@ -1443,6 +1459,8 @@ export function App(): ReactElement {
             onRemoveKeyFromAccount={() => {
               void handleRemoveKeyFromAccount();
             }}
+            onExportData={handleExportAccountData}
+            onDeleteAccount={handleDeleteAccount}
           />
         )}
 

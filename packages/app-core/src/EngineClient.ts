@@ -303,6 +303,14 @@ export class EngineClient {
     return (await res.json()) as DataFile;
   }
 
+  async downloadDataFile(name: string): Promise<Blob> {
+    const res = await fetch(this.filesUrl(name), { headers: this.authHeaders() });
+    if (!res.ok) {
+      throw new Error(`EngineClient.downloadDataFile: ${await readErrorMessage(res)}`);
+    }
+    return res.blob();
+  }
+
   async deleteDataFile(name: string): Promise<void> {
     const res = await fetch(this.filesUrl(name), {
       method: "DELETE",
@@ -310,6 +318,17 @@ export class EngineClient {
     });
     if (!res.ok) {
       throw new Error(`EngineClient.deleteDataFile: ${await readErrorMessage(res)}`);
+    }
+  }
+
+  /** Purge the signed-in user's complete tenant upload directory. */
+  async deleteAccountData(): Promise<void> {
+    const res = await fetch(`${this.httpBase()}/account-data`, {
+      method: "DELETE",
+      headers: this.authHeaders(),
+    });
+    if (!res.ok) {
+      throw new Error(`EngineClient.deleteAccountData: ${await readErrorMessage(res)}`);
     }
   }
 

@@ -78,6 +78,11 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       await sendWebResponse(res, await handleProviderKeyRequest(request));
       return;
     }
+    if (pathname === "/api/account/export") {
+      const { handleAccountRequest } = await import("../src/server/account.js");
+      await sendWebResponse(res, await handleAccountRequest(request));
+      return;
+    }
 
     // Typed via api/dist-server.d.ts (referenced above).
     const mod = await import("../dist/server/server.js");

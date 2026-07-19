@@ -111,6 +111,32 @@ describe("EngineClient auth headers", () => {
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(init.headers).toEqual({ Authorization: "Bearer jwt-123" });
   });
+
+  it("downloads an encoded data-file path with the bearer token", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("a,b\n1,2\n", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new EngineClient("wss://engine.example.com/ws", "jwt-123");
+
+    const blob = await client.downloadDataFile("Q1 sales.csv");
+
+    expect(await blob.text()).toBe("a,b\n1,2\n");
+    expect(fetchMock).toHaveBeenCalledWith("https://engine.example.com/files/Q1%20sales.csv", {
+      headers: { Authorization: "Bearer jwt-123" },
+    });
+  });
+
+  it("purges only the authenticated account-data endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new EngineClient("wss://engine.example.com/ws", "jwt-123");
+
+    await client.deleteAccountData();
+
+    expect(fetchMock).toHaveBeenCalledWith("https://engine.example.com/account-data", {
+      method: "DELETE",
+      headers: { Authorization: "Bearer jwt-123" },
+    });
+  });
 });
 
 describe("EngineClient credentials", () => {

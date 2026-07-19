@@ -2,6 +2,7 @@ import { LogOut, Settings as SettingsIcon, X } from "lucide-react";
 import type { ReactElement } from "react";
 import { useEffect } from "react";
 
+import { AccountDataControls } from "@/components/AccountDataControls";
 import { Button } from "@/components/ui/button";
 import { LanguageSwitcher, useI18n } from "@/lib/i18n";
 import type { UserSettings } from "@/lib/settings";
@@ -18,6 +19,8 @@ interface SettingsDialogProps {
   accountKeyState: "none" | "saved" | "saving";
   onSaveKeyToAccount: () => void;
   onRemoveKeyFromAccount: () => void;
+  onExportData: () => Promise<void>;
+  onDeleteAccount: () => Promise<void>;
 }
 
 export function SettingsDialog({
@@ -30,6 +33,8 @@ export function SettingsDialog({
   accountKeyState,
   onSaveKeyToAccount,
   onRemoveKeyFromAccount,
+  onExportData,
+  onDeleteAccount,
 }: SettingsDialogProps): ReactElement {
   const { t } = useI18n();
 
@@ -205,6 +210,14 @@ export function SettingsDialog({
             </div>
           )}
         </div>
+
+        {signedIn && email !== null && (
+          <AccountDataControls
+            email={email}
+            onExportData={onExportData}
+            onDeleteAccount={onDeleteAccount}
+          />
+        )}
       </div>
     </div>
   );

@@ -39,6 +39,25 @@ export const en = {
   saving: "Saving…",
   removeKey: "Remove from account",
   savedEncrypted: "Saved (encrypted)",
+
+  // GDPR account data controls.
+  dataRightsSection: "Your data",
+  dataRightsHelp:
+    "Download your account, saved notebooks, and uploaded data files, or permanently delete all server-side data tied to this account.",
+  exportData: "Export my data",
+  exportingData: "Preparing export…",
+  dataExportFailed: "Data export failed (HTTP {{status}}).",
+  dataExportFailedGeneric: "Data export failed. Please try again.",
+  deleteAccount: "Delete account",
+  deleteAccountConfirmTitle: "Permanently delete this account?",
+  deleteAccountConfirmBody:
+    "This removes your account, saved notebooks, uploaded data files, encrypted provider key, connected sign-ins, and every session. This cannot be undone. Browser-local notebooks and layout settings remain; the locally cached API key is cleared.",
+  deleteAccountConfirmLabel: "Enter {{email}} to confirm",
+  deleteAccountPermanently: "Delete permanently",
+  deletingAccount: "Deleting…",
+  cancelAccountDeletion: "Cancel",
+  accountDeletionFailed: "Account deletion failed (HTTP {{status}}). Sign in again and retry.",
+  accountDeletionFailedGeneric: "Account deletion failed. Sign in again and retry.",
 };
 
 export const de: typeof en = {
@@ -75,4 +94,24 @@ export const de: typeof en = {
   saving: "Wird gespeichert…",
   removeKey: "Aus Konto entfernen",
   savedEncrypted: "Gespeichert (verschlüsselt)",
+
+  dataRightsSection: "Deine Daten",
+  dataRightsHelp:
+    "Lade dein Konto, gespeicherte Notebooks und hochgeladene Datendateien herunter oder lösche dauerhaft alle serverseitigen Daten dieses Kontos.",
+  exportData: "Meine Daten exportieren",
+  exportingData: "Export wird vorbereitet…",
+  dataExportFailed: "Datenexport fehlgeschlagen (HTTP {{status}}).",
+  dataExportFailedGeneric: "Datenexport fehlgeschlagen. Bitte versuche es erneut.",
+  deleteAccount: "Konto löschen",
+  deleteAccountConfirmTitle: "Dieses Konto dauerhaft löschen?",
+  deleteAccountConfirmBody:
+    "Dadurch werden dein Konto, gespeicherte Notebooks, hochgeladene Datendateien, der verschlüsselte Anbieterschlüssel, verknüpfte Anmeldungen und alle Sitzungen gelöscht. Dies kann nicht rückgängig gemacht werden. Browserlokale Notebooks und Layout-Einstellungen bleiben erhalten; der lokal gespeicherte API-Schlüssel wird gelöscht.",
+  deleteAccountConfirmLabel: "Gib zur Bestätigung {{email}} ein",
+  deleteAccountPermanently: "Dauerhaft löschen",
+  deletingAccount: "Wird gelöscht…",
+  cancelAccountDeletion: "Abbrechen",
+  accountDeletionFailed:
+    "Kontolöschung fehlgeschlagen (HTTP {{status}}). Melde dich erneut an und versuche es noch einmal.",
+  accountDeletionFailedGeneric:
+    "Kontolöschung fehlgeschlagen. Melde dich erneut an und versuche es noch einmal.",
 };

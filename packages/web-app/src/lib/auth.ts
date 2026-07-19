@@ -14,8 +14,8 @@
 
 import { betterAuth } from "better-auth";
 import { jwt } from "better-auth/plugins/jwt";
+import { deleteUserVerificationRecords } from "../server/accountData.js";
 import { drizzleAdapter } from "./db/drizzle-adapter.js";
-
 import { db } from "./db/index.js";
 import * as schema from "./db/schema.js";
 
@@ -66,6 +66,20 @@ export const auth = betterAuth({
   socialProviders,
   plugins: [jwt()],
   trustedOrigins: trustedOrigins(),
+  user: {
+    // Enables BetterAuth's authenticated deletion endpoint. Deleting the user
+    // cascades through sessions, OAuth accounts, notebooks, and the encrypted
+    // provider-key row; the browser purges engine uploads immediately before it.
+    deleteUser: {
+      enabled: true,
+      // BetterAuth's verification table has no userId foreign key, so remove
+      // any email/user-id verification artifacts explicitly before the user
+      // row and all FK-owned rows are cascade-deleted.
+      beforeDelete: async (deletingUser) => {
+        await deleteUserVerificationRecords(db, deletingUser.id, deletingUser.email);
+      },
+    },
+  },
   // Pin the disclosed seven-day session lifetime instead of inheriting a
   // BetterAuth default that could change during a dependency upgrade.
   session: {

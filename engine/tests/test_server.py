@@ -306,6 +306,11 @@ def test_upload_list_and_delete_data_file(client: TestClient) -> None:
     assert listing.status_code == 200
     assert "orders.csv" in [entry["name"] for entry in listing.json()]
 
+    downloaded = client.get("/files/orders.csv")
+    assert downloaded.status_code == 200
+    assert downloaded.content == payload
+    assert 'filename="orders.csv"' in downloaded.headers["content-disposition"]
+
     deleted = client.delete("/files/orders.csv")
     assert deleted.status_code == 200
     after = client.get("/files")
@@ -730,6 +735,43 @@ def test_data_files_isolated_per_user(client: TestClient, monkeypatch: pytest.Mo
     assert client.get("/files", headers=a).json() == []
     assert len(client.get("/files", headers=b).json()) == 1
     client.delete("/files/orders.csv", headers=b)
+
+
+def test_data_file_download_isolated_per_user(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mint = _jwt_factory(monkeypatch)
+    owner = _bearer(mint("download-owner"))
+    other = _bearer(mint("download-other"))
+    client.post("/files", files={"file": ("private.csv", b"owner-only", "text/csv")}, headers=owner)
+
+    assert client.get("/files/private.csv", headers=owner).content == b"owner-only"
+    assert client.get("/files/private.csv", headers=other).status_code == 404
+
+    client.delete("/files/private.csv", headers=owner)
+
+
+def test_delete_account_data_removes_only_callers_tenant(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mint = _jwt_factory(monkeypatch)
+    owner = _bearer(mint("delete-owner"))
+    other = _bearer(mint("delete-other"))
+    for name in ("one.csv", "two.json"):
+        client.post("/files", files={"file": (name, b"owner", "text/plain")}, headers=owner)
+    client.post("/files", files={"file": ("keep.csv", b"other", "text/csv")}, headers=other)
+
+    assert client.delete("/account-data", headers=owner).status_code == 200
+    assert client.get("/files", headers=owner).json() == []
+    assert [entry["name"] for entry in client.get("/files", headers=other).json()] == ["keep.csv"]
+    # Idempotent: retrying after the directory is gone is still successful.
+    assert client.delete("/account-data", headers=owner).status_code == 200
+
+    client.delete("/account-data", headers=other)
+
+
+def test_delete_account_data_rejects_shared_self_host_store(client: TestClient) -> None:
+    assert client.delete("/account-data").status_code == 403
 
 
 def test_run_resolves_owning_users_data_file(
