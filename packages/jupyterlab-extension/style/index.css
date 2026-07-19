@@ -24,6 +24,9 @@
   }
 }
 @layer utilities {
+  .invisible {
+    visibility: hidden;
+  }
   .fixed {
     position: fixed;
   }
@@ -63,11 +66,17 @@
   .block {
     display: block;
   }
+  .contents {
+    display: contents;
+  }
   .flex {
     display: flex;
   }
   .grid {
     display: grid;
+  }
+  .hidden {
+    display: none;
   }
   .inline {
     display: inline;

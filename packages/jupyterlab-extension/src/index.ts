@@ -84,7 +84,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
         if (panel === null) {
           return;
         }
-        const widget = new SplitView(panel, settings);
+        // Contents manager for the notebook-directory data uploads (kernel
+        // runs use the notebook's directory as their working directory).
+        const widget = new SplitView(panel, settings, app.serviceManager.contents);
         app.shell.add(widget, "main", { mode: "split-right" });
         app.shell.activateById(widget.id);
       },

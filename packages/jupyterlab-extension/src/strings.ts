@@ -7,6 +7,7 @@
  */
 import type {
   AskPaletteLabels,
+  CellOutputsLabels,
   ComposeDialogLabels,
   ExplanationPanelLabels,
 } from "@notebookflow/app-core";
@@ -45,6 +46,15 @@ export const en = {
   askEmpty: "Ask a question or describe what you'd like to do.",
   askFailed: "Could not reach the engine: {message}",
   applyProposalFailed: "Could not apply the draft: {message}",
+  outputsHeading: "Outputs",
+  dataHeading: "Data",
+  upload: "Upload",
+  uploadData: "Upload data file (CSV, etc.)",
+  dataEmpty: "Upload a CSV, then read it by name in a node.",
+  dataUnavailable: "Data files unavailable: {message}",
+  deleteDataFile: "Delete {name}",
+  uploadDataFailed: "Upload failed: {message}",
+  deleteDataFailed: "Delete failed: {message}",
 };
 
 export const de: typeof en = {
@@ -80,6 +90,15 @@ export const de: typeof en = {
   askEmpty: "Stell eine Frage oder beschreibe, was du tun möchtest.",
   askFailed: "Engine konnte nicht erreicht werden: {message}",
   applyProposalFailed: "Entwurf konnte nicht angewendet werden: {message}",
+  outputsHeading: "Ausgaben",
+  dataHeading: "Daten",
+  upload: "Hochladen",
+  uploadData: "Datendatei hochladen (CSV usw.)",
+  dataEmpty: "Lade eine CSV hoch und lies sie dann in einem Knoten per Name.",
+  dataUnavailable: "Datendateien nicht verfügbar: {message}",
+  deleteDataFile: "{name} löschen",
+  uploadDataFailed: "Hochladen fehlgeschlagen: {message}",
+  deleteDataFailed: "Löschen fehlgeschlagen: {message}",
 };
 
 // DE label tables for the shared app-core AI dialogs. Key sets mirror the
@@ -111,6 +130,12 @@ export const deComposeDialogLabels: ComposeDialogLabels = {
 export const deExplanationPanelLabels: ExplanationPanelLabels = {
   title: "Pipeline-Erklärung",
   dismiss: "Erklärung schließen",
+};
+
+export const deCellOutputsLabels: CellOutputsLabels = {
+  streaming: "Wird gestreamt",
+  streamingTitle: "Knoten wird ausgeführt – Ausgabe wird gestreamt",
+  outputFigureAlt: "Ausgabe-Abbildung der Zelle",
 };
 
 /** The UI locale resolved at module load ("de" | "en"). */

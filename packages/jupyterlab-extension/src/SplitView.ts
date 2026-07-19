@@ -14,8 +14,10 @@
 
 import { ReactWidget } from "@jupyterlab/apputils";
 import type { NotebookPanel } from "@jupyterlab/notebook";
+import type { Contents } from "@jupyterlab/services";
 import type {
   AskAnswer,
+  DataFile,
   EngineEvent,
   PipelineDef,
   PipelineExplanation,
@@ -27,6 +29,12 @@ import type { ReactElement } from "react";
 import { createElement } from "react";
 
 import { App } from "./App";
+import {
+  deleteNotebookDataFile,
+  listNotebookDataFiles,
+  notebookDirname,
+  uploadNotebookDataFile,
+} from "./dataFiles";
 import { resolveEngineUrl } from "./engineUrl";
 import { KernelBridge } from "./KernelBridge";
 import { NotebookBridge } from "./NotebookBridge";
@@ -38,13 +46,14 @@ export class SplitView extends ReactWidget {
   private readonly panel: NotebookPanel;
   private readonly bridge: NotebookBridge;
   private readonly kernel: KernelBridge;
+  private readonly contents: Contents.IManager;
   /** Plugin settings seam (BYOK credentials + engine URL override). */
   readonly settings: SettingsAccessor;
   private engineClient: EngineClient;
   private engineUrl: string;
   private readonly unsubscribeSettings: () => void;
 
-  constructor(panel: NotebookPanel, settings: SettingsAccessor) {
+  constructor(panel: NotebookPanel, settings: SettingsAccessor, contents: Contents.IManager) {
     super();
     widgetCounter += 1;
     this.id = `notebookflow-split-${String(widgetCounter)}`;
@@ -54,6 +63,7 @@ export class SplitView extends ReactWidget {
 
     this.panel = panel;
     this.settings = settings;
+    this.contents = contents;
     this.bridge = new NotebookBridge(panel);
     this.engineUrl = resolveEngineUrl(settings.get().engineUrlOverride);
     this.engineClient = new EngineClient(this.engineUrl);
@@ -94,6 +104,38 @@ export class SplitView extends ReactWidget {
     );
   }
 
+  /** The Contents-API directory the notebook lives in ("" = server root). */
+  private get notebookDir(): string {
+    return notebookDirname(this.panel.context.path);
+  }
+
+  // Data files follow the execution path: the kernel runs with the notebook's
+  // directory as cwd, so kernel-path uploads go to the notebook's directory
+  // via the Jupyter Contents API; the engine's /files dir is only reachable
+  // by engine-path runs and is used as the fallback.
+  private listDataFiles(): Promise<DataFile[]> {
+    if (this.kernel.isReady) {
+      return listNotebookDataFiles(this.contents, this.notebookDir);
+    }
+    return this.engine.listDataFiles();
+  }
+
+  private async uploadDataFile(file: File): Promise<void> {
+    if (this.kernel.isReady) {
+      await uploadNotebookDataFile(this.contents, this.notebookDir, file);
+      return;
+    }
+    await this.engine.uploadDataFile(file);
+  }
+
+  private async deleteDataFile(name: string): Promise<void> {
+    if (this.kernel.isReady) {
+      await deleteNotebookDataFile(this.contents, this.notebookDir, name);
+      return;
+    }
+    await this.engine.deleteDataFile(name);
+  }
+
   private activeKernel(): NonNullable<
     NotebookPanel["sessionContext"]["session"]
   >["kernel"] extends infer K
@@ -129,6 +171,9 @@ export class SplitView extends ReactWidget {
         this.engine.proposePipeline(prompt, this.bridge.notebookPath),
       onExplain: (pipeline: PipelineDef): Promise<PipelineExplanation> =>
         this.engine.explainPipeline(pipeline),
+      onListDataFiles: (): Promise<DataFile[]> => this.listDataFiles(),
+      onUploadDataFile: (file: File): Promise<void> => this.uploadDataFile(file),
+      onDeleteDataFile: (name: string): Promise<void> => this.deleteDataFile(name),
     });
   }
 

@@ -9,7 +9,9 @@
 
 import type {
   AskAnswer,
+  DataFile,
   EngineEvent,
+  NbOutput,
   PipelineDef,
   PipelineExplanation,
   PipelineProposal,
@@ -17,6 +19,7 @@ import type {
 import {
   AskPalette,
   buildPipelineDef,
+  CellOutputs,
   ComposeDialog,
   ExplanationPanel,
   stripMarkerLine,
@@ -47,6 +50,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { NotebookBridge } from "./NotebookBridge";
 import {
   deAskPaletteLabels,
+  deCellOutputsLabels,
   deComposeDialogLabels,
   deExplanationPanelLabels,
   resolveLocale,
@@ -68,6 +72,9 @@ export interface AppProps {
   onAsk: (prompt: string, pipeline?: PipelineDef) => Promise<AskAnswer>;
   onCompose: (prompt: string) => Promise<PipelineProposal>;
   onExplain: (pipeline: PipelineDef) => Promise<PipelineExplanation>;
+  onListDataFiles: () => Promise<DataFile[]>;
+  onUploadDataFile: (file: File) => Promise<void>;
+  onDeleteDataFile: (name: string) => Promise<void>;
 }
 
 // JupyterLab's UI language is fixed for the page's lifetime, so resolve the
@@ -82,6 +89,7 @@ const nodeConfigLabels = locale === "de" ? deNodeConfigLabels : undefined;
 const askLabels = locale === "de" ? deAskPaletteLabels : undefined;
 const composeLabels = locale === "de" ? deComposeDialogLabels : undefined;
 const explanationLabels = locale === "de" ? deExplanationPanelLabels : undefined;
+const cellOutputsLabels = locale === "de" ? deCellOutputsLabels : undefined;
 
 const EMPTY_GRAPH: GraphModel = { nodes: {}, groups: {}, wires: {} };
 const DIVIDER_SIZE_PX = 10;
@@ -104,6 +112,9 @@ export function App({
   onAsk,
   onCompose,
   onExplain,
+  onListDataFiles,
+  onUploadDataFile,
+  onDeleteDataFile,
 }: AppProps): ReactElement {
   const [graph, setGraph] = useState<GraphModel>(EMPTY_GRAPH);
   const [selected, setSelected] = useState<NodeModel | null>(null);
@@ -131,6 +142,11 @@ export function App({
   const [isAsking, setIsAsking] = useState(false);
   const [askResult, setAskResult] = useState<AskAnswer | null>(null);
   const [askError, setAskError] = useState<string | null>(null);
+  // Per-node nbformat outputs captured from the shared EngineEvent stream, so
+  // BOTH the kernel and the engine execution paths feed the sidebar surface.
+  const [outputsByNodeId, setOutputsByNodeId] = useState<Record<string, NbOutput[]>>({});
+  const [dataFiles, setDataFiles] = useState<DataFile[]>([]);
+  const [dataError, setDataError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const lastOpenSidebarWidthRef = useRef(DEFAULT_SIDEBAR_WIDTH_PX);
 
@@ -448,6 +464,58 @@ export function App({
     setComposeError(null);
   }, [bridge, composeResult, pushErrorEvent]);
 
+  // Data files a pipeline reads by name (`pd.read_csv("orders.csv")`). The
+  // host decides the storage target per call: the notebook's directory via
+  // the Jupyter Contents API when a kernel is attached (kernel cwd), the
+  // engine's data dir otherwise.
+  const refreshDataFiles = useCallback(async (): Promise<void> => {
+    try {
+      setDataFiles(await onListDataFiles());
+      setDataError(null);
+    } catch (err: unknown) {
+      // Neither surface reachable (engine offline / contents error) — degrade
+      // to an empty list with a muted note instead of crashing the sidebar.
+      const message = err instanceof Error ? err.message : "unknown error";
+      setDataFiles([]);
+      setDataError(s.dataUnavailable.replace("{message}", message));
+    }
+  }, [onListDataFiles]);
+
+  useEffect(() => {
+    void refreshDataFiles();
+  }, [refreshDataFiles]);
+
+  const triggerUploadData = useCallback((): void => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".csv,.tsv,.json,.parquet,.txt,.xlsx";
+    input.onchange = (): void => {
+      const file = input.files?.[0];
+      if (file === undefined) {
+        return;
+      }
+      void onUploadDataFile(file)
+        .then(() => refreshDataFiles())
+        .catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : "unknown error";
+          pushErrorEvent(s.uploadDataFailed.replace("{message}", message));
+        });
+    };
+    input.click();
+  }, [onUploadDataFile, pushErrorEvent, refreshDataFiles]);
+
+  const handleDeleteData = useCallback(
+    (name: string): void => {
+      void onDeleteDataFile(name)
+        .then(() => refreshDataFiles())
+        .catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : "unknown error";
+          pushErrorEvent(s.deleteDataFailed.replace("{message}", message));
+        });
+    },
+    [onDeleteDataFile, pushErrorEvent, refreshDataFiles],
+  );
+
   // Cmd/Ctrl+K toggles the Ask AI palette, mirroring the web app + VS Code.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -476,6 +544,7 @@ export function App({
     );
     setEvents([]);
     setIsRunning(true);
+    setOutputsByNodeId({});
     bridge.clearOutputs(outputCellIndices);
     let nextExecutionCount = 0;
     void onRun(pipeline, (event) => {
@@ -483,6 +552,7 @@ export function App({
       if (event.type !== "nodeCompleted") {
         return;
       }
+      setOutputsByNodeId((prev) => ({ ...prev, [event.result.nodeId]: event.result.outputs }));
       const cellIndex = graph.nodes[event.result.nodeId]?.cellIndices[0];
       if (cellIndex === undefined) {
         return;
@@ -739,6 +809,15 @@ export function App({
               ) : (
                 <pre style={preStyle}>{JSON.stringify(selected, null, 2)}</pre>
               )}
+              {selected !== null && (outputsByNodeId[selected.id] ?? []).length > 0 && (
+                <>
+                  <h3 style={sectionTitleStyle}>{s.outputsHeading}</h3>
+                  <CellOutputs
+                    outputs={outputsByNodeId[selected.id] ?? []}
+                    {...(cellOutputsLabels === undefined ? {} : { labels: cellOutputsLabels })}
+                  />
+                </>
+              )}
             </div>
             <div style={sidebarScrollSectionStyle}>
               <div style={sidebarSectionHeaderStyle}>
@@ -778,6 +857,45 @@ export function App({
                     </section>
                   ))}
                 </div>
+              )}
+              <div style={{ ...sidebarSectionHeaderStyle, marginTop: 12 }}>
+                <h3 style={sectionTitleResetStyle}>{s.dataHeading}</h3>
+                <button
+                  type="button"
+                  style={secondaryButtonStyle}
+                  onClick={triggerUploadData}
+                  title={s.uploadData}
+                  aria-label={s.uploadData}
+                >
+                  {s.upload}
+                </button>
+              </div>
+              {dataError !== null ? (
+                <p style={mutedStyle}>{dataError}</p>
+              ) : dataFiles.length === 0 ? (
+                <p style={mutedStyle}>{s.dataEmpty}</p>
+              ) : (
+                <ul style={eventListStyle}>
+                  {dataFiles.map((file) => (
+                    <li key={file.name} style={dataItemStyle}>
+                      <span style={dataNameStyle} title={file.name}>
+                        {file.name}
+                      </span>
+                      <span style={dataSizeStyle}>{formatBytes(file.size)}</span>
+                      <button
+                        type="button"
+                        style={dataDeleteButtonStyle}
+                        onClick={() => {
+                          handleDeleteData(file.name);
+                        }}
+                        title={s.deleteDataFile.replace("{name}", file.name)}
+                        aria-label={s.deleteDataFile.replace("{name}", file.name)}
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               )}
               <h3 style={sectionTitleStyle}>
                 {s.executionEvents.replace("{count}", String(events.length))}
@@ -1101,6 +1219,43 @@ const paletteItemDescriptionStyle = {
   lineHeight: 1.35,
 } as const;
 
+const dataItemStyle = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  background: "var(--jp-layout-color0, #f9fafb)",
+  border: "1px solid var(--jp-border-color2, #d1d5db)",
+  borderRadius: 3,
+  padding: "4px 6px",
+  fontSize: 10,
+} as const;
+
+const dataNameStyle = {
+  minWidth: 0,
+  flex: 1,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontFamily: "var(--jp-code-font-family, monospace)",
+} as const;
+
+const dataSizeStyle = {
+  flexShrink: 0,
+  fontFamily: "var(--jp-code-font-family, monospace)",
+  color: "var(--jp-ui-font-color3, #9ca3af)",
+} as const;
+
+const dataDeleteButtonStyle = {
+  flexShrink: 0,
+  border: 0,
+  background: "transparent",
+  color: "var(--jp-ui-font-color2, #6b7280)",
+  cursor: "pointer",
+  padding: 2,
+  fontSize: 10,
+  lineHeight: 1,
+} as const;
+
 function groupPalette(
   nodes: NodeManifestDef[],
 ): Array<[NodeManifestDef["tag"], NodeManifestDef[]]> {
@@ -1127,4 +1282,14 @@ function sortPalette(nodes: NodeManifestDef[]): NodeManifestDef[] {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${String(bytes)} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
