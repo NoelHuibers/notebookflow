@@ -9,5 +9,5 @@
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "dist-webview", "webview"],
-  "references": [{ "path": "../graph-canvas" }]
+  "references": [{ "path": "../graph-canvas" }, { "path": "../app-core" }]
 }

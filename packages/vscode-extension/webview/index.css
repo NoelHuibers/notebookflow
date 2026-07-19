@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 @source "../../graph-canvas/src/**/*.{ts,tsx}";
+@source "../../app-core/src/**/*.{ts,tsx}";
 
 /* Map VS Code theme tokens into the shadcn / Tailwind design-token slots so
  * the shared Canvas components inherit the editor's colour scheme. */
@@ -14,6 +15,15 @@
   --border: var(--vscode-panel-border, oklch(1 0 0 / 10%));
   --primary: var(--vscode-button-background, oklch(0.922 0 0));
   --primary-foreground: var(--vscode-button-foreground, oklch(0.205 0 0));
+  --secondary: var(--vscode-button-secondaryBackground, oklch(0.269 0 0));
+  --secondary-foreground: var(--vscode-button-secondaryForeground, oklch(0.985 0 0));
+  --accent: var(--vscode-list-hoverBackground, oklch(0.269 0 0));
+  --accent-foreground: var(--vscode-foreground, oklch(0.985 0 0));
+  --destructive: var(--vscode-errorForeground, oklch(0.704 0.191 22.216));
+  --input: var(--vscode-input-background, oklch(1 0 0 / 15%));
+  --ring: var(--vscode-focusBorder, oklch(0.556 0 0));
+  --popover: var(--vscode-editorWidget-background, oklch(0.205 0 0));
+  --popover-foreground: var(--vscode-editorWidget-foreground, oklch(0.985 0 0));
   --radius: 0.5rem;
 }
 
@@ -27,6 +37,15 @@
   --color-border: var(--border);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
