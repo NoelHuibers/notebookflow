@@ -19,6 +19,16 @@
         "title": "NotebookFlow: Open Canvas",
         "category": "NotebookFlow",
         "icon": "$(circuit-board)"
+      },
+      {
+        "command": "notebookflow.setLlmApiKey",
+        "title": "NotebookFlow: Set LLM API Key",
+        "category": "NotebookFlow"
+      },
+      {
+        "command": "notebookflow.clearLlmApiKey",
+        "title": "NotebookFlow: Clear LLM API Key",
+        "category": "NotebookFlow"
       }
     ],
     "menus": {
@@ -37,6 +47,30 @@
           "type": "string",
           "default": "",
           "description": "Absolute path to a directory containing the NotebookFlow engine (a project with `uv run notebookflow` available). Leave blank to auto-discover an `engine/` directory under the workspace root."
+        },
+        "notebookflow.llm.provider": {
+          "type": "string",
+          "enum": [
+            "anthropic",
+            "openai",
+            "moonshot",
+            "deepseek",
+            "qwen"
+          ],
+          "enumDescriptions": [
+            "Anthropic (Claude)",
+            "OpenAI (GPT)",
+            "Moonshot (Kimi)",
+            "DeepSeek",
+            "Qwen"
+          ],
+          "default": "anthropic",
+          "description": "LLM provider used for the AI features (Ask / Compose / Explain / node synthesis). The API key is stored separately via the \"NotebookFlow: Set LLM API Key\" command."
+        },
+        "notebookflow.llm.model": {
+          "type": "string",
+          "default": "",
+          "description": "Model ID sent to the LLM provider. Leave blank to use the provider's default model."
         }
       }
     }

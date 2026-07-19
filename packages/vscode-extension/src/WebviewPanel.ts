@@ -5,7 +5,9 @@
  * URIs through ``webview.asWebviewUri`` so the bundle can be served from
  * the extension's install directory. Bridges three flows:
  *
- *   - extension → webview: ``ingest`` (cells), ``engineUrl`` / ``engineDown``.
+ *   - extension → webview: ``ingest`` (cells), ``engineUrl`` / ``engineDown``,
+ *     and ``credentials`` (BYOK provider/model from settings + the API key
+ *     from SecretStorage — sent via postMessage, never injected into the DOM).
  *   - webview → extension: ``patch`` plus output updates for executed cells.
  *
  * Pipeline execution itself runs webview ↔ engine over a direct WebSocket;
@@ -20,6 +22,9 @@ import * as vscode from "vscode";
 
 import type { EngineProcess } from "./EngineProcess.js";
 import { type NbOutput, NotebookBridge } from "./NotebookBridge.js";
+
+/** SecretStorage key holding the user's LLM API key (set via command). */
+export const LLM_API_KEY_SECRET = "notebookflow.llmApiKey";
 
 interface PatchMessage {
   type: "patch";
@@ -116,6 +121,7 @@ export class CanvasWebviewPanel {
   private readonly bridge: NotebookBridge;
   private readonly engine: EngineProcess;
   private readonly extensionUri: vscode.Uri;
+  private readonly secrets: vscode.SecretStorage;
   private readonly disposables: vscode.Disposable[] = [];
   private messageQueue: Promise<void> = Promise.resolve();
 
@@ -149,6 +155,7 @@ export class CanvasWebviewPanel {
     this.bridge = new NotebookBridge(doc);
     this.engine = engine;
     this.extensionUri = context.extensionUri;
+    this.secrets = context.secrets;
 
     panel.webview.html = this.renderHtml();
 
@@ -164,6 +171,16 @@ export class CanvasWebviewPanel {
       vscode.workspace.onDidChangeNotebookDocument((event) => {
         if (event.notebook === doc) {
           this.sendIngest();
+        }
+      }),
+      vscode.workspace.onDidChangeConfiguration((event) => {
+        if (event.affectsConfiguration("notebookflow.llm")) {
+          void this.sendCredentials();
+        }
+      }),
+      this.secrets.onDidChange((event) => {
+        if (event.key === LLM_API_KEY_SECRET) {
+          void this.sendCredentials();
         }
       }),
       panel.onDidDispose(() => {
@@ -195,6 +212,19 @@ export class CanvasWebviewPanel {
     });
   }
 
+  /**
+   * Push the BYOK LLM credentials (provider/model from settings, API key from
+   * SecretStorage) to the webview. Goes over postMessage — never into the
+   * rendered HTML — so the key is not exposed in the webview DOM.
+   */
+  private async sendCredentials(): Promise<void> {
+    const config = vscode.workspace.getConfiguration("notebookflow");
+    const provider = config.get<string>("llm.provider", "anthropic");
+    const model = config.get<string>("llm.model", "");
+    const apiKey = (await this.secrets.get(LLM_API_KEY_SECRET)) ?? "";
+    void this.panel.webview.postMessage({ type: "credentials", provider, model, apiKey });
+  }
+
   private async kickEngine(): Promise<void> {
     try {
       const url = await this.engine.start();
@@ -211,6 +241,7 @@ export class CanvasWebviewPanel {
   private async handleMessage(msg: unknown): Promise<void> {
     if (isReadyMessage(msg)) {
       this.sendIngest();
+      void this.sendCredentials();
       void this.kickEngine();
       return;
     }
