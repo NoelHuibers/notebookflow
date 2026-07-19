@@ -29,6 +29,26 @@
         "command": "notebookflow.clearLlmApiKey",
         "title": "NotebookFlow: Clear LLM API Key",
         "category": "NotebookFlow"
+      },
+      {
+        "command": "notebookflow.cloudSignIn",
+        "title": "NotebookFlow: Sign in to NotebookFlow Cloud",
+        "category": "NotebookFlow"
+      },
+      {
+        "command": "notebookflow.cloudSignOut",
+        "title": "NotebookFlow: Sign out of NotebookFlow Cloud",
+        "category": "NotebookFlow"
+      },
+      {
+        "command": "notebookflow.openCloudNotebook",
+        "title": "NotebookFlow: Open Cloud Notebook",
+        "category": "NotebookFlow"
+      },
+      {
+        "command": "notebookflow.saveNotebookToCloud",
+        "title": "NotebookFlow: Save Notebook to Cloud",
+        "category": "NotebookFlow"
       }
     ],
     "menus": {
@@ -71,6 +91,11 @@
           "type": "string",
           "default": "",
           "description": "Model ID sent to the LLM provider. Leave blank to use the provider's default model."
+        },
+        "notebookflow.cloud.baseUrl": {
+          "type": "string",
+          "default": "https://notebookflow.app",
+          "description": "Base URL of the hosted NotebookFlow web app, used only for the optional cloud account features (sign-in, cloud notebooks, account LLM key). Pipeline execution never goes there — runs always use the local engine."
         }
       }
     }
