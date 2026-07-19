@@ -174,6 +174,7 @@ export class SplitView extends ReactWidget {
       onListDataFiles: (): Promise<DataFile[]> => this.listDataFiles(),
       onUploadDataFile: (file: File): Promise<void> => this.uploadDataFile(file),
       onDeleteDataFile: (name: string): Promise<void> => this.deleteDataFile(name),
+      onAnalyzeCells: (sources: string[]): Promise<string[][]> => this.engine.analyzeCells(sources),
     });
   }
 
