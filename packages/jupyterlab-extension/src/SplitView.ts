@@ -23,12 +23,13 @@ import type {
   PipelineExplanation,
   PipelineProposal,
 } from "@notebookflow/app-core";
-import { EngineClient } from "@notebookflow/app-core";
+import { CloudClient, EngineClient } from "@notebookflow/app-core";
 import type { NodeManifestDef } from "@notebookflow/graph-canvas";
 import type { ReactElement } from "react";
 import { createElement } from "react";
 
 import { App } from "./App";
+import { normalizeCloudBaseUrl } from "./cloud";
 import {
   deleteNotebookDataFile,
   listNotebookDataFiles,
@@ -52,8 +53,15 @@ export class SplitView extends ReactWidget {
   private engineClient: EngineClient;
   private engineUrl: string;
   private readonly unsubscribeSettings: () => void;
+  /** Opens the optional NotebookFlow Cloud menu (header button, #88). */
+  private readonly onCloudMenu: (() => void) | undefined;
 
-  constructor(panel: NotebookPanel, settings: SettingsAccessor, contents: Contents.IManager) {
+  constructor(
+    panel: NotebookPanel,
+    settings: SettingsAccessor,
+    contents: Contents.IManager,
+    onCloudMenu?: () => void,
+  ) {
     super();
     widgetCounter += 1;
     this.id = `notebookflow-split-${String(widgetCounter)}`;
@@ -64,6 +72,7 @@ export class SplitView extends ReactWidget {
     this.panel = panel;
     this.settings = settings;
     this.contents = contents;
+    this.onCloudMenu = onCloudMenu;
     this.bridge = new NotebookBridge(panel);
     this.engineUrl = resolveEngineUrl(settings.get().engineUrlOverride);
     this.engineClient = new EngineClient(this.engineUrl);
@@ -95,13 +104,52 @@ export class SplitView extends ReactWidget {
     this.applyCredentials();
   }
 
+  /**
+   * Apply BYOK credentials to the LOCAL engine client. A locally configured
+   * key always wins; when it's empty and the user is signed in to
+   * NotebookFlow Cloud (#88), the account's saved provider key is fetched
+   * from the cloud base URL as a fallback (silent skip on failure).
+   */
   private applyCredentials(): void {
-    const { llmProvider, llmModel, llmApiKey } = this.settings.get();
-    this.engineClient.setCredentials(
-      llmApiKey.trim() === ""
-        ? null
-        : { provider: llmProvider, model: llmModel, apiKey: llmApiKey },
-    );
+    const { llmProvider, llmModel, llmApiKey, cloudToken, cloudBaseUrl } = this.settings.get();
+    if (llmApiKey.trim() !== "") {
+      this.engineClient.setCredentials({
+        provider: llmProvider,
+        model: llmModel,
+        apiKey: llmApiKey,
+      });
+      return;
+    }
+    this.engineClient.setCredentials(null);
+    if (cloudToken.trim() !== "") {
+      void this.applyCloudCredentials(this.engineClient, cloudBaseUrl, cloudToken.trim());
+    }
+  }
+
+  /** Fetch the cloud account's provider key and apply it if still relevant. */
+  private async applyCloudCredentials(
+    client: EngineClient,
+    baseUrl: string,
+    token: string,
+  ): Promise<void> {
+    try {
+      const key = await new CloudClient(normalizeCloudBaseUrl(baseUrl), token).getProviderKey();
+      if (key === null || key.apiKey === "") {
+        return;
+      }
+      // Skip stale results: the engine client may have been swapped or a
+      // local key configured while the request was in flight.
+      if (this.isDisposed || this.engineClient !== client) {
+        return;
+      }
+      if (this.settings.get().llmApiKey.trim() !== "") {
+        return;
+      }
+      client.setCredentials({ provider: key.provider, model: key.model, apiKey: key.apiKey });
+    } catch {
+      // Silent skip — the cloud account is optional and must never degrade
+      // the local experience.
+    }
   }
 
   /** The Contents-API directory the notebook lives in ("" = server root). */
@@ -175,6 +223,7 @@ export class SplitView extends ReactWidget {
       onUploadDataFile: (file: File): Promise<void> => this.uploadDataFile(file),
       onDeleteDataFile: (name: string): Promise<void> => this.deleteDataFile(name),
       onAnalyzeCells: (sources: string[]): Promise<string[][]> => this.engine.analyzeCells(sources),
+      ...(this.onCloudMenu === undefined ? {} : { onCloudMenu: this.onCloudMenu }),
     });
   }
 

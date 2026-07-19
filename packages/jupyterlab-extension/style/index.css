@@ -27,6 +27,9 @@
   .invisible {
     visibility: hidden;
   }
+  .absolute {
+    position: absolute;
+  }
   .fixed {
     position: fixed;
   }

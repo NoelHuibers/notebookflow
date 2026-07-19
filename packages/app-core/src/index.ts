@@ -10,6 +10,14 @@
  */
 
 export {
+  CloudClient,
+  type CloudClientOptions,
+  CloudRequestError,
+  type NotebookRecord,
+  type NotebookSummary,
+  type ProviderKey,
+} from "./CloudClient";
+export {
   AskPalette,
   type AskPaletteLabels,
   type AskPaletteProps,
@@ -66,3 +74,17 @@ export type {
   TriggerKind,
   TriggerSpec,
 } from "./types";
+export {
+  type ParsedWorkspace,
+  parseWorkspace,
+  type SavedWorkspace,
+  type SavedWorkspaceV1,
+  type SavedWorkspaceV2,
+  serializeWorkspace,
+  type WorkspaceFile,
+  type WorkspaceLayoutState,
+  WorkspaceParseError,
+  type WorkspaceParseErrorCode,
+  type WorkspacePosition,
+  type WorkspaceUiState,
+} from "./workspaceDoc";

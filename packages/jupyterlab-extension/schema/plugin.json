@@ -28,6 +28,18 @@
       "title": "Engine URL override",
       "default": "",
       "description": "Full WebSocket URL of a NotebookFlow engine (e.g. ws://127.0.0.1:8765/ws). Leave blank to auto-resolve through jupyter-server-proxy."
+    },
+    "cloudBaseUrl": {
+      "type": "string",
+      "title": "Cloud base URL",
+      "default": "https://notebookflow.app",
+      "description": "Base URL of the hosted NotebookFlow web app, used only for the optional cloud account features (sign-in, cloud notebooks, account LLM key). Pipeline execution never goes there — runs stay on the local kernel/engine."
+    },
+    "cloudToken": {
+      "type": "string",
+      "title": "Cloud access token",
+      "default": "",
+      "description": "Access token written by the \"NotebookFlow: Sign in to NotebookFlow Cloud\" command. Warning: like the LLM API key, this is stored in plain text in your Jupyter user settings directory — do not use on shared machines. Clear it (or run the sign-out command) to sign out."
     }
   },
   "additionalProperties": false

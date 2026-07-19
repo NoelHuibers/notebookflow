@@ -18,8 +18,10 @@ import { randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+import { CloudClient } from "@notebookflow/app-core";
 import * as vscode from "vscode";
 
+import { CLOUD_TOKEN_SECRET, getCloudBaseUrl } from "./cloud.js";
 import type { EngineProcess } from "./EngineProcess.js";
 import { type NbOutput, NotebookBridge } from "./NotebookBridge.js";
 
@@ -174,12 +176,15 @@ export class CanvasWebviewPanel {
         }
       }),
       vscode.workspace.onDidChangeConfiguration((event) => {
-        if (event.affectsConfiguration("notebookflow.llm")) {
+        if (
+          event.affectsConfiguration("notebookflow.llm") ||
+          event.affectsConfiguration("notebookflow.cloud")
+        ) {
           void this.sendCredentials();
         }
       }),
       this.secrets.onDidChange((event) => {
-        if (event.key === LLM_API_KEY_SECRET) {
+        if (event.key === LLM_API_KEY_SECRET || event.key === CLOUD_TOKEN_SECRET) {
           void this.sendCredentials();
         }
       }),
@@ -216,13 +221,49 @@ export class CanvasWebviewPanel {
    * Push the BYOK LLM credentials (provider/model from settings, API key from
    * SecretStorage) to the webview. Goes over postMessage — never into the
    * rendered HTML — so the key is not exposed in the webview DOM.
+   *
+   * When no local key is set and the user is signed in to NotebookFlow Cloud
+   * (#88), the account's saved provider key is used as a fallback — local
+   * settings always win, and the key still goes to the LOCAL engine only.
    */
   private async sendCredentials(): Promise<void> {
     const config = vscode.workspace.getConfiguration("notebookflow");
     const provider = config.get<string>("llm.provider", "anthropic");
     const model = config.get<string>("llm.model", "");
     const apiKey = (await this.secrets.get(LLM_API_KEY_SECRET)) ?? "";
+    if (apiKey === "") {
+      const cloud = await this.fetchCloudCredentials();
+      if (cloud !== null) {
+        void this.panel.webview.postMessage({ type: "credentials", ...cloud });
+        return;
+      }
+    }
     void this.panel.webview.postMessage({ type: "credentials", provider, model, apiKey });
+  }
+
+  /**
+   * The signed-in account's saved provider key from the cloud API, or null
+   * when signed out, no key is stored, or the request fails (silent skip —
+   * cloud is optional and must never degrade the local experience).
+   */
+  private async fetchCloudCredentials(): Promise<{
+    provider: string;
+    model: string;
+    apiKey: string;
+  } | null> {
+    const token = (await this.secrets.get(CLOUD_TOKEN_SECRET)) ?? "";
+    if (token === "") {
+      return null;
+    }
+    try {
+      const key = await new CloudClient(getCloudBaseUrl(), token).getProviderKey();
+      if (key === null || key.apiKey === "") {
+        return null;
+      }
+      return { provider: key.provider, model: key.model, apiKey: key.apiKey };
+    } catch {
+      return null;
+    }
   }
 
   private async kickEngine(): Promise<void> {

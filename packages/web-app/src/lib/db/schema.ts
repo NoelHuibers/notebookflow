@@ -112,6 +112,31 @@ export const rateLimit = sqliteTable("rate_limit", {
   lastRequest: integer("last_request").notNull(),
 });
 
+// OAuth 2.0 device-authorization grant codes (#88) — backing table for
+// BetterAuth's `deviceAuthorization` plugin (extensions sign in by showing a
+// user code; this row tracks the pending/approved/denied handshake). Export
+// name must stay `deviceCode` — it is the BetterAuth model name the drizzle
+// adapter looks up. Rows are short-lived (expiresAt, 15m).
+export const deviceCode = sqliteTable(
+  "device_code",
+  {
+    id: text("id").primaryKey(),
+    deviceCode: text("device_code").notNull(),
+    userCode: text("user_code").notNull(),
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    status: text("status").notNull(),
+    lastPolledAt: integer("last_polled_at", { mode: "timestamp_ms" }),
+    pollingInterval: integer("polling_interval"),
+    clientId: text("client_id"),
+    scope: text("scope"),
+  },
+  (table) => [
+    index("device_code_deviceCode_idx").on(table.deviceCode),
+    index("device_code_userCode_idx").on(table.userCode),
+  ],
+);
+
 // NotebookFlow per-user persistence (#60). `content` is the serialized
 // workspace JSON ({ files: { name, json }[] }) — the same shape as the zip
 // export. Scoped to the owning user; cascade-deleted with the account.

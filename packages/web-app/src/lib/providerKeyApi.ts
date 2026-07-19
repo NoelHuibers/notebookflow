@@ -1,32 +1,24 @@
 /**
- * Client for the opt-in server-side BYOK provider key (#61). Same-origin,
- * session-cookie authenticated; the server scopes everything to the owner.
+ * Client for the opt-in server-side BYOK provider key (#61). Thin adapter
+ * over app-core's CloudClient in cookie mode (same-origin, session-cookie
+ * authenticated; the server scopes everything to the owner).
  */
 
-export interface ProviderKey {
-  provider: string;
-  model: string;
-  apiKey: string;
-}
+import { CloudClient, type ProviderKey } from "@notebookflow/app-core";
+
+export type { ProviderKey };
+
+const client = new CloudClient("", "", { credentials: "include" });
 
 /** The owner's saved key, decrypted, or null if none is stored. */
 export async function getProviderKey(): Promise<ProviderKey | null> {
-  const res = await fetch("/api/provider-key", { credentials: "include" });
-  if (!res.ok) throw new Error(`provider-key GET failed: ${res.status}`);
-  return res.json();
+  return client.getProviderKey();
 }
 
 export async function saveProviderKey(key: ProviderKey): Promise<void> {
-  const res = await fetch("/api/provider-key", {
-    method: "PUT",
-    credentials: "include",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(key),
-  });
-  if (!res.ok) throw new Error(`provider-key PUT failed: ${res.status}`);
+  return client.saveProviderKey(key);
 }
 
 export async function deleteProviderKey(): Promise<void> {
-  const res = await fetch("/api/provider-key", { method: "DELETE", credentials: "include" });
-  if (!res.ok) throw new Error(`provider-key DELETE failed: ${res.status}`);
+  return client.deleteProviderKey();
 }

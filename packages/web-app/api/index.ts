@@ -47,6 +47,48 @@ async function toWebRequest(req: IncomingMessage): Promise<Request> {
 //     engine URL is user-configurable (BYO-engine Settings override).
 // Dev parity: vite.config.ts reads the same vercel.json block and applies it
 // as middleware.
+// CORS for the extension-facing API routes (VS Code / JupyterLab, #88).
+// Duplicated from src/server/api.ts (this file must not import ../src — see
+// the header comment). Keep both copies in sync.
+// `Access-Control-Allow-Credentials` is NEVER set: extensions authenticate
+// with `Authorization: Bearer` only, so cookies are never sent cross-origin
+// and cookie-authenticated (same-origin) responses are never exposed to
+// another origin. Non-matching paths are untouched, so browser cookie flows
+// are unaffected.
+const CORS_API_PREFIXES = ["/api/notebooks", "/api/provider-key", "/api/auth/device"];
+
+function isCorsApiPath(pathname: string): boolean {
+  return CORS_API_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+function corsPreflight(request: Request, pathname: string): Response | null {
+  if (request.method !== "OPTIONS" || !isCorsApiPath(pathname)) return null;
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "access-control-allow-origin": request.headers.get("origin") ?? "*",
+      "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
+      "access-control-allow-headers": "Authorization, Content-Type",
+      "access-control-max-age": "86400",
+      vary: "Origin",
+    },
+  });
+}
+
+function withCors(response: Response, request: Request, pathname: string): Response {
+  if (!isCorsApiPath(pathname)) return response;
+  const headers = new Headers(response.headers);
+  headers.set("access-control-allow-origin", request.headers.get("origin") ?? "*");
+  headers.append("vary", "Origin");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 async function sendWebResponse(res: ServerResponse, response: Response): Promise<void> {
   res.statusCode = response.status;
   const setCookie =
@@ -63,19 +105,31 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     const request = await toWebRequest(req);
     const { pathname } = new URL(request.url);
 
+    const preflight = corsPreflight(request, pathname);
+    if (preflight) {
+      await sendWebResponse(res, preflight);
+      return;
+    }
+
     if (pathname.startsWith("/api/auth/")) {
       const { auth } = await import("../src/lib/auth.js");
-      await sendWebResponse(res, await auth.handler(request));
+      await sendWebResponse(res, withCors(await auth.handler(request), request, pathname));
       return;
     }
     if (pathname === "/api/notebooks" || pathname.startsWith("/api/notebooks/")) {
       const { handleNotebooksRequest } = await import("../src/server/notebooks.js");
-      await sendWebResponse(res, await handleNotebooksRequest(request));
+      await sendWebResponse(
+        res,
+        withCors(await handleNotebooksRequest(request), request, pathname),
+      );
       return;
     }
     if (pathname === "/api/provider-key") {
       const { handleProviderKeyRequest } = await import("../src/server/providerKey.js");
-      await sendWebResponse(res, await handleProviderKeyRequest(request));
+      await sendWebResponse(
+        res,
+        withCors(await handleProviderKeyRequest(request), request, pathname),
+      );
       return;
     }
     if (pathname === "/api/account/export") {

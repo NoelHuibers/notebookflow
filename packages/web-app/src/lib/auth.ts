@@ -13,6 +13,8 @@
  */
 
 import { betterAuth } from "better-auth";
+import { bearer } from "better-auth/plugins/bearer";
+import { deviceAuthorization } from "better-auth/plugins/device-authorization";
 import { jwt } from "better-auth/plugins/jwt";
 import { deleteUserVerificationRecords } from "../server/accountData.js";
 import { drizzleAdapter } from "./db/drizzle-adapter.js";
@@ -61,10 +63,50 @@ function trustedOrigins(): string[] {
   return origins;
 }
 
+// Absolute URL of the device-approval page (#88). The plugin's default is the
+// relative "/device", which would render an unusable verification_uri in the
+// extensions; derive the absolute URL from BETTER_AUTH_URL the same way
+// trustedOrigins() does, falling back to relative when the env is absent
+// (local tooling without a configured base URL).
+function deviceVerificationUri(): string {
+  if (BETTER_AUTH_URL) {
+    try {
+      return new URL("/device", new URL(BETTER_AUTH_URL).origin).toString();
+    } catch {
+      // Malformed BETTER_AUTH_URL — BetterAuth itself will complain about it.
+    }
+  }
+  return "/device";
+}
+
+// Extension identifiers allowed to start a device-authorization flow (#88).
+const DEVICE_CLIENT_IDS = new Set(["notebookflow-vscode", "notebookflow-jupyterlab"]);
+
 export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: "sqlite", schema }),
   socialProviders,
-  plugins: [jwt()],
+  plugins: [
+    jwt(),
+    // Device-authorization grant for the VS Code / JupyterLab extensions
+    // (#88): they POST /device/code, show the user code, and poll
+    // /device/token until the user approves on /device.
+    deviceAuthorization({
+      expiresIn: "15m",
+      interval: "5s",
+      verificationUri: deviceVerificationUri(),
+      validateClient: (clientId) => DEVICE_CLIENT_IDS.has(clientId),
+      // better-auth 1.6.20 quirk: the plugin's zod options schema declares
+      // `schema` as z.custom() WITHOUT .optional(), so omitting the key makes
+      // parse() throw ("expected nonoptional") at startup. An empty object
+      // means "no model/field overrides" and passes validation.
+      schema: {},
+    }),
+    // Lets `auth.api.getSession({ headers })` accept `Authorization: Bearer
+    // <token>` so the extensions can call /api/notebooks etc. with the device
+    // access token. requireSignature stays false (the default): device tokens
+    // are raw, unsigned session tokens.
+    bearer(),
+  ],
   trustedOrigins: trustedOrigins(),
   user: {
     // Enables BetterAuth's authenticated deletion endpoint. Deleting the user
@@ -108,6 +150,11 @@ export const auth = betterAuth({
       "/sign-in/*": { window: 60, max: 10 },
       // JWT minting for the engine — called per engine session, keep roomier.
       "/token": { window: 60, max: 30 },
+      // Device-grant token polling (#88): extensions poll every 5s, so allow
+      // a poll per second of the window with headroom for retries.
+      "/device/token": { window: 60, max: 60 },
+      // Device-code issuance is once per sign-in attempt — keep it tight.
+      "/device/code": { window: 60, max: 10 },
     },
   },
 });
