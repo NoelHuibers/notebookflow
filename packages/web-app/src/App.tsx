@@ -24,6 +24,7 @@ import {
   defaultComposeDialogLabels,
   defaultExplanationPanelLabels,
   ExplanationPanel,
+  extractSourceFilename,
   renderEvent,
   stripMarkerLine,
 } from "@notebookflow/app-core";
@@ -98,7 +99,7 @@ import { formatError } from "@/lib/errors";
 import { pickSaveFileHandle, writeFileHandle } from "@/lib/fileSystemAccess";
 import { useI18n } from "@/lib/i18n";
 import type { IpynbDoc } from "@/lib/notebook";
-import { extractSourceFilename, serializeNotebook, toIpynbCell } from "@/lib/notebook";
+import { serializeNotebook, toIpynbCell } from "@/lib/notebook";
 import { sortPalette } from "@/lib/palette";
 import { deleteProviderKey, getProviderKey, saveProviderKey } from "@/lib/providerKeyApi";
 import type { UserSettings } from "@/lib/settings";

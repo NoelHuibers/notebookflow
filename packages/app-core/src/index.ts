@@ -47,6 +47,7 @@ export {
   sanitizeOutputHtml,
 } from "./outputHtml";
 export { buildPipelineDef, stripMarkerLine } from "./pipeline";
+export { extractSourceFilename } from "./sourceMeta";
 export type {
   AskAnswer,
   Credentials,
