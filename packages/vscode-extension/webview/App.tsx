@@ -18,6 +18,7 @@
 import type {
   AskAnswer,
   Credentials,
+  DataFile,
   EngineEvent,
   PipelineExplanation,
   PipelineProposal,
@@ -48,7 +49,7 @@ import {
 } from "@notebookflow/graph-canvas";
 import type { CellPatch, NotebookCell } from "@notebookflow/graph-canvas/sync";
 import { SyncEngine } from "@notebookflow/graph-canvas/sync";
-import { Command, Sparkles, Wand2 } from "lucide-react";
+import { Command, Database, Sparkles, Upload, Wand2, X } from "lucide-react";
 import type {
   ReactElement,
   KeyboardEvent as ReactKeyboardEvent,
@@ -157,6 +158,7 @@ export function App(): ReactElement {
   const [isAsking, setIsAsking] = useState(false);
   const [askResult, setAskResult] = useState<AskAnswer | null>(null);
   const [askError, setAskError] = useState<string | null>(null);
+  const [dataFiles, setDataFiles] = useState<DataFile[]>([]);
   const engineRef = useRef<SyncEngine | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
@@ -674,6 +676,72 @@ export function App(): ReactElement {
     setComposeError(null);
   }, [cells.length, composeResult]);
 
+  // Uploaded data files (CSVs etc.) a pipeline can read by name — the engine
+  // stores them in its data dir and runs cells with that as the working
+  // directory. Mirrors the web-app's Data rail.
+  const refreshDataFiles = useCallback(async (): Promise<void> => {
+    const client = clientRef.current;
+    if (client === null) {
+      setDataFiles([]);
+      return;
+    }
+    try {
+      setDataFiles(await client.listDataFiles());
+    } catch {
+      // Engine offline / older engine without /files — leave the list empty.
+      setDataFiles([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (engineUrl === null) {
+      setDataFiles([]);
+      return;
+    }
+    void refreshDataFiles();
+  }, [engineUrl, refreshDataFiles]);
+
+  const triggerUploadData = useCallback((): void => {
+    const client = clientRef.current;
+    if (client === null) {
+      return;
+    }
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".csv,.tsv,.json,.parquet,.txt,.xlsx";
+    input.onchange = (): void => {
+      const file = input.files?.[0];
+      if (file === undefined) {
+        return;
+      }
+      void client
+        .uploadDataFile(file)
+        .then(() => refreshDataFiles())
+        .catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : "unknown error";
+          pushErrorEvent(s.uploadDataFailed.replace("{message}", message));
+        });
+    };
+    input.click();
+  }, [pushErrorEvent, refreshDataFiles]);
+
+  const handleDeleteData = useCallback(
+    (name: string): void => {
+      const client = clientRef.current;
+      if (client === null) {
+        return;
+      }
+      void client
+        .deleteDataFile(name)
+        .then(() => refreshDataFiles())
+        .catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : "unknown error";
+          pushErrorEvent(s.deleteDataFailed.replace("{message}", message));
+        });
+    },
+    [pushErrorEvent, refreshDataFiles],
+  );
+
   // Cmd/Ctrl+K toggles the Ask AI palette, mirroring the web app.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -946,6 +1014,58 @@ export function App(): ReactElement {
                 </div>
               )}
 
+              <div className="mb-2 mt-4 flex items-center justify-between gap-2">
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  {s.dataHeading}
+                </h2>
+                <button
+                  type="button"
+                  onClick={triggerUploadData}
+                  disabled={engineUrl === null}
+                  title={s.uploadData}
+                  aria-label={s.uploadData}
+                  className="flex items-center rounded border border-border bg-background p-1 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Upload className="size-3" />
+                </button>
+              </div>
+              {engineUrl === null ? (
+                <p className="text-muted-foreground">{s.startEngineForData}</p>
+              ) : dataFiles.length === 0 ? (
+                <p className="text-muted-foreground">{s.dataEmpty}</p>
+              ) : (
+                <ul className="flex flex-col gap-1">
+                  {dataFiles.map((file) => (
+                    <li
+                      key={file.name}
+                      className="flex items-center gap-2 rounded border bg-background px-2 py-1"
+                    >
+                      <Database className="size-3 shrink-0 text-muted-foreground" />
+                      <span
+                        className="min-w-0 flex-1 truncate font-mono text-[11px]"
+                        title={file.name}
+                      >
+                        {file.name}
+                      </span>
+                      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                        {formatBytes(file.size)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleDeleteData(file.name);
+                        }}
+                        title={s.deleteDataFile.replace("{name}", file.name)}
+                        aria-label={s.deleteDataFile.replace("{name}", file.name)}
+                        className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
               <h2 className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 {s.executionEvents.replace("{count}", String(events.length))}
               </h2>
@@ -1051,4 +1171,14 @@ function sortPalette(nodes: NodeManifestDef[]): NodeManifestDef[] {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${String(bytes)} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

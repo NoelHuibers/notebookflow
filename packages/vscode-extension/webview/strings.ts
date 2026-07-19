@@ -51,6 +51,13 @@ export const en = {
   askEmpty: "Ask a question or describe what you'd like to do.",
   askFailed: "Could not reach the engine: {message}",
   startEngineToUseAi: "Start the engine to use the AI features.",
+  dataHeading: "Data",
+  uploadData: "Upload data file (CSV, etc.)",
+  dataEmpty: "Upload a CSV, then read it by name in a node.",
+  startEngineForData: "Start the engine to manage data files.",
+  deleteDataFile: "Delete {name}",
+  uploadDataFailed: "Upload failed: {message}",
+  deleteDataFailed: "Delete failed: {message}",
 };
 
 export const de: typeof en = {
@@ -93,6 +100,13 @@ export const de: typeof en = {
   askEmpty: "Stell eine Frage oder beschreibe, was du tun möchtest.",
   askFailed: "Engine konnte nicht erreicht werden: {message}",
   startEngineToUseAi: "Starte die Engine, um die KI-Funktionen zu nutzen.",
+  dataHeading: "Daten",
+  uploadData: "Datendatei hochladen (CSV usw.)",
+  dataEmpty: "Lade eine CSV hoch und lies sie dann in einem Knoten per Name.",
+  startEngineForData: "Starte die Engine, um Datendateien zu verwalten.",
+  deleteDataFile: "{name} löschen",
+  uploadDataFailed: "Hochladen fehlgeschlagen: {message}",
+  deleteDataFailed: "Löschen fehlgeschlagen: {message}",
 };
 
 // DE label tables for the shared app-core AI dialogs. Key sets mirror the
