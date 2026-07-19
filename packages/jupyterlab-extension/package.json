@@ -7,6 +7,7 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
+    "schema",
     "src"
   ],
   "scripts": {
@@ -23,9 +24,11 @@
     "@jupyterlab/nbformat": "^4.5.7",
     "@jupyterlab/notebook": "^4.5.7",
     "@jupyterlab/services": "^7.5.7",
+    "@jupyterlab/settingregistry": "^4.5.7",
     "@lumino/disposable": "^2.1.5",
     "@lumino/signaling": "^2.1.5",
     "@lumino/widgets": "^2.7.5",
+    "@notebookflow/app-core": "workspace:*",
     "@notebookflow/graph-canvas": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -41,6 +44,7 @@
   },
   "jupyterlab": {
     "extension": true,
+    "schemaDir": "schema",
     "outputDir": "../../engine/notebookflow/labextension"
   }
 }

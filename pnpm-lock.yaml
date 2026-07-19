@@ -124,6 +124,9 @@ importers:
       '@jupyterlab/services':
         specifier: ^7.5.7
         version: 7.5.7(react@18.3.1)
+      '@jupyterlab/settingregistry':
+        specifier: ^4.5.7
+        version: 4.5.7(react@18.3.1)
       '@lumino/disposable':
         specifier: ^2.1.5
         version: 2.1.5
@@ -133,6 +136,9 @@ importers:
       '@lumino/widgets':
         specifier: ^2.7.5
         version: 2.7.5
+      '@notebookflow/app-core':
+        specifier: workspace:*
+        version: link:../app-core
       '@notebookflow/graph-canvas':
         specifier: workspace:*
         version: link:../graph-canvas

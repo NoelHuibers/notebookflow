@@ -18,6 +18,7 @@ import type { EngineEvent, PipelineDef } from "./EngineClient";
 import { EngineClient } from "./EngineClient";
 import { KernelBridge } from "./KernelBridge";
 import { NotebookBridge } from "./NotebookBridge";
+import type { SettingsAccessor } from "./settings";
 
 let widgetCounter = 0;
 
@@ -26,8 +27,10 @@ export class SplitView extends ReactWidget {
   private readonly bridge: NotebookBridge;
   private readonly engine: EngineClient;
   private readonly kernel: KernelBridge;
+  /** Plugin settings seam (BYOK credentials + engine URL override). */
+  readonly settings: SettingsAccessor;
 
-  constructor(panel: NotebookPanel) {
+  constructor(panel: NotebookPanel, settings: SettingsAccessor) {
     super();
     widgetCounter += 1;
     this.id = `notebookflow-split-${String(widgetCounter)}`;
@@ -36,6 +39,7 @@ export class SplitView extends ReactWidget {
     this.addClass("notebookflow-split-view");
 
     this.panel = panel;
+    this.settings = settings;
     this.bridge = new NotebookBridge(panel);
     this.engine = new EngineClient();
     // Resolve fresh on each call: the active kernel can change (restart,

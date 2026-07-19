@@ -21,9 +21,11 @@ import type { JupyterFrontEnd, JupyterFrontEndPlugin } from "@jupyterlab/applica
 import { ICommandPalette, ToolbarButton } from "@jupyterlab/apputils";
 import type { INotebookTracker, NotebookPanel } from "@jupyterlab/notebook";
 import { INotebookTracker as NotebookTrackerToken } from "@jupyterlab/notebook";
+import { ISettingRegistry } from "@jupyterlab/settingregistry";
 import type { IDisposable } from "@lumino/disposable";
 import { DisposableDelegate } from "@lumino/disposable";
 
+import { createSettingsAccessor } from "./settings";
 import { SplitView } from "./SplitView";
 
 const COMMAND_ID = "notebookflow:open-canvas";
@@ -56,8 +58,20 @@ class OpenCanvasButtonExtension {
 const plugin: JupyterFrontEndPlugin<void> = {
   id: "@notebookflow/jupyterlab-extension:plugin",
   autoStart: true,
-  requires: [NotebookTrackerToken, ICommandPalette],
-  activate: (app: JupyterFrontEnd, tracker: INotebookTracker, palette: ICommandPalette): void => {
+  requires: [NotebookTrackerToken, ICommandPalette, ISettingRegistry],
+  activate: (
+    app: JupyterFrontEnd,
+    tracker: INotebookTracker,
+    palette: ICommandPalette,
+    settingRegistry: ISettingRegistry,
+  ): void => {
+    // Snapshot + subscription seam over the plugin settings (BYOK credentials
+    // and engine URL override). `get()` serves schema defaults until the
+    // registry finishes loading.
+    const settings = createSettingsAccessor(settingRegistry.load(plugin.id), (err: unknown) => {
+      console.error("NotebookFlow: failed to load plugin settings", err);
+    });
+
     app.commands.addCommand(COMMAND_ID, {
       label: "NotebookFlow: Open Canvas",
       caption: "Open the NotebookFlow canvas alongside the active notebook.",
@@ -67,7 +81,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
         if (panel === null) {
           return;
         }
-        const widget = new SplitView(panel);
+        const widget = new SplitView(panel, settings);
         app.shell.add(widget, "main", { mode: "split-right" });
         app.shell.activateById(widget.id);
       },
