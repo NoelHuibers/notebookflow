@@ -137,7 +137,15 @@ The web app boots with `preprocessing.ipynb` only; open the model/report noteboo
 
 ## Deploying
 
-The web-app is a static React bundle, the engine is a Python FastAPI server with WebSocket. They deploy separately.
+Hosted NotebookFlow users do not deploy an engine: the managed service supplies
+one and authenticates signed-in users with short-lived JWTs. The instructions
+below are for operators running their own NotebookFlow stack. The web app and
+Python FastAPI/WebSocket engine deploy separately.
+
+The provider comparison and the decision not to offer a misleading engine-only
+deploy button are recorded in
+[ADR 0002](docs/adr/0002-engine-deployment.md). Fly.io remains the maintained
+self-host reference; the Dockerfile is portable to other container hosts.
 
 ### Frontend on Vercel
 
@@ -152,6 +160,7 @@ The repo includes `Dockerfile`, `fly.toml`, and `.dockerignore` at the root. Fly
 ```powershell
 # One-time
 fly auth login
+# Set `app` in fly.toml to a globally unique Fly app name first.
 fly launch --no-deploy    # creates the app; keeps our fly.toml
 fly deploy
 
@@ -160,7 +169,14 @@ curl https://<app>.fly.dev/health    # -> {"status":"ok"}
 curl https://<app>.fly.dev/nodes     # -> [...] (3 built-in manifests)
 ```
 
-The container reads `PORT` (Fly sets this), binds `0.0.0.0`, and runs `uv run notebookflow`. `auto_stop_machines = "stop"` plus `min_machines_running = 0` keeps the engine within the free tier when idle.
+The container reads `PORT` (Fly sets this), binds `0.0.0.0`, and runs `uv run notebookflow`. `auto_stop_machines = "stop"` plus `min_machines_running = 0` reduces idle compute.
+
+Before sharing the deployment, configure one authentication mode from
+[`.env.example`](.env.example): either the web app's JWKS URL with production
+issuer/audience checks, or a high-entropy `NOTEBOOKFLOW_AUTH_TOKEN` stored with
+`fly secrets set`. Restrict `NOTEBOOKFLOW_ALLOWED_ORIGINS` to the frontend's
+origin. If uploaded files must survive restarts, mount a Fly Volume and point
+`NOTEBOOKFLOW_DATA_DIR` at it.
 
 After deploy, plug the URL into Vercel's env var (above), then redeploy the frontend.
 
@@ -169,6 +185,9 @@ After deploy, plug the URL into Vercel's env var (above), then redeploy the fron
 Same Dockerfile works on Railway, Render, Modal, DigitalOcean App Platform, or any container host. The engine just needs:
 - The container to set `PORT` (most PaaS do).
 - WebSocket support on the public route.
+- Engine authentication and an explicit browser CORS origin.
+- Persistent storage mounted at `NOTEBOOKFLOW_DATA_DIR` when uploaded files
+  must survive restarts.
 - ~512 MB RAM is plenty for the executor.
 
 ## Development
