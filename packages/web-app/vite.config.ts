@@ -95,7 +95,11 @@ export default defineConfig(({ mode }) => {
         { find: /^@\/(.*)$/, replacement: `${webAppSrc}/$1` },
       ],
     },
-    server: { port: 5173, strictPort: false },
+    // cors:false disables Vite's built-in CORS middleware, which would answer
+    // OPTIONS preflights before the /api dispatcher's own CORS handling
+    // (src/server/api.ts, #88) gets a chance — prod (api/index.ts) has no such
+    // layer, so keep dev behavior identical. The app itself is same-origin.
+    server: { port: 5173, strictPort: false, cors: false },
     // Load the auth server deps as native node modules instead of running them
     // through Vite's SSR transform — they're heavy (and use native libSQL), and
     // transforming them makes the dev /api/auth/* handler hang.

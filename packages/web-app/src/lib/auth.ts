@@ -95,6 +95,11 @@ export const auth = betterAuth({
       interval: "5s",
       verificationUri: deviceVerificationUri(),
       validateClient: (clientId) => DEVICE_CLIENT_IDS.has(clientId),
+      // better-auth 1.6.20 quirk: the plugin's zod options schema declares
+      // `schema` as z.custom() WITHOUT .optional(), so omitting the key makes
+      // parse() throw ("expected nonoptional") at startup. An empty object
+      // means "no model/field overrides" and passes validation.
+      schema: {},
     }),
     // Lets `auth.api.getSession({ headers })` accept `Authorization: Bearer
     // <token>` so the extensions can call /api/notebooks etc. with the device

@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as DeviceRouteImport } from './routes/device'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LegalImpressumRouteImport } from './routes/legal/impressum'
@@ -19,6 +20,11 @@ import { Route as LegalAgbRouteImport } from './routes/legal/agb'
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeviceRoute = DeviceRouteImport.update({
+  id: '/device',
+  path: '/device',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppRoute = AppRouteImport.update({
@@ -50,6 +56,7 @@ const LegalAgbRoute = LegalAgbRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRoute
+  '/device': typeof DeviceRoute
   '/login': typeof LoginRoute
   '/legal/agb': typeof LegalAgbRoute
   '/legal/datenschutz': typeof LegalDatenschutzRoute
@@ -58,6 +65,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/app': typeof AppRoute
+  '/device': typeof DeviceRoute
   '/login': typeof LoginRoute
   '/legal/agb': typeof LegalAgbRoute
   '/legal/datenschutz': typeof LegalDatenschutzRoute
@@ -67,6 +75,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/app': typeof AppRoute
+  '/device': typeof DeviceRoute
   '/login': typeof LoginRoute
   '/legal/agb': typeof LegalAgbRoute
   '/legal/datenschutz': typeof LegalDatenschutzRoute
@@ -77,6 +86,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/app'
+    | '/device'
     | '/login'
     | '/legal/agb'
     | '/legal/datenschutz'
@@ -85,6 +95,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/app'
+    | '/device'
     | '/login'
     | '/legal/agb'
     | '/legal/datenschutz'
@@ -93,6 +104,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/app'
+    | '/device'
     | '/login'
     | '/legal/agb'
     | '/legal/datenschutz'
@@ -102,6 +114,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRoute: typeof AppRoute
+  DeviceRoute: typeof DeviceRoute
   LoginRoute: typeof LoginRoute
   LegalAgbRoute: typeof LegalAgbRoute
   LegalDatenschutzRoute: typeof LegalDatenschutzRoute
@@ -115,6 +128,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/device': {
+      id: '/device'
+      path: '/device'
+      fullPath: '/device'
+      preLoaderRoute: typeof DeviceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app': {
@@ -158,6 +178,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRoute: AppRoute,
+  DeviceRoute: DeviceRoute,
   LoginRoute: LoginRoute,
   LegalAgbRoute: LegalAgbRoute,
   LegalDatenschutzRoute: LegalDatenschutzRoute,

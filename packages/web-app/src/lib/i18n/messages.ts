@@ -12,6 +12,7 @@ import * as canvas from "./messages/canvas";
 import * as cells from "./messages/cells";
 import * as cloud from "./messages/cloud";
 import * as compose from "./messages/compose";
+import * as device from "./messages/device";
 import * as explanation from "./messages/explanation";
 import * as files from "./messages/files";
 import * as landing from "./messages/landing";
@@ -59,6 +60,7 @@ export const en = {
   triggers: triggers.en,
   cells: cells.en,
   files: files.en,
+  device: device.en,
 };
 
 export type Messages = typeof en;
@@ -101,4 +103,5 @@ export const de: Messages = {
   triggers: triggers.de,
   cells: cells.de,
   files: files.de,
+  device: device.de,
 };
