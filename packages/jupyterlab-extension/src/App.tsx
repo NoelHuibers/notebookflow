@@ -22,9 +22,17 @@ import {
   CellOutputs,
   ComposeDialog,
   ExplanationPanel,
+  extractSourceFilename,
   stripMarkerLine,
 } from "@notebookflow/app-core";
-import type { GraphModel, NodeManifestDef, NodeModel, WireModel } from "@notebookflow/graph-canvas";
+import type {
+  GraphModel,
+  NodeManifestDef,
+  NodeModel,
+  RunSummary,
+  RuntimeState,
+  WireModel,
+} from "@notebookflow/graph-canvas";
 import {
   addManifestNode,
   Canvas,
@@ -36,9 +44,10 @@ import {
   readNotebookflowMetadata,
   resolveNodeConfig,
   sanitizeConfigForManifest,
+  setPaletteDragData,
   writeNotebookflowMetadata,
 } from "@notebookflow/graph-canvas";
-import type { CellPatch } from "@notebookflow/graph-canvas/sync";
+import type { CellPatch, NotebookCell } from "@notebookflow/graph-canvas/sync";
 import { SyncEngine } from "@notebookflow/graph-canvas/sync";
 import type {
   ReactElement,
@@ -75,6 +84,12 @@ export interface AppProps {
   onListDataFiles: () => Promise<DataFile[]>;
   onUploadDataFile: (file: File) => Promise<void>;
   onDeleteDataFile: (name: string) => Promise<void>;
+  /**
+   * Statically analyze cell sources into per-cell defined-variable names
+   * (feeds port autocomplete). Optional: the canvas degrades gracefully when
+   * the host has no analyzer (engine offline).
+   */
+  onAnalyzeCells?: (sources: string[]) => Promise<string[][]>;
 }
 
 // JupyterLab's UI language is fixed for the page's lifetime, so resolve the
@@ -115,8 +130,10 @@ export function App({
   onListDataFiles,
   onUploadDataFile,
   onDeleteDataFile,
+  onAnalyzeCells,
 }: AppProps): ReactElement {
   const [graph, setGraph] = useState<GraphModel>(EMPTY_GRAPH);
+  const [cells, setCells] = useState<NotebookCell[]>([]);
   const [selected, setSelected] = useState<NodeModel | null>(null);
   const [events, setEvents] = useState<EngineEvent[]>([]);
   const [isRunning, setIsRunning] = useState(false);
@@ -127,6 +144,16 @@ export function App({
   const [isConfigSubmitting, setIsConfigSubmitting] = useState(false);
   const [paletteNodes, setPaletteNodes] = useState<NodeManifestDef[]>([]);
   const [paletteError, setPaletteError] = useState<string | null>(null);
+  const [paletteSearch, setPaletteSearch] = useState("");
+  const [paletteTagFilter, setPaletteTagFilter] = useState<ReadonlySet<NodeManifestDef["tag"]>>(
+    new Set(),
+  );
+  const [runtimeByNode, setRuntimeByNode] = useState<Record<string, RuntimeState>>({});
+  const [timingByNode, setTimingByNode] = useState<Record<string, number>>({});
+  const [rowsByNode, setRowsByNode] = useState<Record<string, number>>({});
+  const [runSummary, setRunSummary] = useState<RunSummary | null>(null);
+  const [definedByCell, setDefinedByCell] = useState<string[][]>([]);
+  const [showMinimap, setShowMinimap] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH_PX);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
@@ -164,7 +191,9 @@ export function App({
 
   useEffect(() => {
     const ingest = (): void => {
-      void engine.ingestNotebook(bridge.notebookPath, bridge.readCells(), Date.now());
+      const nextCells = bridge.readCells();
+      setCells(nextCells);
+      void engine.ingestNotebook(bridge.notebookPath, nextCells, Date.now());
     };
     ingest();
     bridge.changed.connect(ingest);
@@ -246,11 +275,14 @@ export function App({
     [engine, graph],
   );
 
-  const handleAddNode = (manifest: NodeManifestDef): void => {
+  const handleAddNode = (
+    manifest: NodeManifestDef,
+    options?: { insertAtCellIndex?: number },
+  ): void => {
     void addManifestNode(engine, onSynthesizeNode, {
       manifest,
       notebookPath: bridge.notebookPath,
-      insertAtCellIndex: bridge.readCells().length,
+      insertAtCellIndex: options?.insertAtCellIndex ?? bridge.readCells().length,
       onSynthesisError: (err: unknown) => {
         const message = err instanceof Error ? err.message : "unknown error";
         setEvents((prev) => [
@@ -267,10 +299,156 @@ export function App({
     });
   };
 
+  // Palette drops on the canvas: gap drops carry the notebook group and the
+  // preceding cell index, so the new cell lands between nodes; pane drops
+  // append at the end. Mirrors the VS Code webview's handlePaneDrop.
+  const handlePaneDrop = (
+    manifestId: string,
+    target: {
+      groupId?: string;
+      insertAfterCellIndex?: number;
+      position?: { x: number; y: number };
+    },
+  ): void => {
+    const manifest = paletteNodes.find((entry) => entry.id === manifestId);
+    if (manifest === undefined) {
+      return;
+    }
+    if (target.groupId !== undefined && target.insertAfterCellIndex !== undefined) {
+      handleAddNode(manifest, { insertAtCellIndex: target.insertAfterCellIndex + 1 });
+      return;
+    }
+    handleAddNode(manifest);
+  };
+
+  // Ask the engine to statically analyze cell sources so port autocomplete can
+  // suggest real variable names. Debounced and re-run whenever cells change;
+  // gracefully empty when the host has no analyzer or the call fails.
+  useEffect(() => {
+    if (onAnalyzeCells === undefined) {
+      setDefinedByCell([]);
+      return;
+    }
+    let cancelled = false;
+    const sources = cells.map((cell) => cell.source);
+    const timer = window.setTimeout(() => {
+      void onAnalyzeCells(sources)
+        .then((result) => {
+          if (!cancelled) {
+            setDefinedByCell(result);
+          }
+        })
+        .catch(() => {
+          // Analyzer unavailable — autocomplete just loses the extra names.
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [cells, onAnalyzeCells]);
+
+  // Map each node to the variable names defined across its cell(s).
+  const variablesByNode = useMemo<Record<string, string[]>>(() => {
+    const result: Record<string, string[]> = {};
+    for (const node of Object.values(graph.nodes)) {
+      const names = new Set<string>();
+      for (const cellIndex of node.cellIndices) {
+        for (const name of definedByCell[cellIndex] ?? []) {
+          names.add(name);
+        }
+      }
+      result[node.id] = [...names];
+    }
+    return result;
+  }, [graph, definedByCell]);
+
+  // Canvas meta line: a static input filename parsed from the node's first
+  // cell source, merged with the post-run row count from rowsByNode. Either
+  // half may be absent; a node with neither gets no entry.
+  const metaByNode = useMemo<Record<string, { filename?: string; rows?: number }>>(() => {
+    const result: Record<string, { filename?: string; rows?: number }> = {};
+    for (const node of Object.values(graph.nodes)) {
+      const cellIndex = node.cellIndices[0];
+      const source = cellIndex === undefined ? undefined : cells[cellIndex]?.source;
+      const filename = source === undefined ? null : extractSourceFilename(source);
+      const rows = rowsByNode[node.id];
+      if (filename === null && rows === undefined) {
+        continue;
+      }
+      const entry: { filename?: string; rows?: number } = {};
+      if (filename !== null) {
+        entry.filename = filename;
+      }
+      if (rows !== undefined) {
+        entry.rows = rows;
+      }
+      result[node.id] = entry;
+    }
+    return result;
+  }, [graph, cells, rowsByNode]);
+
+  // Input refs that don't resolve to a wire — typically a cross-notebook
+  // `alias:Node.port` pointing at a missing alias/node. Surfaced on the canvas.
+  const unresolvedByNode = useMemo<Record<string, string[]>>(() => {
+    const resolvedByTarget = new Map<string, Set<string>>();
+    for (const wire of Object.values(graph.wires)) {
+      let set = resolvedByTarget.get(wire.targetNodeId);
+      if (set === undefined) {
+        set = new Set();
+        resolvedByTarget.set(wire.targetNodeId, set);
+      }
+      set.add(wire.targetPort);
+    }
+    const result: Record<string, string[]> = {};
+    for (const node of Object.values(graph.nodes)) {
+      const resolved = resolvedByTarget.get(node.id) ?? new Set<string>();
+      const unresolved = node.inputs.filter((ref) => !resolved.has(ref));
+      if (unresolved.length > 0) {
+        result[node.id] = unresolved;
+      }
+    }
+    return result;
+  }, [graph]);
+
   const manifestById = useMemo(
     () => new Map(paletteNodes.map((manifest) => [manifest.id, manifest] as const)),
     [paletteNodes],
   );
+
+  const filteredPaletteNodes = useMemo(() => {
+    const query = paletteSearch.trim().toLowerCase();
+    return paletteNodes.filter((manifest) => {
+      if (paletteTagFilter.size > 0 && !paletteTagFilter.has(manifest.tag)) {
+        return false;
+      }
+      if (query === "") {
+        return true;
+      }
+      return (
+        manifest.name.toLowerCase().includes(query) ||
+        manifest.id.toLowerCase().includes(query) ||
+        manifest.description.toLowerCase().includes(query)
+      );
+    });
+  }, [paletteNodes, paletteSearch, paletteTagFilter]);
+
+  const togglePaletteTag = useCallback((tag: NodeManifestDef["tag"]) => {
+    setPaletteTagFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) {
+        next.delete(tag);
+      } else {
+        next.add(tag);
+      }
+      return next;
+    });
+  }, []);
+
+  const clearPaletteFilters = useCallback(() => {
+    setPaletteTagFilter(new Set());
+    setPaletteSearch("");
+  }, []);
 
   const selectedManifest = useMemo(() => {
     const manifestId = readNotebookflowMetadata(selected?.metadata).manifestId;
@@ -516,12 +694,22 @@ export function App({
     [onDeleteDataFile, pushErrorEvent, refreshDataFiles],
   );
 
-  // Cmd/Ctrl+K toggles the Ask AI palette, mirroring the web app + VS Code.
+  // Cmd/Ctrl+K toggles the Ask AI palette; bare M toggles the minimap
+  // (suppressed while typing so it doesn't hijack editing), mirroring the
+  // web app + VS Code.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if ((event.metaKey || event.ctrlKey) && (event.key === "k" || event.key === "K")) {
         event.preventDefault();
         setIsAskOpen((open) => !open);
+        return;
+      }
+      if (isTypingTarget(event.target)) {
+        return;
+      }
+      if (event.key === "m" || event.key === "M") {
+        event.preventDefault();
+        setShowMinimap((on) => !on);
       }
     };
     document.addEventListener("keydown", onKeyDown);
@@ -545,12 +733,43 @@ export function App({
     setEvents([]);
     setIsRunning(true);
     setOutputsByNodeId({});
+    setTimingByNode({});
+    setRowsByNode({});
+    setRunSummary(null);
+    const initialRuntime: Record<string, RuntimeState> = {};
+    for (const nodeId of Object.keys(graph.nodes)) {
+      initialRuntime[nodeId] = "queued";
+    }
+    setRuntimeByNode(initialRuntime);
     bridge.clearOutputs(outputCellIndices);
     let nextExecutionCount = 0;
     void onRun(pipeline, (event) => {
       setEvents((prev) => [...prev, event]);
+      if (event.type === "nodeStarted") {
+        setRuntimeByNode((prev) => ({ ...prev, [event.nodeId]: "running" }));
+        return;
+      }
+      if (event.type === "pipelineCompleted") {
+        setRunSummary({
+          totalNodes: event.results.length,
+          ok: event.results.filter((r) => r.status === "ok").length,
+          error: event.results.filter((r) => r.status === "error").length,
+          skipped: event.results.filter((r) => r.status === "skipped").length,
+          totalDurationMs: event.results.reduce((sum, r) => sum + r.durationMs, 0),
+        });
+        return;
+      }
       if (event.type !== "nodeCompleted") {
         return;
+      }
+      const status = event.result.status;
+      if (status === "ok" || status === "error" || status === "skipped") {
+        setRuntimeByNode((prev) => ({ ...prev, [event.result.nodeId]: status }));
+      }
+      setTimingByNode((prev) => ({ ...prev, [event.result.nodeId]: event.result.durationMs }));
+      const rows = event.result.metadata?.rows;
+      if (rows !== undefined) {
+        setRowsByNode((prev) => ({ ...prev, [event.result.nodeId]: rows }));
       }
       setOutputsByNodeId((prev) => ({ ...prev, [event.result.nodeId]: event.result.outputs }));
       const cellIndex = graph.nodes[event.result.nodeId]?.cellIndices[0];
@@ -768,6 +987,17 @@ export function App({
             onOutputsChange={handleOutputsChange}
             onWireCreate={handleWireCreate}
             onWireDelete={handleWireDelete}
+            onPaneDrop={handlePaneDrop}
+            variablesByNode={variablesByNode}
+            runtimeByNode={runtimeByNode}
+            timingByNode={timingByNode}
+            metaByNode={metaByNode}
+            unresolvedByNode={unresolvedByNode}
+            runSummary={runSummary}
+            showMinimap={showMinimap}
+            onToggleMinimap={() => {
+              setShowMinimap((on) => !on);
+            }}
             {...(canvasLabels === undefined ? {} : { labels: canvasLabels })}
           />
         </main>
@@ -824,13 +1054,58 @@ export function App({
                 <h3 style={sectionTitleResetStyle}>{s.paletteHeading}</h3>
                 <span style={countBadgeStyle}>{paletteNodes.length}</span>
               </div>
+              {paletteNodes.length > 0 && (
+                <div style={paletteFilterBarStyle}>
+                  <input
+                    type="text"
+                    value={paletteSearch}
+                    onChange={(event) => {
+                      setPaletteSearch(event.target.value);
+                    }}
+                    placeholder={s.paletteSearchPlaceholder}
+                    aria-label={s.paletteSearchLabel}
+                    style={paletteSearchInputStyle}
+                  />
+                  <div style={paletteTagRowStyle}>
+                    <button
+                      type="button"
+                      onClick={clearPaletteFilters}
+                      style={
+                        paletteTagFilter.size === 0
+                          ? paletteTagPillActiveStyle
+                          : paletteTagPillStyle
+                      }
+                    >
+                      {s.paletteAll}
+                    </button>
+                    {TAG_ORDER.map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => {
+                          togglePaletteTag(tag);
+                        }}
+                        style={
+                          paletteTagFilter.has(tag)
+                            ? paletteTagPillActiveStyle
+                            : paletteTagPillStyle
+                        }
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               {paletteError !== null ? (
                 <p style={mutedStyle}>{paletteError}</p>
               ) : paletteNodes.length === 0 ? (
                 <p style={mutedStyle}>{s.loadingRegistry}</p>
+              ) : filteredPaletteNodes.length === 0 ? (
+                <p style={mutedStyle}>{s.paletteNoMatches}</p>
               ) : (
                 <div style={paletteStyle}>
-                  {groupPalette(paletteNodes).map(([tag, nodes]) => (
+                  {groupPalette(filteredPaletteNodes).map(([tag, nodes]) => (
                     <section key={tag}>
                       <div style={paletteGroupTitleStyle}>{tag}</div>
                       <div style={paletteGroupListStyle}>
@@ -839,9 +1114,14 @@ export function App({
                             key={manifest.id}
                             type="button"
                             style={paletteItemStyle}
+                            draggable
+                            onDragStart={(event) => {
+                              setPaletteDragData(event.dataTransfer, manifest.id);
+                            }}
                             onClick={() => {
                               handleAddNode(manifest);
                             }}
+                            title={s.appendOrDrag}
                           >
                             <div style={paletteItemHeaderStyle}>
                               <span style={{ fontWeight: 600 }}>{manifest.name}</span>
@@ -1166,6 +1446,50 @@ const paletteStyle = {
   gap: 10,
 } as const;
 
+const paletteFilterBarStyle = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+  marginBottom: 8,
+  paddingBottom: 8,
+  borderBottom: "1px solid var(--jp-border-color2, #d1d5db)",
+} as const;
+
+const paletteSearchInputStyle = {
+  border: "1px solid var(--jp-border-color2, #d1d5db)",
+  background: "var(--jp-layout-color0, #f9fafb)",
+  color: "var(--jp-ui-font-color1, #111827)",
+  borderRadius: 3,
+  padding: "3px 6px",
+  fontSize: 11,
+  outline: "none",
+} as const;
+
+const paletteTagRowStyle = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 4,
+} as const;
+
+const paletteTagPillStyle = {
+  fontSize: 9,
+  textTransform: "uppercase",
+  letterSpacing: 0.5,
+  padding: "1px 8px",
+  borderRadius: 999,
+  border: "1px solid var(--jp-border-color2, #d1d5db)",
+  background: "var(--jp-layout-color0, #f9fafb)",
+  color: "var(--jp-ui-font-color2, #6b7280)",
+  cursor: "pointer",
+} as const;
+
+const paletteTagPillActiveStyle = {
+  ...paletteTagPillStyle,
+  border: "1px solid var(--jp-ui-font-color1, #111827)",
+  background: "var(--jp-ui-font-color1, #111827)",
+  color: "var(--jp-layout-color1, #ffffff)",
+} as const;
+
 const paletteGroupTitleStyle = {
   fontSize: 10,
   textTransform: "uppercase",
@@ -1282,6 +1606,20 @@ function sortPalette(nodes: NodeManifestDef[]): NodeManifestDef[] {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+/** True when the event target is a text-editing surface (input/textarea/CodeMirror). */
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  const tag = target.tagName;
+  return (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    target.isContentEditable ||
+    target.closest(".cm-editor") !== null
+  );
 }
 
 function formatBytes(bytes: number): string {

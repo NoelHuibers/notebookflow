@@ -29,10 +29,18 @@ import {
   ComposeDialog,
   EngineClient,
   ExplanationPanel,
+  extractSourceFilename,
   renderEvent,
   stripMarkerLine,
 } from "@notebookflow/app-core";
-import type { GraphModel, NodeManifestDef, NodeModel, WireModel } from "@notebookflow/graph-canvas";
+import type {
+  GraphModel,
+  NodeManifestDef,
+  NodeModel,
+  RunSummary,
+  RuntimeState,
+  WireModel,
+} from "@notebookflow/graph-canvas";
 import {
   addManifestNode,
   Canvas,
@@ -143,6 +151,16 @@ export function App(): ReactElement {
   const [isConfigSubmitting, setIsConfigSubmitting] = useState(false);
   const [paletteNodes, setPaletteNodes] = useState<NodeManifestDef[]>([]);
   const [paletteError, setPaletteError] = useState<string | null>(null);
+  const [paletteSearch, setPaletteSearch] = useState("");
+  const [paletteTagFilter, setPaletteTagFilter] = useState<ReadonlySet<NodeManifestDef["tag"]>>(
+    new Set(),
+  );
+  const [runtimeByNode, setRuntimeByNode] = useState<Record<string, RuntimeState>>({});
+  const [timingByNode, setTimingByNode] = useState<Record<string, number>>({});
+  const [rowsByNode, setRowsByNode] = useState<Record<string, number>>({});
+  const [runSummary, setRunSummary] = useState<RunSummary | null>(null);
+  const [definedByCell, setDefinedByCell] = useState<string[][]>([]);
+  const [showMinimap, setShowMinimap] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH_PX);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
@@ -354,10 +372,136 @@ export function App(): ReactElement {
     };
   }, [engineUrl]);
 
+  // Ask the engine to statically analyze cell sources so port autocomplete can
+  // suggest real variable names. Debounced and re-run whenever cells change.
+  // Mirrors the web-app's analyze effect; empty when the engine is offline.
+  useEffect(() => {
+    const client = clientRef.current;
+    if (engineUrl === null || client === null) {
+      setDefinedByCell([]);
+      return;
+    }
+    let cancelled = false;
+    const sources = cells.map((cell) => cell.source);
+    const timer = window.setTimeout(() => {
+      void client
+        .analyzeCells(sources)
+        .then((result) => {
+          if (!cancelled) {
+            setDefinedByCell(result);
+          }
+        })
+        .catch(() => {
+          // Analyzer unavailable — autocomplete just loses the extra names.
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [cells, engineUrl]);
+
+  // Map each node to the variable names defined across its cell(s).
+  const variablesByNode = useMemo<Record<string, string[]>>(() => {
+    const result: Record<string, string[]> = {};
+    for (const node of Object.values(graph.nodes)) {
+      const names = new Set<string>();
+      for (const cellIndex of node.cellIndices) {
+        for (const name of definedByCell[cellIndex] ?? []) {
+          names.add(name);
+        }
+      }
+      result[node.id] = [...names];
+    }
+    return result;
+  }, [graph, definedByCell]);
+
+  // Canvas meta line: a static input filename parsed from the node's first
+  // cell source, merged with the post-run row count from rowsByNode. Either
+  // half may be absent; a node with neither gets no entry.
+  const metaByNode = useMemo<Record<string, { filename?: string; rows?: number }>>(() => {
+    const result: Record<string, { filename?: string; rows?: number }> = {};
+    for (const node of Object.values(graph.nodes)) {
+      const cellIndex = node.cellIndices[0];
+      const source = cellIndex === undefined ? undefined : cells[cellIndex]?.source;
+      const filename = source === undefined ? null : extractSourceFilename(source);
+      const rows = rowsByNode[node.id];
+      if (filename === null && rows === undefined) {
+        continue;
+      }
+      const entry: { filename?: string; rows?: number } = {};
+      if (filename !== null) {
+        entry.filename = filename;
+      }
+      if (rows !== undefined) {
+        entry.rows = rows;
+      }
+      result[node.id] = entry;
+    }
+    return result;
+  }, [graph, cells, rowsByNode]);
+
+  // Input refs that don't resolve to a wire — typically a cross-notebook
+  // `alias:Node.port` pointing at a missing alias/node. Surfaced on the canvas.
+  const unresolvedByNode = useMemo<Record<string, string[]>>(() => {
+    const resolvedByTarget = new Map<string, Set<string>>();
+    for (const wire of Object.values(graph.wires)) {
+      let set = resolvedByTarget.get(wire.targetNodeId);
+      if (set === undefined) {
+        set = new Set();
+        resolvedByTarget.set(wire.targetNodeId, set);
+      }
+      set.add(wire.targetPort);
+    }
+    const result: Record<string, string[]> = {};
+    for (const node of Object.values(graph.nodes)) {
+      const resolved = resolvedByTarget.get(node.id) ?? new Set<string>();
+      const unresolved = node.inputs.filter((ref) => !resolved.has(ref));
+      if (unresolved.length > 0) {
+        result[node.id] = unresolved;
+      }
+    }
+    return result;
+  }, [graph]);
+
   const manifestById = useMemo(
     () => new Map(paletteNodes.map((manifest) => [manifest.id, manifest] as const)),
     [paletteNodes],
   );
+
+  const filteredPaletteNodes = useMemo(() => {
+    const query = paletteSearch.trim().toLowerCase();
+    return paletteNodes.filter((manifest) => {
+      if (paletteTagFilter.size > 0 && !paletteTagFilter.has(manifest.tag)) {
+        return false;
+      }
+      if (query === "") {
+        return true;
+      }
+      return (
+        manifest.name.toLowerCase().includes(query) ||
+        manifest.id.toLowerCase().includes(query) ||
+        manifest.description.toLowerCase().includes(query)
+      );
+    });
+  }, [paletteNodes, paletteSearch, paletteTagFilter]);
+
+  const togglePaletteTag = useCallback((tag: NodeManifestDef["tag"]) => {
+    setPaletteTagFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) {
+        next.delete(tag);
+      } else {
+        next.add(tag);
+      }
+      return next;
+    });
+  }, []);
+
+  const clearPaletteFilters = useCallback(() => {
+    setPaletteTagFilter(new Set());
+    setPaletteSearch("");
+  }, []);
 
   const selectedManifest = useMemo(() => {
     const manifestId = readNotebookflowMetadata(selected?.metadata).manifestId;
@@ -742,12 +886,22 @@ export function App(): ReactElement {
     [pushErrorEvent, refreshDataFiles],
   );
 
-  // Cmd/Ctrl+K toggles the Ask AI palette, mirroring the web app.
+  // Cmd/Ctrl+K toggles the Ask AI palette; bare M toggles the minimap
+  // (suppressed while typing so it doesn't hijack editing), mirroring the
+  // web app.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if ((event.metaKey || event.ctrlKey) && (event.key === "k" || event.key === "K")) {
         event.preventDefault();
         setIsAskOpen((open) => !open);
+        return;
+      }
+      if (isTypingTarget(event.target)) {
+        return;
+      }
+      if (event.key === "m" || event.key === "M") {
+        event.preventDefault();
+        setShowMinimap((on) => !on);
       }
     };
     document.addEventListener("keydown", onKeyDown);
@@ -770,6 +924,14 @@ export function App(): ReactElement {
       return;
     }
     setEvents([]);
+    setTimingByNode({});
+    setRowsByNode({});
+    setRunSummary(null);
+    const initialRuntime: Record<string, RuntimeState> = {};
+    for (const nodeId of Object.keys(graph.nodes)) {
+      initialRuntime[nodeId] = "queued";
+    }
+    setRuntimeByNode(initialRuntime);
     setIsRunning(true);
 
     const outputCellIndices = Array.from(
@@ -795,6 +957,9 @@ export function App(): ReactElement {
       try {
         const parsed = JSON.parse(event.data as string) as EngineEvent;
         setEvents((prev) => [...prev, parsed]);
+        if (parsed.type === "nodeStarted") {
+          setRuntimeByNode((prev) => ({ ...prev, [parsed.nodeId]: "running" }));
+        }
         if (parsed.type === "nodeCompleted") {
           const cellIndex = graph.nodes[parsed.result.nodeId]?.cellIndices[0];
           if (cellIndex !== undefined) {
@@ -806,6 +971,27 @@ export function App(): ReactElement {
               durationMs: parsed.result.durationMs,
             });
           }
+          const status = parsed.result.status;
+          if (status === "ok" || status === "error" || status === "skipped") {
+            setRuntimeByNode((prev) => ({ ...prev, [parsed.result.nodeId]: status }));
+          }
+          setTimingByNode((prev) => ({
+            ...prev,
+            [parsed.result.nodeId]: parsed.result.durationMs,
+          }));
+          const rows = parsed.result.metadata?.rows;
+          if (rows !== undefined) {
+            setRowsByNode((prev) => ({ ...prev, [parsed.result.nodeId]: rows }));
+          }
+        }
+        if (parsed.type === "pipelineCompleted") {
+          setRunSummary({
+            totalNodes: parsed.results.length,
+            ok: parsed.results.filter((r) => r.status === "ok").length,
+            error: parsed.results.filter((r) => r.status === "error").length,
+            skipped: parsed.results.filter((r) => r.status === "skipped").length,
+            totalDurationMs: parsed.results.reduce((sum, r) => sum + r.durationMs, 0),
+          });
         }
         if (parsed.type === "pipelineCompleted" || parsed.type === "error") {
           setIsRunning(false);
@@ -909,6 +1095,16 @@ export function App(): ReactElement {
             onWireCreate={handleWireCreate}
             onWireDelete={handleWireDelete}
             onPaneDrop={handlePaneDrop}
+            variablesByNode={variablesByNode}
+            runtimeByNode={runtimeByNode}
+            timingByNode={timingByNode}
+            metaByNode={metaByNode}
+            unresolvedByNode={unresolvedByNode}
+            runSummary={runSummary}
+            showMinimap={showMinimap}
+            onToggleMinimap={() => {
+              setShowMinimap((on) => !on);
+            }}
             {...(canvasLabels === undefined ? {} : { labels: canvasLabels })}
           />
         </main>
@@ -965,13 +1161,58 @@ export function App(): ReactElement {
                   {paletteNodes.length}
                 </span>
               </div>
+              {paletteNodes.length > 0 && (
+                <div className="mb-3 flex flex-col gap-2 border-b pb-2">
+                  <input
+                    type="text"
+                    value={paletteSearch}
+                    onChange={(event) => {
+                      setPaletteSearch(event.target.value);
+                    }}
+                    placeholder={s.paletteSearchPlaceholder}
+                    aria-label={s.paletteSearchLabel}
+                    className="rounded border bg-background px-2 py-1 text-[11px] outline-none focus:ring-1 focus:ring-ring"
+                  />
+                  <div className="flex flex-wrap gap-1">
+                    <button
+                      type="button"
+                      onClick={clearPaletteFilters}
+                      className={
+                        paletteTagFilter.size === 0
+                          ? "rounded-full border border-foreground bg-foreground px-2 py-0.5 text-[10px] uppercase tracking-wider text-background transition-colors"
+                          : "rounded-full border bg-background px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:bg-muted/70"
+                      }
+                    >
+                      {s.paletteAll}
+                    </button>
+                    {TAG_ORDER.map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => {
+                          togglePaletteTag(tag);
+                        }}
+                        className={
+                          paletteTagFilter.has(tag)
+                            ? "rounded-full border border-foreground bg-foreground px-2 py-0.5 text-[10px] uppercase tracking-wider text-background transition-colors"
+                            : "rounded-full border bg-background px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:bg-muted/70"
+                        }
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               {paletteError !== null ? (
                 <p className="text-muted-foreground">{paletteError}</p>
               ) : paletteNodes.length === 0 ? (
                 <p className="text-muted-foreground">{s.loadingRegistry}</p>
+              ) : filteredPaletteNodes.length === 0 ? (
+                <p className="text-muted-foreground">{s.paletteNoMatches}</p>
               ) : (
                 <div className="flex flex-col gap-3">
-                  {groupPalette(paletteNodes).map(([tag, nodes]) => (
+                  {groupPalette(filteredPaletteNodes).map(([tag, nodes]) => (
                     <section key={tag} className="flex flex-col gap-2">
                       <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                         {tag}
@@ -1171,6 +1412,15 @@ function sortPalette(nodes: NodeManifestDef[]): NodeManifestDef[] {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+/** True when the event target is a text-editing surface (input/textarea/contenteditable). */
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  const tag = target.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable;
 }
 
 function formatBytes(bytes: number): string {
