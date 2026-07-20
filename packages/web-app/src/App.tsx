@@ -459,17 +459,31 @@ export function App(): ReactElement {
     engineRef.current = engine;
   }, [openFilesKey]);
 
-  // Ingest every open file so the canvas is the union pipeline across files;
+  // Ingest open files so the canvas is the union pipeline across files;
   // cross-notebook (alias:Node.port) refs resolve between groups. Each ingest
-  // recomputes all wires, so file order doesn't matter.
+  // already recomputes all wires workspace-wide, so re-ingesting files whose
+  // cells didn't change is pure redundancy — skip them by comparing the
+  // per-path cells array identity against what we last ingested (the
+  // cellsByPath memo preserves entry identity for untouched files). A fresh
+  // SyncEngine (created on open/close via openFilesKey) resets the tracker so
+  // every file is ingested into the new engine.
+  const ingestedCellsRef = useRef<{
+    engine: SyncEngine | null;
+    byPath: Map<string, NotebookCell[]>;
+  }>({ engine: null, byPath: new Map() });
   useEffect(() => {
     const engine = engineRef.current;
     if (engine === null) {
       return;
     }
+    if (ingestedCellsRef.current.engine !== engine) {
+      ingestedCellsRef.current = { engine, byPath: new Map() };
+    }
+    const ingested = ingestedCellsRef.current.byPath;
     for (const file of openFiles) {
       const cells = cellsByPath.get(file.name);
-      if (cells !== undefined) {
+      if (cells !== undefined && ingested.get(file.name) !== cells) {
+        ingested.set(file.name, cells);
         void engine.ingestNotebook(file.name, cells, Date.now());
       }
     }

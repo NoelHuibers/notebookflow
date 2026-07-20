@@ -10,27 +10,34 @@
 import { CellOutputs, type CellOutputsLabels } from "@notebookflow/app-core";
 import type { NotebookCell } from "@notebookflow/graph-canvas/sync";
 import type { ReactElement } from "react";
-import { lazy, Suspense, useMemo } from "react";
+import { lazy, memo, Suspense, useCallback, useMemo } from "react";
 
 import type { NbOutput } from "@/lib/EngineClient";
 import { useI18n } from "@/lib/i18n";
 
 const CodeMirrorEditor = lazy(() => import("./CodeMirrorEditor"));
 
+const EMPTY_OUTPUTS: readonly NbOutput[] = Object.freeze([]);
+
 export interface CellEditorProps {
   cell: NotebookCell;
   index: number;
-  outputs?: NbOutput[];
+  outputs?: readonly NbOutput[];
   isStreaming?: boolean;
-  onChange: (next: string) => void;
+  /**
+   * Stable index-tagged change callback. Taking the index here (rather than a
+   * per-cell closure in the list) keeps the prop identity constant across
+   * renders so the `memo` wrapper below actually skips unchanged cells.
+   */
+  onChangeAt: (index: number, next: string) => void;
 }
 
-export function CellEditor({
+function CellEditorImpl({
   cell,
   index,
-  outputs = [],
+  outputs = EMPTY_OUTPUTS,
   isStreaming = false,
-  onChange,
+  onChangeAt,
 }: CellEditorProps): ReactElement {
   const { t } = useI18n();
   // Translate the shared CellOutputs labels (component lives in app-core; the
@@ -42,6 +49,12 @@ export function CellEditor({
       outputFigureAlt: t("cells.outputFigureAlt"),
     }),
     [t],
+  );
+  const handleChange = useCallback(
+    (next: string) => {
+      onChangeAt(index, next);
+    },
+    [onChangeAt, index],
   );
   const typeLabelKey =
     cell.cellType === "markdown"
@@ -59,13 +72,20 @@ export function CellEditor({
         <CodeMirrorEditor
           value={cell.source}
           isCode={cell.cellType === "code"}
-          onChange={onChange}
+          onChange={handleChange}
         />
       </Suspense>
       <CellOutputs outputs={outputs} isStreaming={isStreaming} labels={outputsLabels} />
     </div>
   );
 }
+
+/**
+ * Memoized so typing in one cell doesn't re-render every other cell: CellList
+ * keeps `cell`, `outputs` and `onChangeAt` referentially stable for untouched
+ * cells, making the shallow prop comparison effective.
+ */
+export const CellEditor = memo(CellEditorImpl);
 
 function EditorFallback({ source }: { source: string }): ReactElement {
   return (
