@@ -334,6 +334,20 @@ function CanvasInner(props: CanvasProps): ReactElement {
 
   const portPlacement: PortPlacement = layout === "manual" ? "stacked" : "sides";
 
+  // Input-ref autocomplete pools depend only on the graph shape and the
+  // per-node code variables — not on runtime overlays. Precomputing them in
+  // their own memo keeps the O(n²) collectInputRefs sweep out of baseNodes
+  // rebuilds triggered by runtime-status events (runtimeByNode/timingByNode/
+  // metaByNode/unresolvedByNode changes).
+  const inputSuggestionsByNode = useMemo<Record<string, string[]>>(() => {
+    const vars = variablesByNode ?? {};
+    const byNode: Record<string, string[]> = {};
+    for (const nodeId of Object.keys(graph.nodes)) {
+      byNode[nodeId] = collectInputRefs(graph, vars, nodeId);
+    }
+    return byNode;
+  }, [graph, variablesByNode]);
+
   const baseNodes = useMemo<Node[]>(() => {
     return buildNodes(graph, {
       onNodeRename,
@@ -347,6 +361,7 @@ function CanvasInner(props: CanvasProps): ReactElement {
       timingByNode,
       metaByNode,
       unresolvedByNode,
+      inputSuggestionsByNode,
       portPlacement,
       manualGroupPositions,
     });
@@ -363,6 +378,7 @@ function CanvasInner(props: CanvasProps): ReactElement {
     timingByNode,
     metaByNode,
     unresolvedByNode,
+    inputSuggestionsByNode,
     portPlacement,
     manualGroupPositions,
   ]);
@@ -736,6 +752,8 @@ function buildNodes(
     timingByNode: CanvasProps["timingByNode"];
     metaByNode: CanvasProps["metaByNode"];
     unresolvedByNode: CanvasProps["unresolvedByNode"];
+    /** Precomputed per-node input autocomplete refs (see Canvas memo). */
+    inputSuggestionsByNode: Record<string, string[]>;
     portPlacement: PortPlacement;
     manualGroupPositions: ReadonlyMap<string, CanvasGroupPosition>;
   },
@@ -752,6 +770,7 @@ function buildNodes(
     timingByNode,
     metaByNode,
     unresolvedByNode,
+    inputSuggestionsByNode,
     portPlacement,
     manualGroupPositions,
   } = callbacks;
@@ -908,7 +927,7 @@ function buildNodes(
       if (onRename !== undefined) {
         nodeData.onRename = onRename;
       }
-      nodeData.inputSuggestions = collectInputRefs(graph, vars, node.id);
+      nodeData.inputSuggestions = inputSuggestionsByNode[node.id] ?? [];
       nodeData.outputSuggestions = collectOutputSuggestions(node, vars);
       if (onInputsChange !== undefined) {
         nodeData.onInputsChange = onInputsChange;
