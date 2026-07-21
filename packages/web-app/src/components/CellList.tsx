@@ -17,6 +17,10 @@ import { CellEditor } from "./CellEditor";
 
 const DEBOUNCE_MS = 300;
 
+// Shared frozen fallback so cells without outputs get an identity-stable prop
+// (a fresh `[]` per render would defeat CellEditor's memo).
+const EMPTY_OUTPUTS: readonly NbOutput[] = Object.freeze([]);
+
 export interface CellListProps {
   cells: NotebookCell[];
   onCellsChange: (next: NotebookCell[]) => void;
@@ -142,11 +146,9 @@ export function CellList({
               <CellEditor
                 cell={cell}
                 index={idx}
-                outputs={outputsByCell?.[idx] ?? []}
+                outputs={outputsByCell?.[idx] ?? EMPTY_OUTPUTS}
                 isStreaming={streamingCellIndex === idx}
-                onChange={(next) => {
-                  handleChange(idx, next);
-                }}
+                onChangeAt={handleChange}
               />
             </div>
           );

@@ -35,6 +35,10 @@ PayloadKind = Literal["dataframe", "json", "fileref"]
 
 _PRIMITIVE_TYPES: tuple[type, ...] = (int, float, str, bool, type(None), dict, list)
 
+# Immutable scalars: always JSON-serializable, so put() skips the json.dumps
+# round-trip and get() skips the pointless deepcopy for these.
+_SCALAR_TYPES: tuple[type, ...] = (bool, int, float, str, type(None))
+
 
 @dataclass(slots=True)
 class Payload:
@@ -91,6 +95,7 @@ class DataBus:
             run_dir.mkdir(parents=True, exist_ok=True)
             path = run_dir / f"{uuid.uuid4().hex}.parquet"
             value.to_parquet(path)
+            self._unlink_replaced_spill(key)
             self._store[key] = Payload(
                 kind="dataframe",
                 value=path,
@@ -99,16 +104,35 @@ class DataBus:
             return
 
         if isinstance(value, _PRIMITIVE_TYPES):
-            try:
-                json.dumps(value)
-            except (TypeError, ValueError) as exc:
-                raise TypeError(f"Value for {node_id!r}.{port!r} is not JSON-serializable") from exc
+            # Scalars are JSON-serializable by construction; only containers
+            # need the json.dumps round-trip to validate their contents.
+            if not isinstance(value, _SCALAR_TYPES):
+                try:
+                    json.dumps(value)
+                except (TypeError, ValueError) as exc:
+                    raise TypeError(
+                        f"Value for {node_id!r}.{port!r} is not JSON-serializable"
+                    ) from exc
+            self._unlink_replaced_spill(key)
             self._store[key] = Payload(kind="json", value=value, meta={})
             return
 
         raise TypeError(
             f"Unsupported payload type for {node_id!r}.{port!r}: {type(value).__name__}"
         )
+
+    def _unlink_replaced_spill(self, key: tuple[str, str, str, str]) -> None:
+        """Best-effort removal of the parquet file behind a key being
+        overwritten, so re-``put``-ing a port doesn't leak spill files until
+        ``clear_run``. Called only once the replacement value is validated, so
+        a failing put never destroys the previous payload."""
+        previous = self._store.get(key)
+        if (
+            previous is not None
+            and previous.kind == "dataframe"
+            and isinstance(previous.value, Path)
+        ):
+            previous.value.unlink(missing_ok=True)
 
     def get(self, node_id: str, port: str) -> Payload:
         key = (self._tenant, self._run_id, node_id, port)
@@ -118,13 +142,17 @@ class DataBus:
         if payload.kind == "dataframe" and isinstance(payload.value, Path):
             df = pd.read_parquet(payload.value)
             return Payload(kind="dataframe", value=df, meta=dict(payload.meta))
-        # JSON payloads are stored by reference. Deep-copy on read so that a
-        # node fanning out to several consumers gives each an independent
-        # value -- one branch mutating a list/dict in place must not leak into
-        # a sibling branch reading the same cached output.
+        # JSON payloads are stored by reference. Deep-copy containers on read
+        # so that a node fanning out to several consumers gives each an
+        # independent value -- one branch mutating a list/dict in place must
+        # not leak into a sibling branch reading the same cached output.
+        # Immutable scalars are returned as-is (deepcopy would be a no-op).
+        value = payload.value
+        if not isinstance(value, _SCALAR_TYPES):
+            value = copy.deepcopy(value)
         return Payload(
             kind=payload.kind,
-            value=copy.deepcopy(payload.value),
+            value=value,
             meta=dict(payload.meta),
         )
 

@@ -196,3 +196,60 @@ def test_get_isolates_nested_dict_payloads(bus: DataBus) -> None:
     a = bus.get("src", "cfg")
     a.value["opts"]["n"] = 42
     assert bus.get("src", "cfg").value == {"opts": {"n": 1}}
+
+
+def test_overwriting_dataframe_unlinks_previous_spill_file(bus: DataBus) -> None:
+    """Re-putting a DataFrame on the same key must not leak the old parquet
+    file on disk until clear_run."""
+    bus.put("n1", "df", pd.DataFrame({"a": [1]}))
+    bus.put("n1", "df", pd.DataFrame({"a": [2, 3]}))
+
+    files = list(bus.spill_root.iterdir())
+    assert len(files) == 1
+    assert bus.get("n1", "df").value["a"].tolist() == [2, 3]
+
+
+def test_replacing_dataframe_with_json_unlinks_spill_file(bus: DataBus) -> None:
+    bus.put("n1", "out", pd.DataFrame({"a": [1]}))
+    assert len(list(bus.spill_root.iterdir())) == 1
+
+    bus.put("n1", "out", 42)
+
+    assert list(bus.spill_root.iterdir()) == []
+    payload = bus.get("n1", "out")
+    assert payload.kind == "json"
+    assert payload.value == 42
+
+
+def test_failed_put_keeps_previous_payload_and_spill_file(bus: DataBus) -> None:
+    """A rejected value must not destroy the existing payload for the key."""
+    bus.put("n1", "df", pd.DataFrame({"a": [1]}))
+
+    with pytest.raises(TypeError, match="not JSON-serializable"):
+        bus.put("n1", "df", {"bad": {1, 2}})
+
+    assert len(list(bus.spill_root.iterdir())) == 1
+    assert bus.get("n1", "df").value["a"].tolist() == [1]
+
+
+@pytest.mark.parametrize("value", [None, True, 7, 3.25, "text"])
+def test_scalar_fast_path_round_trips(bus: DataBus, value: object) -> None:
+    """Scalars skip json.dumps validation on put and deepcopy on get, but the
+    observable round-trip stays identical."""
+    bus.put("n1", "v", value)
+    payload = bus.get("n1", "v")
+    assert payload.kind == "json"
+    assert payload.value == value
+    assert type(payload.value) is type(value)
+
+
+def test_container_payload_still_deep_copied_on_get(bus: DataBus) -> None:
+    """The scalar fast path must not weaken container isolation: mutating one
+    consumer's copy never leaks into a later get()."""
+    bus.put("src", "rows", [{"n": 1}])
+
+    first = bus.get("src", "rows")
+    first.value[0]["n"] = 99
+    first.value.append({"n": 2})
+
+    assert bus.get("src", "rows").value == [{"n": 1}]

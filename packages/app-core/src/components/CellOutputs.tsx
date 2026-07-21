@@ -41,7 +41,7 @@ export const defaultCellOutputsLabels: CellOutputsLabels = {
 };
 
 export interface CellOutputsProps {
-  outputs: NbOutput[];
+  outputs: readonly NbOutput[];
   isStreaming?: boolean;
   labels?: Partial<CellOutputsLabels>;
 }
