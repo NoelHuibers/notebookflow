@@ -433,7 +433,7 @@ export class SyncEngine {
 
   /** Snapshot of the current derived graph. */
   getGraph(): GraphModel {
-    return structuredClone(this.graph);
+    return cloneGraph(this.graph);
   }
 
   private upsertGroup(groupId: string, notebookPath: string, alias: string): void {
@@ -763,27 +763,96 @@ export class SyncEngine {
    */
   private recomputeAllWires(): void {
     this.graph.wires = {};
+    // Name-resolution index rebuilt from current state on every recompute:
+    // O(nodes) once up front, then O(1) per binding — replacing the
+    // per-binding linear scans of resolveRef/groupIdForAlias that made a
+    // full-notebook ingest O(n²). Rebuilding locally (instead of maintaining
+    // a persistent index across every mutation site) leaves no cache
+    // invalidation to get wrong.
+    const groupIdByAlias = new Map<string, string>();
+    const nodesByName = new Map<string, Map<string, NodeModel>>();
+    for (const group of Object.values(this.graph.groups)) {
+      // First declaration wins on alias collision (matches groupIdForAlias).
+      if (!groupIdByAlias.has(group.alias)) {
+        groupIdByAlias.set(group.alias, group.id);
+      }
+      const byName = new Map<string, NodeModel>();
+      for (const nodeId of group.nodeIds) {
+        const node = this.graph.nodes[nodeId];
+        // First node with a given name wins (matches resolveRef's scan order).
+        if (node !== undefined && !byName.has(node.name)) {
+          byName.set(node.name, node);
+        }
+      }
+      nodesByName.set(group.id, byName);
+    }
+
     for (const target of Object.values(this.graph.nodes)) {
       for (const binding of target.inputs) {
         const sourceRef = sourceRefOfBinding(binding);
         if (sourceRef === null) {
           continue;
         }
-        const resolved = this.resolveRef(sourceRef, target.groupId);
-        if (resolved === null || !resolved.source.outputs.includes(resolved.portName)) {
+        const parsed = parseRef(sourceRef);
+        if (parsed === null) {
           continue;
         }
-        const wireId = makeWireId(resolved.source.id, resolved.portName, target.id, binding);
+        const groupId =
+          parsed.alias === null ? target.groupId : (groupIdByAlias.get(parsed.alias) ?? null);
+        if (groupId === null) {
+          continue;
+        }
+        const source = nodesByName.get(groupId)?.get(parsed.nodeName);
+        if (source === undefined || !source.outputs.includes(parsed.portName)) {
+          continue;
+        }
+        const wireId = makeWireId(source.id, parsed.portName, target.id, binding);
         this.graph.wires[wireId] = {
           id: wireId,
-          sourceNodeId: resolved.source.id,
-          sourcePort: resolved.portName,
+          sourceNodeId: source.id,
+          sourcePort: parsed.portName,
           targetNodeId: target.id,
           targetPort: binding,
         };
       }
     }
   }
+}
+
+/**
+ * Deep-clone the graph without structuredClone. SyncEngine mutates node and
+ * group objects in place between ingests (renameNode writes node.name and
+ * sibling inputs; createWire/applyPorts/ensureOutputPort/ensurePassthroughNode
+ * reassign inputs/outputs; updateNodeContents swaps metadata; upsertGroup and
+ * ingest mutate group.alias/nodeIds), so emitted snapshots must never share
+ * references with internal state — a later in-place mutation would silently
+ * rewrite a snapshot a React consumer already holds. The model shapes are
+ * otherwise flat (see types.ts), so spreads plus fresh arrays ARE a complete
+ * deep clone; node.metadata is the one open-ended field and keeps
+ * structuredClone. Same isolation guarantees as structuredClone(graph) at a
+ * fraction of the cost, and every emission still hands consumers entirely
+ * fresh top-level, container, and leaf object identities.
+ */
+function cloneGraph(graph: GraphModel): GraphModel {
+  const nodes: GraphModel["nodes"] = {};
+  for (const [id, node] of Object.entries(graph.nodes)) {
+    nodes[id] = {
+      ...node,
+      inputs: [...node.inputs],
+      outputs: [...node.outputs],
+      cellIndices: [...node.cellIndices],
+      ...(node.metadata === undefined ? {} : { metadata: structuredClone(node.metadata) }),
+    };
+  }
+  const groups: GraphModel["groups"] = {};
+  for (const [id, group] of Object.entries(graph.groups)) {
+    groups[id] = { ...group, nodeIds: [...group.nodeIds] };
+  }
+  const wires: GraphModel["wires"] = {};
+  for (const [id, wire] of Object.entries(graph.wires)) {
+    wires[id] = { ...wire };
+  }
+  return { nodes, groups, wires };
 }
 
 function cellKey(notebookPath: string, cellIndex: number): string {
