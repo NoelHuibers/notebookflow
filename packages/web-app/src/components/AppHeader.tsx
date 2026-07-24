@@ -18,6 +18,7 @@ import {
 import type { ReactElement } from "react";
 
 import { EngineStatus } from "@/components/EngineStatus";
+import { HelpMenu } from "@/components/HelpMenu";
 import { Wordmark } from "@/components/Logo";
 import { ToolbarOverflowMenu } from "@/components/ToolbarOverflowMenu";
 import { Badge } from "@/components/ui/badge";
@@ -44,6 +45,8 @@ interface AppHeaderProps {
   isRunning: boolean;
   onRun: () => void;
   onToggleShortcuts: () => void;
+  /** Restarts the onboarding tour from the help popover. */
+  onReplayTour: () => void;
   onToggleSettings: () => void;
   /** Active notebook name — forwarded to the overflow menu's Jupyter action. */
   notebookName: string;
@@ -68,6 +71,7 @@ export function AppHeader({
   isRunning,
   onRun,
   onToggleShortcuts,
+  onReplayTour,
   onToggleSettings,
   notebookName,
   onDownloadWorkspace,
@@ -170,6 +174,7 @@ export function AppHeader({
         >
           <Keyboard className="size-4" />
         </Button>
+        <HelpMenu onReplayTour={onReplayTour} onOpenShortcuts={onToggleShortcuts} />
         <Button
           variant="ghost"
           size="sm"

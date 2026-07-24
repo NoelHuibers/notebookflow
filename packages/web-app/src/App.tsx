@@ -70,6 +70,8 @@ import { CloudNotebooksDialog } from "@/components/CloudNotebooksDialog";
 import { FileDropZone } from "@/components/FileDropZone";
 import { FilesRail } from "@/components/FilesRail";
 import { InspectorPanel } from "@/components/InspectorPanel";
+import { TourOverlay } from "@/components/onboarding/TourOverlay";
+import { WelcomeCard } from "@/components/onboarding/WelcomeCard";
 import { PaneDivider } from "@/components/PaneDivider";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { ShortcutsDialog } from "@/components/ShortcutsDialog";
@@ -100,6 +102,12 @@ import { pickSaveFileHandle, writeFileHandle } from "@/lib/fileSystemAccess";
 import { useI18n } from "@/lib/i18n";
 import type { IpynbDoc } from "@/lib/notebook";
 import { serializeNotebook, toIpynbCell } from "@/lib/notebook";
+import {
+  clearOnboardingSeen,
+  hasSeenOnboarding,
+  markOnboardingSeen,
+  type TourStep,
+} from "@/lib/onboarding";
 import { sortPalette } from "@/lib/palette";
 import { deleteProviderKey, getProviderKey, saveProviderKey } from "@/lib/providerKeyApi";
 import type { UserSettings } from "@/lib/settings";
@@ -325,6 +333,37 @@ export function App(): ReactElement {
   }, [setIsSidebarCollapsed, setShowMinimap]);
 
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+
+  // First-run onboarding (#78). App only renders inside the route's
+  // <ClientOnly>, so the lazy localStorage read never runs during SSR /
+  // hydration — no server flash of the welcome overlay.
+  const [onboardingStage, setOnboardingStage] = useState<"hidden" | "welcome" | "tour">(() =>
+    hasSeenOnboarding() ? "hidden" : "welcome",
+  );
+  const dismissOnboarding = useCallback((): void => {
+    markOnboardingSeen();
+    setOnboardingStage("hidden");
+  }, []);
+  const startTour = useCallback((): void => {
+    setOnboardingStage("tour");
+  }, []);
+  const handleReplayTour = useCallback((): void => {
+    clearOnboardingSeen();
+    setOnboardingStage("tour");
+  }, []);
+  // Before a step is spotlighted, expand the pane it lives in (collapsed
+  // panes don't render their [data-tour] target). Leaving them open after
+  // the tour is intentional.
+  const handleTourBeforeStep = useCallback(
+    (step: TourStep): void => {
+      if (step.id === "files") {
+        setIsFilesCollapsed(false);
+      } else if (step.id === "cells") {
+        setIsCellsCollapsed(false);
+      }
+    },
+    [setIsFilesCollapsed, setIsCellsCollapsed],
+  );
 
   // Selection state lives in useCanvasSelectionSync, which must run after
   // useWorkspaceFiles (it needs openFiles / switchToFile) — the callbacks
@@ -1446,6 +1485,7 @@ export function App(): ReactElement {
           onToggleShortcuts={() => {
             setIsShortcutsOpen((open) => !open);
           }}
+          onReplayTour={handleReplayTour}
           onToggleSettings={() => {
             setIsSettingsOpen((open) => !open);
           }}
@@ -1485,6 +1525,14 @@ export function App(): ReactElement {
               setIsShortcutsOpen(false);
             }}
           />
+        )}
+
+        {onboardingStage === "welcome" && (
+          <WelcomeCard onTakeTour={startTour} onSkip={dismissOnboarding} />
+        )}
+
+        {onboardingStage === "tour" && (
+          <TourOverlay onBeforeStep={handleTourBeforeStep} onClose={dismissOnboarding} />
         )}
 
         {isCloudOpen && (
