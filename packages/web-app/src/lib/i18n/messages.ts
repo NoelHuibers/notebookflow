@@ -17,6 +17,7 @@ import * as explanation from "./messages/explanation";
 import * as files from "./messages/files";
 import * as landing from "./messages/landing";
 import * as legal from "./messages/legal";
+import * as onboarding from "./messages/onboarding";
 import * as palette from "./messages/palette";
 import * as settings from "./messages/settings";
 import * as shortcuts from "./messages/shortcuts";
@@ -61,6 +62,7 @@ export const en = {
   cells: cells.en,
   files: files.en,
   device: device.en,
+  onboarding: onboarding.en,
 };
 
 export type Messages = typeof en;
@@ -104,4 +106,5 @@ export const de: Messages = {
   cells: cells.de,
   files: files.de,
   device: device.de,
+  onboarding: onboarding.de,
 };

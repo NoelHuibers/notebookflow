@@ -55,7 +55,10 @@ export function FilesRail({
   const { t } = useI18n();
   if (collapsed) {
     return (
-      <div className="flex w-8 shrink-0 flex-col items-center border-r bg-muted/30 py-2">
+      <div
+        data-tour="files"
+        className="flex w-8 shrink-0 flex-col items-center border-r bg-muted/30 py-2"
+      >
         <Button
           variant="ghost"
           size="sm"
@@ -70,7 +73,7 @@ export function FilesRail({
     );
   }
   return (
-    <aside className="flex w-44 shrink-0 flex-col border-r bg-muted/30">
+    <aside data-tour="files" className="flex w-44 shrink-0 flex-col border-r bg-muted/30">
       <div className="flex items-center justify-between border-b pl-3 pr-1.5 py-2 text-xs text-muted-foreground">
         <span className="font-medium">{t("files.files")}</span>
         <div className="flex items-center gap-0.5">

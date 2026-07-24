@@ -18,6 +18,7 @@ import {
 import type { ReactElement } from "react";
 
 import { EngineStatus } from "@/components/EngineStatus";
+import { HelpMenu } from "@/components/HelpMenu";
 import { Wordmark } from "@/components/Logo";
 import { ToolbarOverflowMenu } from "@/components/ToolbarOverflowMenu";
 import { Badge } from "@/components/ui/badge";
@@ -44,6 +45,8 @@ interface AppHeaderProps {
   isRunning: boolean;
   onRun: () => void;
   onToggleShortcuts: () => void;
+  /** Restarts the onboarding tour from the help popover. */
+  onReplayTour: () => void;
   onToggleSettings: () => void;
   /** Active notebook name — forwarded to the overflow menu's Jupyter action. */
   notebookName: string;
@@ -68,6 +71,7 @@ export function AppHeader({
   isRunning,
   onRun,
   onToggleShortcuts,
+  onReplayTour,
   onToggleSettings,
   notebookName,
   onDownloadWorkspace,
@@ -143,14 +147,20 @@ export function AppHeader({
           <Wand2 className="mr-1.5 size-3.5" />
           {t("app.toolbar.compose")}
         </Button>
-        <Button variant="ghost" size="sm" onClick={onOpenAsk} title={t("app.toolbar.askAiTitle")}>
+        <Button
+          data-tour="ask"
+          variant="ghost"
+          size="sm"
+          onClick={onOpenAsk}
+          title={t("app.toolbar.askAiTitle")}
+        >
           <Command className="mr-1.5 size-3.5" />
           {t("app.toolbar.askAi")}
           <Badge variant="outline" className="ml-2 px-1 font-mono text-[10px]">
             ⌘K
           </Badge>
         </Button>
-        <Button variant="default" size="sm" onClick={onRun} disabled={isRunning}>
+        <Button data-tour="run" variant="default" size="sm" onClick={onRun} disabled={isRunning}>
           <Play className="mr-1.5 size-3.5" />
           {isRunning ? t("app.toolbar.running") : t("app.toolbar.runPipeline")}
         </Button>
@@ -164,6 +174,7 @@ export function AppHeader({
         >
           <Keyboard className="size-4" />
         </Button>
+        <HelpMenu onReplayTour={onReplayTour} onOpenShortcuts={onToggleShortcuts} />
         <Button
           variant="ghost"
           size="sm"
