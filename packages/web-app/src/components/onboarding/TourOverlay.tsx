@@ -176,8 +176,10 @@ export function TourOverlay({ onBeforeStep, onClose }: TourOverlayProps): ReactE
       positionedRef.current = true;
       return;
     }
-    gsap.to(spot, { ...spotVars, duration: 0.45, ease: "power3.inOut" });
-    gsap.to(card, { ...cardVars, duration: 0.45, ease: "power3.inOut" });
+    // overwrite:"auto" kills in-flight position tweens (rapid stepping,
+    // resize storms) instead of letting them fight over the same props.
+    gsap.to(spot, { ...spotVars, duration: 0.45, ease: "power3.inOut", overwrite: "auto" });
+    gsap.to(card, { ...cardVars, duration: 0.45, ease: "power3.inOut", overwrite: "auto" });
   }, [tour.targetRect, tour.step.placement, renderedIndex, reduced, gsapReady]);
 
   const renderedStep = TOUR_STEPS[renderedIndex] ?? TOUR_STEPS[0];
@@ -229,7 +231,7 @@ export function TourOverlay({ onBeforeStep, onClose }: TourOverlayProps): ReactE
               <span
                 key={step.id}
                 className={cn(
-                  "h-1.5 rounded-full transition-all duration-300 ease-out",
+                  "h-1.5 rounded-full transition-all duration-300 ease-out motion-reduce:transition-none",
                   index === tour.stepIndex
                     ? "w-6 bg-primary"
                     : index < tour.stepIndex

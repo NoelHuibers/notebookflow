@@ -53,6 +53,10 @@ export function useTour({ onBeforeStep, onClose }: UseTourOptions): TourState {
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   const closedRef = useRef(false);
+  // Mirror of stepIndex so next() can decide "advance vs finish" without
+  // side effects inside a setState updater (updaters must stay pure).
+  const stepIndexRef = useRef(0);
+  stepIndexRef.current = stepIndex;
 
   // TOUR_STEPS is a non-empty tuple, so the fallback needs no further guard.
   const step: TourStep = TOUR_STEPS[stepIndex] ?? TOUR_STEPS[0];
@@ -67,13 +71,11 @@ export function useTour({ onBeforeStep, onClose }: UseTourOptions): TourState {
   }, []);
 
   const next = useCallback((): void => {
-    setStepIndex((current) => {
-      if (current >= TOUR_STEPS.length - 1) {
-        close(true);
-        return current;
-      }
-      return current + 1;
-    });
+    if (stepIndexRef.current >= TOUR_STEPS.length - 1) {
+      close(true);
+      return;
+    }
+    setStepIndex((current) => Math.min(current + 1, TOUR_STEPS.length - 1));
   }, [close]);
 
   const back = useCallback((): void => {
