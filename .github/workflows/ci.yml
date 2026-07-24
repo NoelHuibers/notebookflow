@@ -105,13 +105,13 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # ADVISORY ONLY (does not fail CI): still not clean after the 2026-07
-      # deps sweep — 1 critical + 13 high remain, all transitive except
-      # better-auth: shell-quote via concurrently; brace-expansion via
-      # rimraf/glob and @jupyterlab/builder; fast-uri via @jupyterlab/builder's
-      # ajv; ws via @jupyterlab/services; vite/postcss via vitest and the
-      # vscode-extension build; js-yaml via @tanstack/react-start; better-auth
-      # <1.6.22 (direct in web-app, patch within ^1.6.20 range). Watch this
-      # step's log; flip continue-on-error off once the tree is clean.
+      # deps sweep — 1 critical + 12 high remain, ALL transitive:
+      # shell-quote via concurrently; brace-expansion via rimraf/glob and
+      # @jupyterlab/builder; fast-uri via @jupyterlab/builder's ajv; ws via
+      # @jupyterlab/services; vite/postcss via vitest and the vscode-extension
+      # build; js-yaml via @tanstack/react-start. (better-auth was patched to
+      # 1.6.22 — the only direct-dep finding.) Watch this step's log; flip
+      # continue-on-error off once upstream releases clear the tree.
       - name: pnpm audit (NON-BLOCKING — check the log for high/critical)
         continue-on-error: true
         run: pnpm audit --audit-level high
@@ -122,14 +122,12 @@ jobs:
           enable-cache: true
           cache-dependency-glob: engine/uv.lock
 
-      # ADVISORY ONLY (does not fail CI): still not clean after the 2026-07
-      # deps sweep — transitive advisories remain: idna 3.13 (fix 3.15),
-      # pillow 12.2.0 (fix 12.3.0), starlette 1.0.0 (fixes up to 1.3.1). All
-      # three are upgradeable within current floors via `uv lock
-      # --upgrade-package`; starlette 1.0 -> 1.3 deserves its own validated
-      # bump. Same deal as pnpm audit above.
-      - name: pip-audit engine deps (NON-BLOCKING — check the log)
-        continue-on-error: true
+      # BLOCKING since the 2026-07 deps sweep: the lock is clean (idna 3.18,
+      # pillow 12.3.0, starlette 1.3.1 validated against the full pytest
+      # suite). A new advisory here should be fixed via
+      # `uv lock --upgrade-package <name>` + tests, not by re-adding
+      # continue-on-error.
+      - name: pip-audit engine deps
         working-directory: engine
         run: |
           uv export --no-dev --no-emit-project --format requirements-txt -o /tmp/nbf-requirements.txt
