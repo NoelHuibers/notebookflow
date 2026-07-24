@@ -143,14 +143,20 @@ export function AppHeader({
           <Wand2 className="mr-1.5 size-3.5" />
           {t("app.toolbar.compose")}
         </Button>
-        <Button variant="ghost" size="sm" onClick={onOpenAsk} title={t("app.toolbar.askAiTitle")}>
+        <Button
+          data-tour="ask"
+          variant="ghost"
+          size="sm"
+          onClick={onOpenAsk}
+          title={t("app.toolbar.askAiTitle")}
+        >
           <Command className="mr-1.5 size-3.5" />
           {t("app.toolbar.askAi")}
           <Badge variant="outline" className="ml-2 px-1 font-mono text-[10px]">
             ⌘K
           </Badge>
         </Button>
-        <Button variant="default" size="sm" onClick={onRun} disabled={isRunning}>
+        <Button data-tour="run" variant="default" size="sm" onClick={onRun} disabled={isRunning}>
           <Play className="mr-1.5 size-3.5" />
           {isRunning ? t("app.toolbar.running") : t("app.toolbar.runPipeline")}
         </Button>

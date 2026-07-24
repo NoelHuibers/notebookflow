@@ -1618,7 +1618,7 @@ export function App(): ReactElement {
                 </div>
               ) : (
                 <>
-                  <section className="flex min-h-0 min-w-0 flex-col">
+                  <section data-tour="cells" className="flex min-h-0 min-w-0 flex-col">
                     <CellToolbar
                       focusedCellIndex={focusedCellIndex}
                       focusedCell={
@@ -1664,7 +1664,7 @@ export function App(): ReactElement {
                 </>
               )}
 
-              <section className="flex min-h-0 min-w-0 flex-col">
+              <section data-tour="canvas" className="flex min-h-0 min-w-0 flex-col">
                 <div
                   ref={canvasPaneRef}
                   className="relative grid min-h-0 flex-1 overflow-hidden bg-background"
