@@ -1,7 +1,11 @@
 """DataBus — typed payload routing between nodes.
 
 Routing strategy by payload kind:
-    * pandas DataFrames → spilled to Parquet, materialized on get().
+    * pandas DataFrames small enough to keep resident (deep memory usage at
+      or below ``NOTEBOOKFLOW_SPILL_THRESHOLD_BYTES``, default 8 MB) → held
+      in memory as a defensive deep copy; get() hands each consumer its own
+      deep copy so mutation isolation matches the spill path exactly.
+    * larger pandas DataFrames → spilled to Parquet, materialized on get().
     * Primitives (int/float/str/bool/None/dict/list) → JSON-compatible
       values kept in memory.
     * Anything else → ``TypeError`` for now. ``fileref`` kind is reserved
@@ -24,6 +28,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -38,6 +43,25 @@ _PRIMITIVE_TYPES: tuple[type, ...] = (int, float, str, bool, type(None), dict, l
 # Immutable scalars: always JSON-serializable, so put() skips the json.dumps
 # round-trip and get() skips the pointless deepcopy for these.
 _SCALAR_TYPES: tuple[type, ...] = (bool, int, float, str, type(None))
+
+# DataFrames whose deep memory usage is at or below this many bytes stay in
+# memory instead of spilling to Parquet (a deep copy costs a few ms at 8 MB,
+# vs ~100+ ms for a parquet write + read round-trip). Overridable via the
+# NOTEBOOKFLOW_SPILL_THRESHOLD_BYTES environment variable; set it to 0 to
+# force every DataFrame to spill (escape hatch restoring the old behavior,
+# e.g. when engine memory is tight).
+_DEFAULT_SPILL_THRESHOLD_BYTES = 8_000_000
+_SPILL_THRESHOLD_ENV = "NOTEBOOKFLOW_SPILL_THRESHOLD_BYTES"
+
+
+def _spill_threshold_from_env() -> int:
+    raw = os.environ.get(_SPILL_THRESHOLD_ENV)
+    if raw is None or raw.strip() == "":
+        return _DEFAULT_SPILL_THRESHOLD_BYTES
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return _DEFAULT_SPILL_THRESHOLD_BYTES
 
 
 @dataclass(slots=True)
@@ -57,7 +81,7 @@ def _tenant_namespace(tenant: str | None) -> str:
 
 
 class DataBus:
-    """In-memory store for node outputs, spilling DataFrames to Parquet."""
+    """In-memory store for node outputs, spilling large DataFrames to Parquet."""
 
     def __init__(
         self,
@@ -68,8 +92,11 @@ class DataBus:
         self._spill_dir = spill_dir
         self._run_id = pipeline_run_id if pipeline_run_id else uuid.uuid4().hex
         self._tenant = _tenant_namespace(tenant)
-        # Internal store keeps the *spilled* form: DataFrames as Path objects.
-        # get() materializes back into a Payload whose value is the DataFrame.
+        # Snapshotted once per bus; see _SPILL_THRESHOLD_ENV (0 = always spill).
+        self._spill_threshold_bytes = _spill_threshold_from_env()
+        # Internal store keeps the *stored* form: spilled DataFrames as Path
+        # objects, small DataFrames as put-time deep copies. get() materializes
+        # back into a Payload whose value is a fresh DataFrame either way.
         # Keys are (tenant, run_id, node_id, port) so concurrent runs from
         # different users can share one bus without colliding.
         self._store: dict[tuple[str, str, str, str], Payload] = {}
@@ -91,16 +118,23 @@ class DataBus:
     def put(self, node_id: str, port: str, value: Any) -> None:
         key = (self._tenant, self._run_id, node_id, port)
         if isinstance(value, pd.DataFrame):
+            meta = {"rows": len(value), "columns": list(value.columns)}
+            size_bytes = int(value.memory_usage(deep=True).sum())
+            if 0 < size_bytes <= self._spill_threshold_bytes:
+                # Small frame: keep it resident. Deep-copy at put time so a
+                # producer mutating its frame afterwards can't change what
+                # consumers read — the parquet path snapshots at put time via
+                # the file write, and the in-memory path must match that.
+                stored = value.copy(deep=True)
+                self._unlink_replaced_spill(key)
+                self._store[key] = Payload(kind="dataframe", value=stored, meta=meta)
+                return
             run_dir = self.spill_root
             run_dir.mkdir(parents=True, exist_ok=True)
             path = run_dir / f"{uuid.uuid4().hex}.parquet"
             value.to_parquet(path)
             self._unlink_replaced_spill(key)
-            self._store[key] = Payload(
-                kind="dataframe",
-                value=path,
-                meta={"rows": len(value), "columns": list(value.columns)},
-            )
+            self._store[key] = Payload(kind="dataframe", value=path, meta=meta)
             return
 
         if isinstance(value, _PRIMITIVE_TYPES):
@@ -124,8 +158,12 @@ class DataBus:
     def _unlink_replaced_spill(self, key: tuple[str, str, str, str]) -> None:
         """Best-effort removal of the parquet file behind a key being
         overwritten, so re-``put``-ing a port doesn't leak spill files until
-        ``clear_run``. Called only once the replacement value is validated, so
-        a failing put never destroys the previous payload."""
+        ``clear_run``. Covers every replacement transition: spill→spill and
+        spill→memory unlink the old file here; memory→anything has no file to
+        remove (in-memory DataFrame payloads hold a DataFrame, not a Path, so
+        the isinstance check skips them). Called only once the replacement
+        value is validated, so a failing put never destroys the previous
+        payload."""
         previous = self._store.get(key)
         if (
             previous is not None
@@ -139,8 +177,14 @@ class DataBus:
         if key not in self._store:
             raise KeyError(f"No payload stored for {node_id!r}.{port!r}")
         payload = self._store[key]
-        if payload.kind == "dataframe" and isinstance(payload.value, Path):
-            df = pd.read_parquet(payload.value)
+        if payload.kind == "dataframe":
+            if isinstance(payload.value, Path):
+                df = pd.read_parquet(payload.value)
+            else:
+                # In-memory frame: every consumer gets its own deep copy so
+                # in-place mutation never leaks across fan-out branches --
+                # exactly the isolation the parquet re-read provides.
+                df = payload.value.copy(deep=True)
             return Payload(kind="dataframe", value=df, meta=dict(payload.meta))
         # JSON payloads are stored by reference. Deep-copy containers on read
         # so that a node fanning out to several consumers gives each an

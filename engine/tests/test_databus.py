@@ -9,6 +9,16 @@ import pytest
 
 from notebookflow.core.databus import DataBus
 
+_THRESHOLD_ENV = "NOTEBOOKFLOW_SPILL_THRESHOLD_BYTES"
+
+
+@pytest.fixture
+def spill_bus(spill_dir: Path, monkeypatch: pytest.MonkeyPatch) -> DataBus:
+    """Bus forced to spill every DataFrame (threshold 0), for the tests that
+    exercise the parquet spill lifecycle regardless of frame size."""
+    monkeypatch.setenv(_THRESHOLD_ENV, "0")
+    return DataBus(spill_dir=spill_dir)
+
 
 def test_put_then_get_primitive(bus: DataBus) -> None:
     bus.put("n1", "count", 42)
@@ -25,17 +35,34 @@ def test_put_then_get_list_of_dicts(bus: DataBus) -> None:
     assert payload.value == rows
 
 
-def test_put_dataframe_spills_to_parquet_and_get_materializes(bus: DataBus) -> None:
+def test_put_dataframe_spills_to_parquet_and_get_materializes(spill_bus: DataBus) -> None:
     df = pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]})
-    bus.put("n1", "df", df)
+    spill_bus.put("n1", "df", df)
 
-    files = list(bus.spill_root.iterdir())
+    files = list(spill_bus.spill_root.iterdir())
     assert len(files) == 1
     assert files[0].suffix == ".parquet"
 
-    payload = bus.get("n1", "df")
+    payload = spill_bus.get("n1", "df")
     assert payload.kind == "dataframe"
     assert isinstance(payload.value, pd.DataFrame)
+    pd.testing.assert_frame_equal(payload.value, df)
+    assert payload.meta == {"rows": 3, "columns": ["a", "b"]}
+
+
+def test_small_dataframe_stays_in_memory_by_default(
+    spill_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(_THRESHOLD_ENV, raising=False)
+    bus = DataBus(spill_dir=spill_dir)
+    df = pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]})
+    bus.put("n1", "df", df)
+
+    # Well under the 8 MB default threshold: no spill file, no spill dir.
+    assert not bus.spill_root.exists()
+
+    payload = bus.get("n1", "df")
+    assert payload.kind == "dataframe"
     pd.testing.assert_frame_equal(payload.value, df)
     assert payload.meta == {"rows": 3, "columns": ["a", "b"]}
 
@@ -59,23 +86,26 @@ def test_put_non_json_primitive_raises(bus: DataBus) -> None:
         bus.put("n1", "p", {1, 2, 3})
 
 
-def test_clear_node_drops_entries_and_deletes_spill_files(bus: DataBus) -> None:
+def test_clear_node_drops_entries_and_deletes_spill_files(spill_bus: DataBus) -> None:
     df = pd.DataFrame({"a": [1, 2]})
-    bus.put("n1", "df", df)
-    bus.put("n1", "count", 5)
-    bus.put("n2", "df", df)
+    spill_bus.put("n1", "df", df)
+    spill_bus.put("n1", "count", 5)
+    spill_bus.put("n2", "df", df)
 
-    assert {k[0] for k in bus.keys()} == {"n1", "n2"}
-    assert len(list(bus.spill_root.iterdir())) == 2
+    assert {k[0] for k in spill_bus.keys()} == {"n1", "n2"}
+    assert len(list(spill_bus.spill_root.iterdir())) == 2
 
-    bus.clear_node("n1")
+    spill_bus.clear_node("n1")
 
-    assert {k[0] for k in bus.keys()} == {"n2"}
+    assert {k[0] for k in spill_bus.keys()} == {"n2"}
     # Exactly one parquet file remains (n2's df). n1's spill should be gone.
-    assert len(list(bus.spill_root.iterdir())) == 1
+    assert len(list(spill_bus.spill_root.iterdir())) == 1
 
 
-def test_explicit_pipeline_run_id_namespaces_spill_subdir(spill_dir: Path) -> None:
+def test_explicit_pipeline_run_id_namespaces_spill_subdir(
+    spill_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(_THRESHOLD_ENV, "0")
     bus = DataBus(spill_dir=spill_dir, pipeline_run_id="run-abc")
     bus.put("n1", "df", pd.DataFrame({"x": [1]}))
     # Self-host maps to the shared "_" tenant namespace.
@@ -84,7 +114,10 @@ def test_explicit_pipeline_run_id_namespaces_spill_subdir(spill_dir: Path) -> No
     assert all(p.parent == bus.spill_root for p in spill_dir.rglob("*.parquet"))
 
 
-def test_two_databuses_on_same_spill_dir_are_isolated(spill_dir: Path) -> None:
+def test_two_databuses_on_same_spill_dir_are_isolated(
+    spill_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(_THRESHOLD_ENV, "0")
     a = DataBus(spill_dir=spill_dir, pipeline_run_id="run-a")
     b = DataBus(spill_dir=spill_dir, pipeline_run_id="run-b")
 
@@ -105,7 +138,10 @@ def test_two_databuses_on_same_spill_dir_are_isolated(spill_dir: Path) -> None:
     assert {p.name for p in (spill_dir / "_").iterdir() if p.is_dir()} == {"run-a", "run-b"}
 
 
-def test_clear_run_drops_run_keys_and_spill_subdir(spill_dir: Path) -> None:
+def test_clear_run_drops_run_keys_and_spill_subdir(
+    spill_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(_THRESHOLD_ENV, "0")
     bus = DataBus(spill_dir=spill_dir, pipeline_run_id="ephemeral")
     bus.put("n1", "df", pd.DataFrame({"a": [1, 2]}))
     bus.put("n2", "count", 7)
@@ -128,7 +164,10 @@ def test_tenant_namespaces_spill_subdir(spill_dir: Path) -> None:
     assert alice.spill_root != anon.spill_root
 
 
-def test_two_tenants_same_run_id_isolated_in_shared_store(spill_dir: Path) -> None:
+def test_two_tenants_same_run_id_isolated_in_shared_store(
+    spill_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(_THRESHOLD_ENV, "0")
     # Same client-supplied run id, different users, one shared in-memory store.
     a = DataBus(spill_dir=spill_dir, pipeline_run_id="demo", tenant="user-A")
     b = DataBus(spill_dir=spill_dir, pipeline_run_id="demo", tenant="user-B")
@@ -163,15 +202,15 @@ def test_auto_generated_run_id_is_unique_per_databus(spill_dir: Path) -> None:
     assert len(a.pipeline_run_id) > 0
 
 
-def test_internal_store_holds_path_not_dataframe(bus: DataBus) -> None:
+def test_internal_store_holds_path_not_dataframe(spill_bus: DataBus) -> None:
     """The spilled form is what's kept in memory; get() materializes on demand."""
     df = pd.DataFrame({"a": [1]})
-    bus.put("n1", "df", df)
+    spill_bus.put("n1", "df", df)
     # Re-import via the public API of the in-memory representation: a fresh
     # get() should still return the materialized DataFrame after the original
     # is dropped from local scope.
     del df
-    payload = bus.get("n1", "df")
+    payload = spill_bus.get("n1", "df")
     assert isinstance(payload.value, pd.DataFrame)
     assert payload.value["a"].tolist() == [1]
 
@@ -198,38 +237,38 @@ def test_get_isolates_nested_dict_payloads(bus: DataBus) -> None:
     assert bus.get("src", "cfg").value == {"opts": {"n": 1}}
 
 
-def test_overwriting_dataframe_unlinks_previous_spill_file(bus: DataBus) -> None:
+def test_overwriting_dataframe_unlinks_previous_spill_file(spill_bus: DataBus) -> None:
     """Re-putting a DataFrame on the same key must not leak the old parquet
     file on disk until clear_run."""
-    bus.put("n1", "df", pd.DataFrame({"a": [1]}))
-    bus.put("n1", "df", pd.DataFrame({"a": [2, 3]}))
+    spill_bus.put("n1", "df", pd.DataFrame({"a": [1]}))
+    spill_bus.put("n1", "df", pd.DataFrame({"a": [2, 3]}))
 
-    files = list(bus.spill_root.iterdir())
+    files = list(spill_bus.spill_root.iterdir())
     assert len(files) == 1
-    assert bus.get("n1", "df").value["a"].tolist() == [2, 3]
+    assert spill_bus.get("n1", "df").value["a"].tolist() == [2, 3]
 
 
-def test_replacing_dataframe_with_json_unlinks_spill_file(bus: DataBus) -> None:
-    bus.put("n1", "out", pd.DataFrame({"a": [1]}))
-    assert len(list(bus.spill_root.iterdir())) == 1
+def test_replacing_dataframe_with_json_unlinks_spill_file(spill_bus: DataBus) -> None:
+    spill_bus.put("n1", "out", pd.DataFrame({"a": [1]}))
+    assert len(list(spill_bus.spill_root.iterdir())) == 1
 
-    bus.put("n1", "out", 42)
+    spill_bus.put("n1", "out", 42)
 
-    assert list(bus.spill_root.iterdir()) == []
-    payload = bus.get("n1", "out")
+    assert list(spill_bus.spill_root.iterdir()) == []
+    payload = spill_bus.get("n1", "out")
     assert payload.kind == "json"
     assert payload.value == 42
 
 
-def test_failed_put_keeps_previous_payload_and_spill_file(bus: DataBus) -> None:
+def test_failed_put_keeps_previous_payload_and_spill_file(spill_bus: DataBus) -> None:
     """A rejected value must not destroy the existing payload for the key."""
-    bus.put("n1", "df", pd.DataFrame({"a": [1]}))
+    spill_bus.put("n1", "df", pd.DataFrame({"a": [1]}))
 
     with pytest.raises(TypeError, match="not JSON-serializable"):
-        bus.put("n1", "df", {"bad": {1, 2}})
+        spill_bus.put("n1", "df", {"bad": {1, 2}})
 
-    assert len(list(bus.spill_root.iterdir())) == 1
-    assert bus.get("n1", "df").value["a"].tolist() == [1]
+    assert len(list(spill_bus.spill_root.iterdir())) == 1
+    assert spill_bus.get("n1", "df").value["a"].tolist() == [1]
 
 
 @pytest.mark.parametrize("value", [None, True, 7, 3.25, "text"])
@@ -241,6 +280,115 @@ def test_scalar_fast_path_round_trips(bus: DataBus, value: object) -> None:
     assert payload.kind == "json"
     assert payload.value == value
     assert type(payload.value) is type(value)
+
+
+def test_threshold_boundary_just_under_stays_in_memory(
+    spill_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    df = pd.DataFrame({"a": range(1000), "b": ["v"] * 1000})
+    size = int(df.memory_usage(deep=True).sum())
+
+    # Threshold == exact frame size: frame is at the boundary, stays resident.
+    monkeypatch.setenv(_THRESHOLD_ENV, str(size))
+    bus = DataBus(spill_dir=spill_dir, pipeline_run_id="under")
+    bus.put("n1", "df", df)
+    assert not bus.spill_root.exists()
+    pd.testing.assert_frame_equal(bus.get("n1", "df").value, df)
+
+
+def test_threshold_boundary_just_over_spills(
+    spill_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    df = pd.DataFrame({"a": range(1000), "b": ["v"] * 1000})
+    size = int(df.memory_usage(deep=True).sum())
+
+    # Threshold one byte below the frame size: frame is just over, spills.
+    monkeypatch.setenv(_THRESHOLD_ENV, str(size - 1))
+    bus = DataBus(spill_dir=spill_dir, pipeline_run_id="over")
+    bus.put("n1", "df", df)
+    files = list(bus.spill_root.iterdir())
+    assert len(files) == 1
+    assert files[0].suffix == ".parquet"
+    pd.testing.assert_frame_equal(bus.get("n1", "df").value, df)
+
+
+def test_threshold_zero_env_forces_spill(spill_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """NOTEBOOKFLOW_SPILL_THRESHOLD_BYTES=0 is the escape hatch restoring
+    spill-everything behavior, no matter how tiny the frame."""
+    monkeypatch.setenv(_THRESHOLD_ENV, "0")
+    bus = DataBus(spill_dir=spill_dir)
+    bus.put("n1", "df", pd.DataFrame({"a": [1]}))
+    assert len(list(bus.spill_root.glob("*.parquet"))) == 1
+
+
+def test_in_memory_dataframe_consumer_mutation_is_isolated(
+    spill_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(_THRESHOLD_ENV, raising=False)
+    bus = DataBus(spill_dir=spill_dir)
+    bus.put("src", "df", pd.DataFrame({"a": [1, 2, 3]}))
+    assert not bus.spill_root.exists()  # in-memory mode
+
+    first = bus.get("src", "df")
+    first.value["a"] = [9, 9, 9]  # one consumer mutates its copy
+
+    second = bus.get("src", "df")
+    assert second.value["a"].tolist() == [1, 2, 3]
+
+
+def test_in_memory_dataframe_producer_mutation_after_put_is_isolated(
+    spill_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """put() snapshots the frame, matching parquet's write-time snapshot."""
+    monkeypatch.delenv(_THRESHOLD_ENV, raising=False)
+    bus = DataBus(spill_dir=spill_dir)
+    df = pd.DataFrame({"a": [1, 2, 3]})
+    bus.put("src", "df", df)
+
+    df.loc[0, "a"] = 999  # producer keeps mutating its own frame
+
+    assert bus.get("src", "df").value["a"].tolist() == [1, 2, 3]
+
+
+def test_spilled_dataframe_consumer_and_producer_mutation_is_isolated(
+    spill_bus: DataBus,
+) -> None:
+    df = pd.DataFrame({"a": [1, 2, 3]})
+    spill_bus.put("src", "df", df)
+    df.loc[0, "a"] = 999  # producer mutation after put
+
+    first = spill_bus.get("src", "df")
+    first.value["a"] = [7, 7, 7]  # consumer mutation
+
+    assert spill_bus.get("src", "df").value["a"].tolist() == [1, 2, 3]
+
+
+def test_replacement_transitions_between_memory_and_spill(
+    spill_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    small = pd.DataFrame({"a": [1]})
+    big = pd.DataFrame({"a": range(10_000), "b": ["padding"] * 10_000})
+    threshold = int(small.memory_usage(deep=True).sum())
+    assert int(big.memory_usage(deep=True).sum()) > threshold
+    monkeypatch.setenv(_THRESHOLD_ENV, str(threshold))
+    bus = DataBus(spill_dir=spill_dir)
+
+    # spill, then spill→memory: the old parquet file must be unlinked.
+    bus.put("n1", "df", big)
+    assert len(list(bus.spill_root.iterdir())) == 1
+    bus.put("n1", "df", small)
+    assert list(bus.spill_root.iterdir()) == []
+    assert bus.get("n1", "df").value["a"].tolist() == [1]
+
+    # memory→spill: a new file appears, and the payload is the big frame.
+    bus.put("n1", "df", big)
+    assert len(list(bus.spill_root.iterdir())) == 1
+    assert len(bus.get("n1", "df").value) == 10_000
+
+    # spill→spill: replacement still leaves exactly one file behind.
+    bus.put("n1", "df", big.head(5000))
+    assert len(list(bus.spill_root.iterdir())) == 1
+    assert len(bus.get("n1", "df").value) == 5000
 
 
 def test_container_payload_still_deep_copied_on_get(bus: DataBus) -> None:
