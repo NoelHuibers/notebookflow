@@ -54,6 +54,11 @@ from notebookflow.llm.ask import Ask
 from notebookflow.llm.code_synth import CodeSynth
 from notebookflow.llm.credentials import CredentialContext, resolve_credentials
 from notebookflow.llm.explainer import Explainer
+from notebookflow.llm.node_author import (
+    NodeAuthor,
+    NodeAuthorContext,
+    UpstreamOutputs,
+)
 from notebookflow.llm.pipeline_author import PipelineAuthor
 from notebookflow.protocol.registry import Registry
 from notebookflow.ratelimit import rate_limited
@@ -246,6 +251,32 @@ class SynthesizeNodeResponse(_APIModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class NodeAuthorUpstream(_APIModel):
+    node_name: str
+    output_ports: list[str] = Field(default_factory=list)
+
+
+class NodeAuthorContextModel(_APIModel):
+    upstream: list[NodeAuthorUpstream] = Field(default_factory=list)
+    notebook_name: str = ""
+
+
+class AuthorNodeRequest(_APIModel):
+    description: str
+    context: NodeAuthorContextModel = Field(default_factory=NodeAuthorContextModel)
+    credentials: CredentialsModel | None = None
+
+
+class AuthorNodeResponse(_APIModel):
+    name: str
+    tag: str
+    inputs: list[str] = Field(default_factory=list)
+    outputs: list[str] = Field(default_factory=list)
+    body: str
+    backend: str
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ExplainPipelineRequest(_APIModel):
     pipeline: PipelineDef
     instruction: str = ""
@@ -323,6 +354,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     _app.state.code_synth = CodeSynth(registry)
     _app.state.explainer = Explainer()
     _app.state.pipeline_author = PipelineAuthor(registry)
+    _app.state.node_author = NodeAuthor(registry)
     _app.state.ask = Ask()
     trigger_manager = TriggerManager(state_path=_trigger_state_path())
     trigger_manager.on_fire(_run_trigger_pipeline)
@@ -412,6 +444,14 @@ def _pipeline_author(app_ref: FastAPI) -> PipelineAuthor:
     if not isinstance(author, PipelineAuthor):
         author = PipelineAuthor(_registry(app_ref))
         app_ref.state.pipeline_author = author
+    return author
+
+
+def _node_author(app_ref: FastAPI) -> NodeAuthor:
+    author = getattr(app_ref.state, "node_author", None)
+    if not isinstance(author, NodeAuthor):
+        author = NodeAuthor(_registry(app_ref))
+        app_ref.state.node_author = author
     return author
 
 
@@ -741,6 +781,53 @@ async def synthesize_node(
         source=result.source,
         backend=result.backend,
         warnings=result.warnings,
+    )
+
+
+@app.post(
+    "/nodes/author",
+    response_model=AuthorNodeResponse,
+    dependencies=[Depends(rate_limited("nodes-author", 10, 60))],
+)
+async def author_node(
+    request: AuthorNodeRequest,
+    principal: Annotated[OptionalPrincipal, Depends(optional_auth)],
+) -> AuthorNodeResponse:
+    """Author a single node from a plain-English description (#19 "Create node").
+
+    Runs through the LLMClient gateway with the per-request provider/key
+    (bring-your-own-key) or a self-host env key; falls back to a deterministic
+    template node otherwise, so the canvas always gets something usable. The
+    response is the structured NodeDraft the canvas places + auto-wires (input
+    bindings reference the upstream outputs passed in ``context``). Anonymous
+    hosted callers must bring their own key (401 otherwise).
+    """
+    credentials = _llm_credentials(request.credentials, principal)
+    if request.description.strip() == "":
+        raise HTTPException(
+            status_code=400,
+            detail="Empty description -- describe the node you want.",
+        )
+    context = NodeAuthorContext(
+        upstream=[
+            UpstreamOutputs(node_name=node.node_name, output_ports=list(node.output_ports))
+            for node in request.context.upstream
+        ],
+        notebook_name=request.context.notebook_name,
+    )
+    draft = await _node_author(app).author(
+        request.description,
+        context=context,
+        credentials=credentials,
+    )
+    return AuthorNodeResponse(
+        name=draft.name,
+        tag=draft.tag,
+        inputs=draft.inputs,
+        outputs=draft.outputs,
+        body=draft.body,
+        backend=draft.backend,
+        warnings=draft.warnings,
     )
 
 
