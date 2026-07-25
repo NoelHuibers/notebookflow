@@ -8,7 +8,8 @@ export const en = {
   welcome: {
     badge: "Welcome to NotebookFlow",
     title: "Your notebooks, as one visual pipeline.",
-    body: "Jupyter cells become nodes on a canvas — wire them together, run the whole graph, and watch results stream back in.",
+    body: "Jupyter cells become nodes on a canvas. Two notebooks arrive already wired together — run the whole graph, extend it, or let AI build the next node with your own key.",
+    meta: "~90 seconds · 8 steps",
     takeTour: "Take the tour",
     skip: "Skip for now",
   },
@@ -66,7 +67,8 @@ export const de: typeof en = {
   welcome: {
     badge: "Willkommen bei NotebookFlow",
     title: "Deine Notebooks als eine visuelle Pipeline.",
-    body: "Jupyter-Zellen werden zu Nodes auf einer Leinwand — verbinde sie, führe den ganzen Graphen aus und sieh zu, wie die Ergebnisse zurückfließen.",
+    body: "Jupyter-Zellen werden zu Nodes auf einer Leinwand. Zwei Notebooks sind schon miteinander verdrahtet — führe den ganzen Graphen aus, erweitere ihn oder lass die KI mit deinem eigenen Schlüssel den nächsten Node bauen.",
+    meta: "~90 Sekunden · 8 Schritte",
     takeTour: "Tour starten",
     skip: "Erstmal überspringen",
   },
