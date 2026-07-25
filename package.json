@@ -24,7 +24,7 @@
     "jupyter:lab": "uv --project engine run jupyter lab examples/preprocessing.ipynb examples/model_baseline.ipynb examples/model_advanced.ipynb examples/postprocessing.ipynb",
     "jupyter:install": "node scripts/install-labextension.mjs",
     "start:web": "concurrently --names \"engine,web\" --prefix-colors \"yellow,cyan\" --kill-others-on-fail \"pnpm engine\" \"turbo run dev --filter=@notebookflow/web-app\"",
-    "start:vscode": "pnpm --filter @notebookflow/vscode-extension build && node scripts/launch-vscode.mjs",
+    "start:vscode": "pnpm --filter notebookflow-vscode build && node scripts/launch-vscode.mjs",
     "start:jupyter": "pnpm --filter @notebookflow/jupyterlab-extension build:lab && pnpm jupyter:lab"
   },
   "devDependencies": {

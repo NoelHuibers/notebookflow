@@ -5,7 +5,12 @@
     "rootDir": "./src",
     "composite": true,
     "lib": ["ES2024"],
-    "types": ["node", "vscode"]
+    "types": ["node", "vscode"],
+    "paths": {
+      "@notebookflow/app-core": ["../app-core/src/index.ts"],
+      "@notebookflow/graph-canvas": ["../graph-canvas/src/index.ts"],
+      "@notebookflow/graph-canvas/sync": ["../graph-canvas/src/sync/index.ts"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "dist-webview", "webview"],

@@ -2,6 +2,13 @@
 
 n8n-style workflow orchestration for computational notebooks. Visually wire together Jupyter notebooks and cell groups into pipelines, with AI assistance, a node library, and full bidirectional sync between the visual graph and the actual notebook cells.
 
+## Install in VS Code
+
+Install [NotebookFlow from the Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=notebookflow.notebookflow-vscode),
+open an `.ipynb` notebook, and run **NotebookFlow: Open Canvas**. The extension
+requires Python 3.11–3.13 and installs its local execution engine on first use;
+Node, `uv`, and a repository checkout are not required.
+
 ## Install in JupyterLab
 
 ```bash
@@ -283,15 +290,15 @@ If you'd rather drive the pieces individually:
 |------------------|---------------------------------------------------------------|
 | Engine only      | `pnpm engine`                                                 |
 | Web app only     | `pnpm --filter @notebookflow/web-app dev`                     |
-| VS Code only     | `pnpm --filter @notebookflow/vscode-extension build && code packages/vscode-extension` (then F5) |
+| VS Code only     | `pnpm --filter notebookflow-vscode build && code packages/vscode-extension` (then F5) |
 | Jupyter Lab only | `pnpm jupyter:lab` (engine must already be running)           |
 
 ### Troubleshooting
 
 - **`pnpm bootstrap` fails on `uv` step** → `uv` isn't on PATH. Install with `winget install astral-sh.uv` (Windows) or `curl -LsSf https://astral.sh/uv/install.sh | sh` (macOS/Linux), then reopen your shell.
-- **`pnpm start:vscode` says `code` not found** → install VS Code's `code` CLI shim. In VS Code: command palette → **Shell Command: Install 'code' command in PATH**. Or use the manual fallback: `pnpm --filter @notebookflow/vscode-extension build && code packages/vscode-extension`, then F5 in that window.
+- **`pnpm start:vscode` says `code` not found** → install VS Code's `code` CLI shim. In VS Code: command palette → **Shell Command: Install 'code' command in PATH**. Or use the manual fallback: `pnpm --filter notebookflow-vscode build && code packages/vscode-extension`, then F5 in that window.
 - **JupyterLab extension doesn't appear in the palette** → re-run `pnpm jupyter:install` (it re-copies the bundle into the venv), refresh the browser tab. Check **Help → About JupyterLab → Installed Extensions** to confirm `@notebookflow/jupyterlab-extension` is listed.
-- **VS Code's engine fails to spawn** → check the **NotebookFlow Engine** output channel for the subprocess error. If `uv` isn't visible to VS Code, set `notebookflow.enginePath` in VS Code settings to an absolute path to a directory containing the engine.
+- **VS Code's engine fails to start** → check the **NotebookFlow Engine** output channel. Release installs need Python 3.11–3.13 and install the engine from PyPI automatically; source development can set `notebookflow.enginePath` to an engine checkout with `uv` available.
 
 ## Implementation status
 
