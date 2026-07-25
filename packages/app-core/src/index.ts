@@ -69,7 +69,7 @@ export {
   OUTPUT_HTML_ALLOWED_TAGS,
   sanitizeOutputHtml,
 } from "./outputHtml";
-export { buildPipelineDef, stripMarkerLine } from "./pipeline";
+export { buildNodeAuthorContext, buildPipelineDef, stripMarkerLine } from "./pipeline";
 export { extractSourceFilename } from "./sourceMeta";
 export type {
   AskAnswer,
@@ -79,7 +79,10 @@ export type {
   EngineEvent,
   ExecutionResultMsg,
   NbOutput,
+  NodeAuthorContext,
+  NodeAuthorUpstream,
   NodeDef,
+  NodeDraft,
   PipelineDef,
   PipelineExplanation,
   PipelineProposal,

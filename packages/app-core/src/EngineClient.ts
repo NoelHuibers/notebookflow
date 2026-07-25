@@ -21,6 +21,8 @@ import type {
   Credentials,
   DataFile,
   EngineEvent,
+  NodeAuthorContext,
+  NodeDraft,
   PipelineDef,
   PipelineExplanation,
   PipelineProposal,
@@ -287,6 +289,35 @@ export class EngineClient {
       throw new EngineRequestError(`EngineClient.proposePipeline: ${message}`, res.status);
     }
     return (await res.json()) as PipelineProposal;
+  }
+
+  /**
+   * Author a single node from a plain-English description (#19 "Create node").
+   * `context` carries the upstream outputs the new node may bind to, so the
+   * returned draft's input bindings reference nodes that actually exist. Backed
+   * by the user's configured provider (bring-your-own-key) when a key is set;
+   * falls back to a deterministic template node otherwise.
+   */
+  async authorNode(description: string, context: NodeAuthorContext): Promise<NodeDraft> {
+    const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/nodes/author");
+    const body: { description: string; context: NodeAuthorContext; credentials?: Credentials } = {
+      description,
+      context,
+    };
+    const credentials = this.credentialBody();
+    if (credentials !== undefined) {
+      body.credentials = credentials;
+    }
+    const res = await fetch(httpUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...this.authHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const message = await readErrorMessage(res);
+      throw new EngineRequestError(`EngineClient.authorNode: ${message}`, res.status);
+    }
+    return (await res.json()) as NodeDraft;
   }
 
   // ---------------------------------------------------------------------

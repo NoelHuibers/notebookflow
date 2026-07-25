@@ -129,3 +129,34 @@ export interface PipelineProposal {
   backend: string;
   warnings: string[];
 }
+
+/** One upstream node the authored node may bind to: its name + output ports. */
+export interface NodeAuthorUpstream {
+  nodeName: string;
+  outputPorts: string[];
+}
+
+/**
+ * What the engine's NodeAuthor needs to wire a new node to the canvas: the
+ * outputs already available upstream, plus an optional notebook name.
+ */
+export interface NodeAuthorContext {
+  upstream: NodeAuthorUpstream[];
+  notebookName?: string;
+}
+
+/**
+ * A single node the canvas can place + auto-wire (#19 "Create node"). `inputs`
+ * are contract-binding strings `local<-Node.port`; `outputs` are Python
+ * identifiers; `body` is the cell source WITHOUT a `# @node:` marker line.
+ * Mirrors the engine's `AuthorNodeResponse`.
+ */
+export interface NodeDraft {
+  name: string;
+  tag: string;
+  inputs: string[];
+  outputs: string[];
+  body: string;
+  backend: string;
+  warnings: string[];
+}
