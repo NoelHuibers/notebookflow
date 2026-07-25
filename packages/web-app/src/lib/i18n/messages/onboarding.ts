@@ -59,6 +59,7 @@ export const en = {
     label: "Help",
     replayTour: "Replay tour",
     shortcuts: "Keyboard shortcuts",
+    jupyterLab: "Install for JupyterLab",
     documentation: "Documentation",
   },
 };
@@ -118,6 +119,7 @@ export const de: typeof en = {
     label: "Hilfe",
     replayTour: "Tour erneut ansehen",
     shortcuts: "Tastenkürzel",
+    jupyterLab: "Für JupyterLab installieren",
     documentation: "Dokumentation",
   },
 };

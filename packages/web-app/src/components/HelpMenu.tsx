@@ -1,10 +1,10 @@
 /**
  * "?" help popover in the toolbar — replay the onboarding tour, open the
- * keyboard-shortcuts dialog, or jump to the documentation. Owns its own open
- * state (same pattern as ToolbarOverflowMenu).
+ * keyboard-shortcuts dialog, install the JupyterLab extension, or jump to the
+ * documentation. Owns its own open state (same pattern as ToolbarOverflowMenu).
  */
 
-import { BookOpen, CircleHelp, Compass, Keyboard } from "lucide-react";
+import { BookOpen, CircleHelp, Compass, Keyboard, Package } from "lucide-react";
 import type { ReactElement } from "react";
 import { useState } from "react";
 
@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n";
 
 const DOCS_URL = "https://github.com/NoelHuibers/notebookflow#readme";
+const JUPYTERLAB_PACKAGE_URL = "https://pypi.org/project/notebookflow-app/";
 
 interface HelpMenuProps {
   onReplayTour: () => void;
@@ -60,6 +61,18 @@ export function HelpMenu({ onReplayTour, onOpenShortcuts }: HelpMenuProps): Reac
             <Keyboard className="size-3.5" />
             {t("onboarding.help.shortcuts")}
           </button>
+          <a
+            href={JUPYTERLAB_PACKAGE_URL}
+            target="_blank"
+            rel="noreferrer"
+            onClick={() => {
+              setIsOpen(false);
+            }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/70"
+          >
+            <Package className="size-3.5" />
+            {t("onboarding.help.jupyterLab")}
+          </a>
           <a
             href={DOCS_URL}
             target="_blank"
