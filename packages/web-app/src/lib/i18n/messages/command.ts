@@ -1,0 +1,56 @@
+// `command` namespace — the unified ⌘K AI command palette (CommandPalette.tsx
+// in app-core). Mirrors CommandPaletteLabels 1:1; consumed via t("command.<key>").
+export const en = {
+  title: "AI commands",
+  dismiss: "Dismiss",
+  searchPlaceholder: "Search commands…",
+  noResults: "No commands match",
+  comingSoon: "Soon",
+  back: "Back to commands",
+  navHint: "↑↓ to navigate · Enter to select · Esc to close",
+  submitHint: "Enter to send · Shift+Enter for a new line · Esc to close",
+  askTitle: "Ask AI",
+  askDescription: "Ask anything about your pipeline or pandas",
+  createNodeTitle: "Create node",
+  createNodeDescription: "Describe a node and drop it on the canvas",
+  composeTitle: "Compose a pipeline",
+  composeDescription: "Draft a whole notebook from one sentence",
+  explainTitle: "Explain pipeline",
+  explainDescription: "Get a prose walkthrough of the current graph",
+  askPlaceholder:
+    "Ask anything — describe what you want to do, request an explanation, or ask a pandas question",
+  askSubmit: "Ask",
+  askThinking: "Thinking…",
+  composePlaceholder: "e.g. Load customers.csv, filter for EU rows, plot revenue by region",
+  composeSubmit: "Draft pipeline",
+  composeDrafting: "Drafting…",
+  composeApply: "Replace notebook with draft",
+};
+
+export const de: typeof en = {
+  title: "KI-Befehle",
+  dismiss: "Schließen",
+  searchPlaceholder: "Befehle durchsuchen…",
+  noResults: "Keine passenden Befehle",
+  comingSoon: "Bald",
+  back: "Zurück zu den Befehlen",
+  navHint: "↑↓ zum Navigieren · Enter zum Auswählen · Esc zum Schließen",
+  submitHint: "Enter zum Senden · Umschalt+Enter für neue Zeile · Esc zum Schließen",
+  askTitle: "KI fragen",
+  askDescription: "Frag alles über deine Pipeline oder pandas",
+  createNodeTitle: "Node erstellen",
+  createNodeDescription: "Beschreibe einen Node und platziere ihn auf der Canvas",
+  composeTitle: "Pipeline erstellen",
+  composeDescription: "Entwirf ein ganzes Notebook aus einem Satz",
+  explainTitle: "Pipeline erklären",
+  explainDescription: "Erhalte eine textuelle Beschreibung des aktuellen Graphen",
+  askPlaceholder:
+    "Frag alles — beschreibe, was du tun möchtest, fordere eine Erklärung an oder stelle eine pandas-Frage",
+  askSubmit: "Fragen",
+  askThinking: "Denkt nach…",
+  composePlaceholder:
+    "z. B. customers.csv laden, nach EU-Zeilen filtern, Umsatz nach Region plotten",
+  composeSubmit: "Entwurf erstellen",
+  composeDrafting: "Entwurf wird erstellt…",
+  composeApply: "Notebook durch Entwurf ersetzen",
+};

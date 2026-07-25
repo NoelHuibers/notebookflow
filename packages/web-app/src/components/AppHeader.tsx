@@ -4,17 +4,7 @@
  * presentational: all state lives in App and flows in as props.
  */
 
-import {
-  Cloud,
-  Command,
-  Keyboard,
-  Play,
-  Save,
-  Settings as SettingsIcon,
-  Sparkles,
-  Wand2,
-  Zap,
-} from "lucide-react";
+import { Cloud, Play, Save, Settings as SettingsIcon, Sparkles, Zap } from "lucide-react";
 import type { ReactElement } from "react";
 
 import { EngineStatus } from "@/components/EngineStatus";
@@ -38,10 +28,8 @@ interface AppHeaderProps {
   onOpenCloud: () => void;
   triggersCount: number;
   onOpenTriggers: () => void;
-  isExplaining: boolean;
-  onExplain: () => void;
-  onOpenCompose: () => void;
-  onOpenAsk: () => void;
+  /** Opens the unified ⌘K AI command palette (Ask / Compose / Explain). */
+  onOpenCommandPalette: () => void;
   isRunning: boolean;
   /**
    * Whether the Run action is available. False for signed-out visitors
@@ -50,7 +38,8 @@ interface AppHeaderProps {
    */
   canRun: boolean;
   onRun: () => void;
-  onToggleShortcuts: () => void;
+  /** Opens the keyboard-shortcuts dialog (used by the "?" help popover). */
+  onOpenShortcuts: () => void;
   /** Restarts the onboarding tour from the help popover. */
   onReplayTour: () => void;
   onToggleSettings: () => void;
@@ -70,14 +59,11 @@ export function AppHeader({
   onOpenCloud,
   triggersCount,
   onOpenTriggers,
-  isExplaining,
-  onExplain,
-  onOpenCompose,
-  onOpenAsk,
+  onOpenCommandPalette,
   isRunning,
   canRun,
   onRun,
-  onToggleShortcuts,
+  onOpenShortcuts,
   onReplayTour,
   onToggleSettings,
   notebookName,
@@ -137,32 +123,13 @@ export function AppHeader({
           )}
         </Button>
         <Button
-          variant="ghost"
-          size="sm"
-          onClick={onExplain}
-          disabled={isExplaining}
-          title={t("app.toolbar.explainTitle")}
-        >
-          <Sparkles className="mr-1.5 size-3.5" />
-          {isExplaining ? t("app.toolbar.explaining") : t("app.toolbar.explain")}
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onOpenCompose}
-          title={t("app.toolbar.composeTitle")}
-        >
-          <Wand2 className="mr-1.5 size-3.5" />
-          {t("app.toolbar.compose")}
-        </Button>
-        <Button
           data-tour="ask"
           variant="ghost"
           size="sm"
-          onClick={onOpenAsk}
+          onClick={onOpenCommandPalette}
           title={t("app.toolbar.askAiTitle")}
         >
-          <Command className="mr-1.5 size-3.5" />
+          <Sparkles className="mr-1.5 size-3.5" />
           {t("app.toolbar.askAi")}
           <Badge variant="outline" className="ml-2 px-1 font-mono text-[10px]">
             ⌘K
@@ -182,17 +149,7 @@ export function AppHeader({
             {isRunning ? t("app.toolbar.running") : t("app.toolbar.runPipeline")}
           </Button>
         </span>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="px-2"
-          title={t("app.toolbar.shortcutsTitle")}
-          aria-label={t("app.toolbar.shortcuts")}
-          onClick={onToggleShortcuts}
-        >
-          <Keyboard className="size-4" />
-        </Button>
-        <HelpMenu onReplayTour={onReplayTour} onOpenShortcuts={onToggleShortcuts} />
+        <HelpMenu onReplayTour={onReplayTour} onOpenShortcuts={onOpenShortcuts} />
         <Button
           variant="ghost"
           size="sm"

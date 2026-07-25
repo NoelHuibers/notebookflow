@@ -11,6 +11,7 @@ import * as ask from "./messages/ask";
 import * as canvas from "./messages/canvas";
 import * as cells from "./messages/cells";
 import * as cloud from "./messages/cloud";
+import * as command from "./messages/command";
 import * as compose from "./messages/compose";
 import * as device from "./messages/device";
 import * as explanation from "./messages/explanation";
@@ -53,6 +54,7 @@ export const en = {
   landing: landing.en,
   settings: settings.en,
   shortcuts: shortcuts.en,
+  command: command.en,
   compose: compose.en,
   cloud: cloud.en,
   ask: ask.en,
@@ -97,6 +99,7 @@ export const de: Messages = {
   landing: landing.de,
   settings: settings.de,
   shortcuts: shortcuts.de,
+  command: command.de,
   compose: compose.de,
   cloud: cloud.de,
   ask: ask.de,
