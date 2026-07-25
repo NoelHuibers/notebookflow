@@ -60,6 +60,7 @@ export const en = {
     replayTour: "Replay tour",
     shortcuts: "Keyboard shortcuts",
     jupyterLab: "Install for JupyterLab",
+    vscode: "Install for VS Code",
     documentation: "Documentation",
   },
 };
@@ -120,6 +121,7 @@ export const de: typeof en = {
     replayTour: "Tour erneut ansehen",
     shortcuts: "Tastenkürzel",
     jupyterLab: "Für JupyterLab installieren",
+    vscode: "Für VS Code installieren",
     documentation: "Dokumentation",
   },
 };

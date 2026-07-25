@@ -1,14 +1,59 @@
 {
-  "name": "@notebookflow/vscode-extension",
-  "version": "0.0.0",
+  "name": "notebookflow-vscode",
+  "version": "0.1.0",
   "displayName": "NotebookFlow",
-  "description": "VS Code platform adapter for NotebookFlow",
+  "description": "Turn Jupyter notebooks into visual, executable workflows without leaving VS Code.",
   "publisher": "notebookflow",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "homepage": "https://notebookflow.app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NoelHuibers/notebookflow.git"
+  },
+  "bugs": {
+    "url": "https://github.com/NoelHuibers/notebookflow/issues"
+  },
+  "preview": true,
+  "pricing": "Free",
+  "categories": [
+    "Notebooks",
+    "Data Science",
+    "Visualization"
+  ],
+  "keywords": [
+    "jupyter",
+    "notebook",
+    "workflow",
+    "pipeline",
+    "data-science",
+    "visualization"
+  ],
+  "galleryBanner": {
+    "color": "#0f766e",
+    "theme": "dark"
+  },
   "engines": {
     "vscode": "^1.94.0"
   },
   "type": "module",
-  "main": "./dist/extension.js",
+  "main": "./dist/extension.cjs",
+  "extensionKind": [
+    "workspace"
+  ],
+  "extensionDependencies": [
+    "ms-toolsai.jupyter"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "NotebookFlow executes notebook code through a local Python engine."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "NotebookFlow needs local notebook files and a local Python runtime."
+    }
+  },
   "activationEvents": [
     "onNotebook:jupyter-notebook"
   ],
@@ -66,7 +111,14 @@
         "notebookflow.enginePath": {
           "type": "string",
           "default": "",
-          "description": "Absolute path to a directory containing the NotebookFlow engine (a project with `uv run notebookflow` available). Leave blank to auto-discover an `engine/` directory under the workspace root."
+          "scope": "machine",
+          "description": "Development override: absolute path to a NotebookFlow engine checkout that can be started with `uv run notebookflow`. Leave blank to use the managed engine from PyPI."
+        },
+        "notebookflow.pythonPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Optional path to a Python 3.11, 3.12, or 3.13 executable used to install the managed local engine. Leave blank to auto-detect Python."
         },
         "notebookflow.llm.provider": {
           "type": "string",
@@ -103,40 +155,44 @@
   "files": [
     "dist",
     "dist-webview",
-    "src",
-    "webview"
+    "media/icon.png",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "SUPPORT.md"
   ],
   "scripts": {
-    "build": "tsc -b && vite build",
-    "build:host": "tsc -b",
+    "build": "pnpm build:dependencies && pnpm clean && pnpm build:host && pnpm build:webview",
+    "build:dependencies": "pnpm --filter @notebookflow/app-core... build",
+    "build:host": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node20 --external:vscode --alias:@notebookflow/app-core=../app-core/src/index.ts --outfile=dist/extension.cjs",
     "build:webview": "vite build",
-    "dev": "tsc -b --watch",
-    "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --noEmit",
-    "clean": "rimraf dist dist-webview .turbo *.tsbuildinfo"
-  },
-  "dependencies": {
-    "@notebookflow/app-core": "workspace:*",
-    "@notebookflow/graph-canvas": "workspace:*",
-    "@radix-ui/react-scroll-area": "^1.2.10",
-    "@radix-ui/react-slot": "^1.2.4",
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
-    "lucide-react": "^1.25.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "reactflow": "^11.11.4",
-    "tailwind-merge": "^3.6.0"
+    "dev": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node20 --external:vscode --alias:@notebookflow/app-core=../app-core/src/index.ts --outfile=dist/extension.cjs --sourcemap --watch",
+    "test": "vitest run",
+    "typecheck": "pnpm build:dependencies && tsc --noEmit",
+    "clean": "rimraf dist dist-webview .turbo tsconfig.tsbuildinfo",
+    "package": "vsce package --no-dependencies --out notebookflow-vscode-0.1.0.vsix",
+    "vscode:prepublish": "pnpm build"
   },
   "devDependencies": {
+    "@radix-ui/react-scroll-area": "^1.2.10",
+    "@radix-ui/react-slot": "^1.2.4",
     "@tailwindcss/vite": "^4.3.0",
     "@types/node": "^26.1.1",
     "@types/react": "^18.3.28",
     "@types/react-dom": "^18.3.7",
-    "@types/vscode": "^1.118.0",
+    "@types/vscode": "1.94.0",
     "@vitejs/plugin-react": "^4.7.0",
+    "@vscode/vsce": "^3.9.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "esbuild": "^0.25.0",
+    "lucide-react": "^1.25.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "reactflow": "^11.11.4",
     "rimraf": "^6.1.3",
     "tailwindcss": "^4.3.0",
+    "tailwind-merge": "^3.6.0",
     "tw-animate-css": "^1.4.0",
     "typescript": "^6.0.3",
     "vite": "^7.3.2",

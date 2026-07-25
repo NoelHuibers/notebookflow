@@ -1,0 +1,148 @@
+name: Release VS Code
+
+on:
+  push:
+    tags:
+      - "vscode-v*"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish the validated VSIX to the Marketplace"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and validate VSIX
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.4
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate release tag
+        if: github.ref_type == 'tag'
+        run: |
+          version="$(node -p "require('./packages/vscode-extension/package.json').version")"
+          test "${GITHUB_REF_NAME}" = "vscode-v${version}" || {
+            echo "Tag ${GITHUB_REF_NAME} does not match package version ${version}"
+            exit 1
+          }
+
+      - name: Typecheck and test
+        run: |
+          pnpm --filter notebookflow-vscode typecheck
+          pnpm --filter notebookflow-vscode test
+
+      - name: Package VSIX
+        run: pnpm --filter notebookflow-vscode package
+
+      - name: Verify VSIX contents
+        run: >-
+          python scripts/verify_vscode_distribution.py
+          packages/vscode-extension/notebookflow-vscode-0.1.0.vsix
+
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v6
+        with:
+          name: vscode-extension
+          path: packages/vscode-extension/notebookflow-vscode-0.1.0.vsix
+          if-no-files-found: error
+
+  smoke:
+    name: Clean VS Code install
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download VSIX
+        uses: actions/download-artifact@v7
+        with:
+          name: vscode-extension
+          path: dist
+
+      - name: Download Visual Studio Code
+        run: |
+          curl --fail --location --retry 3 \
+            https://update.code.visualstudio.com/latest/linux-x64/stable \
+            --output vscode.tar.gz
+          tar -xzf vscode.tar.gz
+
+      - name: Install into an isolated profile
+        run: |
+          mkdir -p /tmp/notebookflow-code-data /tmp/notebookflow-code-extensions
+          ./VSCode-linux-x64/bin/code \
+            --no-sandbox \
+            --user-data-dir /tmp/notebookflow-code-data \
+            --extensions-dir /tmp/notebookflow-code-extensions \
+            --install-extension dist/notebookflow-vscode-0.1.0.vsix
+          ./VSCode-linux-x64/bin/code \
+            --no-sandbox \
+            --user-data-dir /tmp/notebookflow-code-data \
+            --extensions-dir /tmp/notebookflow-code-extensions \
+            --list-extensions --show-versions \
+            | grep -Fx "notebookflow.notebookflow-vscode@0.1.0"
+
+  publish:
+    name: Publish to Visual Studio Marketplace
+    if: github.ref_type == 'tag' || inputs.publish == true
+    needs: [build, smoke]
+    runs-on: ubuntu-latest
+    environment:
+      name: vscode-marketplace
+      url: https://marketplace.visualstudio.com/items?itemName=notebookflow.notebookflow-vscode
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.4
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Install publishing tool
+        run: pnpm install --frozen-lockfile
+
+      - name: Download VSIX
+        uses: actions/download-artifact@v7
+        with:
+          name: vscode-extension
+          path: dist
+
+      - name: Sign in to Azure with GitHub OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Publish
+        run: >-
+          pnpm --filter notebookflow-vscode exec vsce publish
+          --packagePath "${GITHUB_WORKSPACE}/dist/notebookflow-vscode-0.1.0.vsix"
+          --azure-credential

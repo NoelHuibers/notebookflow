@@ -29,7 +29,7 @@ import { CanvasWebviewPanel, LLM_API_KEY_SECRET } from "./WebviewPanel.js";
 let engine: EngineProcess | null = null;
 
 export function activate(context: vscode.ExtensionContext): void {
-  engine = new EngineProcess();
+  engine = new EngineProcess(context.globalStorageUri.fsPath);
   context.subscriptions.push(engine);
 
   context.subscriptions.push(

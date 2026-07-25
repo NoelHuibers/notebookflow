@@ -1,10 +1,10 @@
 /**
  * "?" help popover in the toolbar — replay the onboarding tour, open the
- * keyboard-shortcuts dialog, install the JupyterLab extension, or jump to the
+ * keyboard-shortcuts dialog, install either editor extension, or jump to the
  * documentation. Owns its own open state (same pattern as ToolbarOverflowMenu).
  */
 
-import { BookOpen, CircleHelp, Compass, Keyboard, Package } from "lucide-react";
+import { BookOpen, CircleHelp, Code2, Compass, Keyboard, Package } from "lucide-react";
 import type { ReactElement } from "react";
 import { useState } from "react";
 
@@ -13,6 +13,8 @@ import { useI18n } from "@/lib/i18n";
 
 const DOCS_URL = "https://github.com/NoelHuibers/notebookflow#readme";
 const JUPYTERLAB_PACKAGE_URL = "https://pypi.org/project/notebookflow-app/";
+const VSCODE_MARKETPLACE_URL =
+  "https://marketplace.visualstudio.com/items?itemName=notebookflow.notebookflow-vscode";
 
 interface HelpMenuProps {
   onReplayTour: () => void;
@@ -72,6 +74,18 @@ export function HelpMenu({ onReplayTour, onOpenShortcuts }: HelpMenuProps): Reac
           >
             <Package className="size-3.5" />
             {t("onboarding.help.jupyterLab")}
+          </a>
+          <a
+            href={VSCODE_MARKETPLACE_URL}
+            target="_blank"
+            rel="noreferrer"
+            onClick={() => {
+              setIsOpen(false);
+            }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/70"
+          >
+            <Code2 className="size-3.5" />
+            {t("onboarding.help.vscode")}
           </a>
           <a
             href={DOCS_URL}
