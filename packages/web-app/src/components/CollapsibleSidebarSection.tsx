@@ -11,6 +11,8 @@ interface CollapsibleSidebarSectionProps {
   onToggle: () => void;
   /** When true, expanded content fills remaining sidebar height (for scrollable lists). */
   fill?: boolean;
+  /** Optional `data-tour` target on the section root (for the onboarding spotlight). */
+  dataTour?: string;
   children: ReactNode;
 }
 
@@ -20,10 +22,14 @@ export function CollapsibleSidebarSection({
   collapsed,
   onToggle,
   fill = false,
+  dataTour,
   children,
 }: CollapsibleSidebarSectionProps): ReactElement {
   return (
-    <section className={cn("flex flex-col border-b", fill && !collapsed && "min-h-0 flex-1")}>
+    <section
+      data-tour={dataTour}
+      className={cn("flex flex-col border-b", fill && !collapsed && "min-h-0 flex-1")}
+    >
       <button
         type="button"
         onClick={onToggle}

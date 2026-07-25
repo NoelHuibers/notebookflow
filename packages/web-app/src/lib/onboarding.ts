@@ -62,27 +62,43 @@ export function clearOnboardingSeen(storage: StorageLike | null = defaultStorage
 // ---------------------------------------------------------------------------
 // Tour steps
 
-export type TourStepId = "files" | "cells" | "canvas" | "run" | "ask";
+export type TourStepId =
+  | "files"
+  | "cells"
+  | "canvas"
+  | "connect"
+  | "palette"
+  | "run"
+  | "triggers"
+  | "ask";
+/** The `data-tour` targets that exist in the DOM (a subset of the step ids —
+ *  the `connect` step reuses the `canvas` region rather than owning a target). */
+export type TourTarget = Exclude<TourStepId, "connect">;
 export type TourPlacement = "top" | "bottom" | "left" | "right";
 
 export interface TourStep {
   id: TourStepId;
   /** Value of the `data-tour` attribute the spotlight targets. */
-  target: TourStepId;
+  target: TourTarget;
   /** Preferred card side relative to the spotlight; flips if it won't fit. */
   placement: TourPlacement;
 }
 
 /**
- * The five tour stops, in order. `id` doubles as the i18n key segment
- * (`onboarding.steps.<id>.title` / `.body`) and the `data-tour` target.
- * Typed as a non-empty tuple so `TOUR_STEPS[0]` needs no undefined-guard.
+ * The eight tour stops, in order. `id` is the i18n key segment
+ * (`onboarding.steps.<id>.title` / `.body`); `target` is the `data-tour`
+ * attribute the spotlight lands on — usually the same string, except
+ * `connect`, which re-spotlights the `canvas` to call out the cross-notebook
+ * wire. Typed as a non-empty tuple so `TOUR_STEPS[0]` needs no undefined-guard.
  */
 export const TOUR_STEPS: readonly [TourStep, ...TourStep[]] = [
   { id: "files", target: "files", placement: "right" },
   { id: "cells", target: "cells", placement: "right" },
   { id: "canvas", target: "canvas", placement: "left" },
+  { id: "connect", target: "canvas", placement: "left" },
+  { id: "palette", target: "palette", placement: "left" },
   { id: "run", target: "run", placement: "bottom" },
+  { id: "triggers", target: "triggers", placement: "bottom" },
   { id: "ask", target: "ask", placement: "bottom" },
 ];
 

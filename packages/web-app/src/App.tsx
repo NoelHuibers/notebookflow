@@ -381,9 +381,12 @@ export function App(): ReactElement {
         setIsFilesCollapsed(false);
       } else if (step.id === "cells") {
         setIsCellsCollapsed(false);
+      } else if (step.id === "palette") {
+        // The palette lives in the right sidebar, which the canvas can hide.
+        setIsSidebarCollapsed(false);
       }
     },
-    [setIsFilesCollapsed, setIsCellsCollapsed],
+    [setIsFilesCollapsed, setIsCellsCollapsed, setIsSidebarCollapsed],
   );
 
   // Selection state lives in useCanvasSelectionSync, which must run after
