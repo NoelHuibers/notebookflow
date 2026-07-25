@@ -446,9 +446,9 @@ export class EngineClient {
     return (await res.json()) as TriggerFiring[];
   }
 
-  /** The ready-to-paste URL a third party hits to fire this trigger. */
-  webhookUrl(triggerId: string): string {
-    return `${this.httpBase()}/triggers/${encodeURIComponent(triggerId)}/fire`;
+  /** The ready-to-paste opaque capability URL for a webhook trigger. */
+  webhookUrl(webhookToken: string): string {
+    return `${this.httpBase()}/webhooks/${encodeURIComponent(webhookToken)}`;
   }
 }
 

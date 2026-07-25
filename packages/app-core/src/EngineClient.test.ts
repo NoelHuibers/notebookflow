@@ -70,9 +70,11 @@ describe("EngineClient URLs", () => {
     expect(new EngineClient("ws://localhost:8765/ws").baseUrl).toBe("ws://localhost:8765/ws");
   });
 
-  it("derives HTTP webhook URLs from the WS URL, encoding the trigger id", () => {
+  it("derives opaque webhook URLs from the WS URL, encoding the capability token", () => {
     const client = new EngineClient("wss://engine.example.com/ws");
-    expect(client.webhookUrl("t 1")).toBe("https://engine.example.com/triggers/t%201/fire");
+    expect(client.webhookUrl("token / 1")).toBe(
+      "https://engine.example.com/webhooks/token%20%2F%201",
+    );
   });
 
   it("opens the WS without a token query param when no token is set", async () => {

@@ -992,10 +992,23 @@ def test_delete_account_data_removes_only_callers_tenant(
     for name in ("one.csv", "two.json"):
         client.post("/files", files={"file": (name, b"owner", "text/plain")}, headers=owner)
     client.post("/files", files={"file": ("keep.csv", b"other", "text/csv")}, headers=other)
+    trigger = {
+        "id": "keep-or-delete",
+        "kind": "manual",
+        "pipelineId": "saved-pipeline",
+        "pipeline": _linear_pipeline(),
+        "config": {},
+    }
+    assert client.post("/triggers", json=trigger, headers=owner).status_code == 201
+    assert client.post("/triggers", json=trigger, headers=other).status_code == 201
 
     assert client.delete("/account-data", headers=owner).status_code == 200
     assert client.get("/files", headers=owner).json() == []
     assert [entry["name"] for entry in client.get("/files", headers=other).json()] == ["keep.csv"]
+    assert client.get("/triggers", headers=owner).json() == []
+    assert [item["id"] for item in client.get("/triggers", headers=other).json()] == [
+        "keep-or-delete"
+    ]
     # Idempotent: retrying after the directory is gone is still successful.
     assert client.delete("/account-data", headers=owner).status_code == 200
 
@@ -1250,6 +1263,118 @@ def test_trigger_lifecycle_register_list_fire_unregister(client: TestClient) -> 
     assert r.status_code == 204
     r = client.get("/triggers")
     assert r.json() == []
+
+
+def test_trigger_fire_executes_registered_pipeline(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, server.PipelineDef, str | None]] = []
+
+    async def run(
+        pipeline_id: str, pipeline: server.PipelineDef, user_id: str | None = None
+    ) -> list[Any]:
+        calls.append((pipeline_id, pipeline, user_id))
+        return []
+
+    monkeypatch.setattr(server, "_run_pipeline", run)
+    registered = client.post(
+        "/triggers",
+        json={
+            "id": "runs",
+            "kind": "manual",
+            "pipelineId": "saved-pipeline",
+            "pipeline": _linear_pipeline(),
+            "config": {},
+        },
+    )
+    assert registered.status_code == 201
+
+    fired = client.post("/triggers/runs/fire", json={"payload": {}})
+
+    assert fired.status_code == 200
+    assert len(calls) == 1
+    assert calls[0][0] == "saved-pipeline"
+    assert [node.id for node in calls[0][1].nodes] == ["a", "b", "c"]
+    assert calls[0][2] is None
+
+
+def test_triggers_are_isolated_per_authenticated_user(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mint = _jwt_factory(monkeypatch)
+    user_a = _bearer(mint("trigger-user-a"))
+    user_b = _bearer(mint("trigger-user-b"))
+    spec = {
+        "id": "daily",
+        "kind": "manual",
+        "pipelineId": "saved-pipeline",
+        "pipeline": _linear_pipeline(),
+        "config": {},
+    }
+
+    assert client.post("/triggers", json=spec, headers=user_a).status_code == 201
+    assert client.post("/triggers", json=spec, headers=user_b).status_code == 201
+
+    assert [item["id"] for item in client.get("/triggers", headers=user_a).json()] == ["daily"]
+    assert [item["id"] for item in client.get("/triggers", headers=user_b).json()] == ["daily"]
+    assert client.delete("/triggers/daily", headers=user_a).status_code == 204
+    assert [item["id"] for item in client.get("/triggers", headers=user_b).json()] == ["daily"]
+
+
+def test_webhook_token_fires_without_browser_jwt(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, str | None]] = []
+
+    async def run(
+        pipeline_id: str, _pipeline: server.PipelineDef, user_id: str | None = None
+    ) -> list[Any]:
+        calls.append((pipeline_id, user_id))
+        return []
+
+    monkeypatch.setattr(server, "_run_pipeline", run)
+    mint = _jwt_factory(monkeypatch)
+    registered = client.post(
+        "/triggers",
+        headers=_bearer(mint("webhook-owner")),
+        json={
+            "id": "incoming",
+            "kind": "webhook",
+            "pipelineId": "webhook-pipeline",
+            "pipeline": _linear_pipeline(),
+            "config": {},
+        },
+    )
+    assert registered.status_code == 201
+    webhook_token = registered.json()["webhookToken"]
+    assert isinstance(webhook_token, str) and len(webhook_token) >= 32
+
+    fired = client.post(
+        f"/webhooks/{webhook_token}",
+        json={"payload": {"event": "push"}},
+    )
+
+    assert fired.status_code == 200
+    assert calls == [("webhook-pipeline", "webhook-owner")]
+
+
+def test_trigger_registry_survives_server_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_TRIGGER_STATE_PATH", str(tmp_path / "triggers.json"))
+    spec = {
+        "id": "persistent",
+        "kind": "manual",
+        "pipelineId": "saved-pipeline",
+        "pipeline": _linear_pipeline(),
+        "config": {},
+    }
+
+    with TestClient(app) as first:
+        assert first.post("/triggers", json=spec).status_code == 201
+
+    with TestClient(app) as restored:
+        assert [item["id"] for item in restored.get("/triggers").json()] == ["persistent"]
 
 
 def test_trigger_duplicate_id_returns_400(client: TestClient) -> None:

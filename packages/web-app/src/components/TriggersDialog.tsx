@@ -5,15 +5,20 @@ import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import type { EngineClient, TriggerFiring, TriggerKind, TriggerSpec } from "@/lib/EngineClient";
+import type {
+  EngineClient,
+  PipelineDef,
+  TriggerFiring,
+  TriggerKind,
+  TriggerSpec,
+} from "@/lib/EngineClient";
 import { useI18n } from "@/lib/i18n";
 import { truncate } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
 // Triggers (#20). Backed by the /triggers REST surface that shipped with #8.
-// The default on_fire callback on the engine just logs -- "this trigger
-// fired" is the signal, "the pipeline auto-ran" is future work. We hide
-// pipelineId from the form to avoid implying otherwise.
+// Registration captures the current pipeline so manual, cron, file-watch, and
+// webhook firings can execute without an open browser.
 // ---------------------------------------------------------------------------
 
 // kind → translation key (the label copy itself lives in the `triggers` catalog).
@@ -41,6 +46,7 @@ interface TriggersDialogProps {
   triggers: TriggerSpec[];
   errorMessage: string | null;
   isLoading: boolean;
+  pipeline: PipelineDef;
   onRefresh: () => void;
   onClose: () => void;
 }
@@ -50,6 +56,7 @@ export function TriggersDialog({
   triggers,
   errorMessage,
   isLoading,
+  pipeline,
   onRefresh,
   onClose,
 }: TriggersDialogProps): ReactElement {
@@ -98,6 +105,7 @@ export function TriggersDialog({
         {isCreating ? (
           <TriggerCreateForm
             client={client}
+            pipeline={pipeline}
             onCancel={() => {
               setIsCreating(false);
             }}
@@ -133,11 +141,17 @@ export function TriggersDialog({
 
 interface TriggerCreateFormProps {
   client: EngineClient;
+  pipeline: PipelineDef;
   onCancel: () => void;
   onCreated: () => void;
 }
 
-function TriggerCreateForm({ client, onCancel, onCreated }: TriggerCreateFormProps): ReactElement {
+function TriggerCreateForm({
+  client,
+  pipeline,
+  onCancel,
+  onCreated,
+}: TriggerCreateFormProps): ReactElement {
   const { t } = useI18n();
   const [kind, setKind] = useState<TriggerKind>("manual");
   const [id, setId] = useState(() => `trigger-${Date.now().toString(36)}`);
@@ -177,8 +191,9 @@ function TriggerCreateForm({ client, onCancel, onCreated }: TriggerCreateFormPro
       await client.registerTrigger({
         id: id.trim(),
         kind,
-        pipelineId: "default",
+        pipelineId: id.trim(),
         config,
+        pipeline,
       });
       onCreated();
     } catch (err: unknown) {
@@ -278,6 +293,7 @@ function TriggerCreateForm({ client, onCancel, onCreated }: TriggerCreateFormPro
           {t("triggers.manualDescriptionSuffix")}
         </p>
       )}
+      <p className="text-[10px] text-muted-foreground">{t("triggers.pipelineSnapshotHint")}</p>
       {error !== null && (
         <p className="rounded border border-destructive/40 bg-destructive/5 px-2 py-1 text-[11px] text-destructive">
           {error}
@@ -374,7 +390,10 @@ function TriggerListItem({ client, trigger, onChanged }: TriggerListItemProps): 
     }
   }
 
-  const webhookUrl = trigger.kind === "webhook" ? client.webhookUrl(trigger.id) : "";
+  const webhookUrl =
+    trigger.kind === "webhook" && trigger.webhookToken !== undefined
+      ? client.webhookUrl(trigger.webhookToken)
+      : "";
 
   async function handleCopy(): Promise<void> {
     try {
@@ -441,7 +460,7 @@ function TriggerListItem({ client, trigger, onChanged }: TriggerListItemProps): 
           {actionError}
         </p>
       )}
-      {isExpanded && trigger.kind === "webhook" && (
+      {isExpanded && trigger.kind === "webhook" && webhookUrl !== "" && (
         <div className="mt-2 flex flex-col gap-1 rounded border bg-muted/50 p-2 font-mono text-[10px]">
           <div className="flex items-center justify-between gap-2">
             <code className="break-all">POST {webhookUrl}</code>

@@ -86,6 +86,10 @@ export interface TriggerSpec {
   kind: TriggerKind;
   pipelineId: string;
   config: Record<string, unknown>;
+  /** Pipeline snapshot captured when this trigger is created. */
+  pipeline?: PipelineDef;
+  /** Opaque capability returned for webhook triggers. */
+  webhookToken?: string;
 }
 
 export interface TriggerFiring {

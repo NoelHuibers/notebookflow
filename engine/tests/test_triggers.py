@@ -65,10 +65,10 @@ async def test_unregister_removes_trigger_and_cancels_task() -> None:
         Trigger(id="t1", kind="cron", pipeline_id="p1", config={"expression": "* * * * *"}),
     )
     # cron registration spawns a background task; unregistering must cancel it.
-    assert "t1" in manager._tasks  # noqa: SLF001 - test inspecting internal task table
+    assert (None, "t1") in manager._tasks  # noqa: SLF001 - inspect task table
     await manager.unregister("t1")
     assert manager.list_triggers() == []
-    assert "t1" not in manager._tasks  # noqa: SLF001
+    assert (None, "t1") not in manager._tasks  # noqa: SLF001
 
 
 async def test_unregister_unknown_raises() -> None:
@@ -86,7 +86,8 @@ async def test_shutdown_cancels_all_watcher_tasks() -> None:
         Trigger(id="b", kind="cron", pipeline_id="p", config={"expression": "* * * * *"}),
     )
     await manager.shutdown()
-    assert manager.list_triggers() == []
+    assert [trigger.id for trigger in manager.list_triggers()] == ["a", "b"]
+    assert manager._tasks == {}  # noqa: SLF001 - watcher cleanup is the contract
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +132,47 @@ async def test_fire_caps_history_at_max_firings() -> None:
     for _ in range(5):
         await manager.fire("t1")
     assert len(manager.firings()) == 3
+
+
+async def test_same_trigger_id_is_isolated_per_owner() -> None:
+    manager = TriggerManager()
+    user_a = Trigger(id="daily", kind="manual", pipeline_id="a", owner_id="user-a")
+    user_b = Trigger(id="daily", kind="manual", pipeline_id="b", owner_id="user-b")
+
+    manager.register(user_a)
+    manager.register(user_b)
+
+    assert manager.get("daily", owner_id="user-a") is user_a
+    assert manager.get("daily", owner_id="user-b") is user_b
+    assert manager.list_triggers(owner_id="user-a") == [user_a]
+    assert manager.list_triggers(owner_id="user-b") == [user_b]
+
+
+async def test_trigger_state_survives_manager_restart(tmp_path: Path) -> None:
+    state_path = tmp_path / "triggers.json"
+    first = TriggerManager(state_path=state_path)
+    first.register(
+        Trigger(
+            id="persisted",
+            kind="webhook",
+            pipeline_id="pipeline-1",
+            pipeline={"nodes": [], "edges": []},
+            owner_id="user-a",
+            webhook_token="opaque-token",
+        )
+    )
+    await first.fire("persisted", {"source": "test"}, owner_id="user-a")
+    await first.shutdown()
+
+    restored = TriggerManager(state_path=state_path)
+    trigger = restored.get("persisted", owner_id="user-a")
+    assert trigger.pipeline_id == "pipeline-1"
+    assert trigger.webhook_token == "opaque-token"
+    assert [f.payload for f in restored.firings("persisted", owner_id="user-a")] == [
+        {"source": "test"}
+    ]
+    assert restored.get_by_webhook_token("opaque-token") is trigger
+    await restored.shutdown()
 
 
 async def test_fire_swallows_callback_exception() -> None:

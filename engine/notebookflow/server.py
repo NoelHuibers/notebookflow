@@ -19,6 +19,7 @@ import ast
 import hashlib
 import json
 import os
+import secrets
 import shutil
 import tempfile
 from collections.abc import AsyncIterator
@@ -288,6 +289,8 @@ class TriggerSpec(_APIModel):
     kind: Literal["manual", "file_watch", "cron", "webhook"]
     pipeline_id: str
     config: dict[str, Any] = Field(default_factory=dict)
+    pipeline: PipelineDef | None = None
+    webhook_token: str | None = None
 
 
 class TriggerFiringModel(_APIModel):
@@ -321,8 +324,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     _app.state.explainer = Explainer()
     _app.state.pipeline_author = PipelineAuthor(registry)
     _app.state.ask = Ask()
-    trigger_manager = TriggerManager()
-    trigger_manager.on_fire(_log_trigger_fire)
+    trigger_manager = TriggerManager(state_path=_trigger_state_path())
+    trigger_manager.on_fire(_run_trigger_pipeline)
     _app.state.trigger_manager = trigger_manager
     try:
         yield
@@ -330,17 +333,26 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await trigger_manager.shutdown()
 
 
-async def _log_trigger_fire(trigger: Trigger, firing: TriggerFiring) -> None:
-    """Default on_fire callback -- just logs. Hosts that want to actually
-    run a pipeline on a trigger fire should replace this via
-    ``trigger_manager.on_fire(...)`` after the app starts up."""
+async def _run_trigger_pipeline(trigger: Trigger, firing: TriggerFiring) -> None:
+    """Run the pipeline snapshot captured when the trigger was registered."""
     import logging  # noqa: PLC0415
 
+    if trigger.pipeline is None:
+        logging.getLogger(__name__).warning(
+            "Trigger %r fired without a saved pipeline; recreate it in the current client",
+            trigger.id,
+        )
+        return
+    pipeline = PipelineDef.model_validate(trigger.pipeline)
+    results = await _run_pipeline(trigger.pipeline_id, pipeline, trigger.owner_id)
+    failures = [result for result in results if result.status == "error"]
     logging.getLogger(__name__).info(
-        "Trigger %r fired at %s for pipeline %r",
+        "Trigger %r ran pipeline %r at %s (%d nodes, %d failed)",
         trigger.id,
-        firing.fired_at,
         trigger.pipeline_id,
+        firing.fired_at,
+        len(results),
+        len(failures),
     )
 
 
@@ -406,10 +418,15 @@ def _pipeline_author(app_ref: FastAPI) -> PipelineAuthor:
 def _trigger_manager(app_ref: FastAPI) -> TriggerManager:
     manager = getattr(app_ref.state, "trigger_manager", None)
     if not isinstance(manager, TriggerManager):
-        manager = TriggerManager()
-        manager.on_fire(_log_trigger_fire)
+        manager = TriggerManager(state_path=_trigger_state_path())
+        manager.on_fire(_run_trigger_pipeline)
         app_ref.state.trigger_manager = manager
     return manager
+
+
+def _trigger_state_path() -> Path | None:
+    configured = os.environ.get("NOTEBOOKFLOW_TRIGGER_STATE_PATH", "").strip()
+    return Path(configured) if configured != "" else None
 
 
 def _ask(app_ref: FastAPI) -> Ask:
@@ -820,6 +837,7 @@ async def delete_account_data(
     """
     if principal.user_id is None:
         raise HTTPException(status_code=403, detail="a signed-in user is required")
+    await _trigger_manager(app).unregister_owner(principal.user_id)
     tenant_dir = _tenant_data_dir(app, principal.user_id)
     if tenant_dir.is_dir():
         shutil.rmtree(tenant_dir)
@@ -918,12 +936,15 @@ async def propose_pipeline(
 # ---------------------------------------------------------------------------
 
 
-def _spec_to_trigger(spec: TriggerSpec) -> Trigger:
+def _spec_to_trigger(spec: TriggerSpec, owner_id: str | None) -> Trigger:
     return Trigger(
         id=spec.id,
         kind=spec.kind,
         pipeline_id=spec.pipeline_id,
         config=dict(spec.config),
+        pipeline=spec.pipeline.model_dump(by_alias=True) if spec.pipeline is not None else None,
+        owner_id=owner_id,
+        webhook_token=secrets.token_urlsafe(32) if spec.kind == "webhook" else None,
     )
 
 
@@ -933,6 +954,7 @@ def _trigger_to_spec(trigger: Trigger) -> TriggerSpec:
         kind=trigger.kind,
         pipeline_id=trigger.pipeline_id,
         config=dict(trigger.config),
+        webhook_token=trigger.webhook_token,
     )
 
 
@@ -944,35 +966,44 @@ def _firing_to_model(firing: TriggerFiring) -> TriggerFiringModel:
     )
 
 
-@app.get("/triggers", dependencies=[Depends(require_auth)])
-async def list_triggers() -> list[dict[str, Any]]:
+@app.get("/triggers")
+async def list_triggers(
+    principal: Annotated[AuthPrincipal, Depends(require_auth)],
+) -> list[dict[str, Any]]:
     return [
-        _trigger_to_spec(t).model_dump(by_alias=True) for t in _trigger_manager(app).list_triggers()
+        _trigger_to_spec(t).model_dump(by_alias=True, exclude_none=True)
+        for t in _trigger_manager(app).list_triggers(owner_id=principal.user_id)
     ]
 
 
 @app.post(
     "/triggers",
     response_model=TriggerSpec,
+    response_model_exclude_none=True,
     status_code=201,
-    dependencies=[Depends(require_auth)],
 )
-async def register_trigger(spec: TriggerSpec) -> TriggerSpec:
+async def register_trigger(
+    spec: TriggerSpec,
+    principal: Annotated[AuthPrincipal, Depends(require_auth)],
+) -> TriggerSpec:
+    trigger = _spec_to_trigger(spec, principal.user_id)
     try:
-        _trigger_manager(app).register(_spec_to_trigger(spec))
+        _trigger_manager(app).register(trigger)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return spec
+    return _trigger_to_spec(trigger)
 
 
 @app.delete(
     "/triggers/{trigger_id}",
     status_code=204,
-    dependencies=[Depends(require_auth)],
 )
-async def unregister_trigger(trigger_id: str) -> Response:
+async def unregister_trigger(
+    trigger_id: str,
+    principal: Annotated[AuthPrincipal, Depends(require_auth)],
+) -> Response:
     try:
-        await _trigger_manager(app).unregister(trigger_id)
+        await _trigger_manager(app).unregister(trigger_id, owner_id=principal.user_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"unknown trigger id: {trigger_id}") from exc
     return Response(status_code=204)
@@ -981,26 +1012,62 @@ async def unregister_trigger(trigger_id: str) -> Response:
 @app.post(
     "/triggers/{trigger_id}/fire",
     response_model=TriggerFiringModel,
-    dependencies=[Depends(require_auth)],
 )
-async def fire_trigger(trigger_id: str, request: FireTriggerRequest) -> TriggerFiringModel:
+async def fire_trigger(
+    trigger_id: str,
+    request: FireTriggerRequest,
+    principal: Annotated[AuthPrincipal, Depends(require_auth)],
+) -> TriggerFiringModel:
     """Fire a trigger -- the webhook ingress and manual-run path both flow
     through here. Works for any registered kind."""
     try:
-        firing = await _trigger_manager(app).fire(trigger_id, payload=dict(request.payload))
+        firing = await _trigger_manager(app).fire(
+            trigger_id,
+            payload=dict(request.payload),
+            owner_id=principal.user_id,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"unknown trigger id: {trigger_id}") from exc
     return _firing_to_model(firing)
 
 
-@app.get("/triggers/{trigger_id}/firings", dependencies=[Depends(require_auth)])
-async def list_firings(trigger_id: str) -> list[dict[str, Any]]:
+@app.get("/triggers/{trigger_id}/firings")
+async def list_firings(
+    trigger_id: str,
+    principal: Annotated[AuthPrincipal, Depends(require_auth)],
+) -> list[dict[str, Any]]:
     manager = _trigger_manager(app)
     try:
-        manager.get(trigger_id)
+        manager.get(trigger_id, owner_id=principal.user_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"unknown trigger id: {trigger_id}") from exc
-    return [_firing_to_model(f).model_dump(by_alias=True) for f in manager.firings(trigger_id)]
+    return [
+        _firing_to_model(f).model_dump(by_alias=True)
+        for f in manager.firings(trigger_id, owner_id=principal.user_id)
+    ]
+
+
+@app.post(
+    "/webhooks/{webhook_token}",
+    response_model=TriggerFiringModel,
+    dependencies=[Depends(rate_limited("trigger-webhook", 60, 60))],
+)
+async def fire_webhook(
+    webhook_token: str,
+    request: FireTriggerRequest,
+) -> TriggerFiringModel:
+    """Fire a webhook through its unguessable per-trigger capability URL."""
+    manager = _trigger_manager(app)
+    try:
+        trigger = manager.get_by_webhook_token(webhook_token)
+        firing = await manager.fire(
+            trigger.id,
+            payload=dict(request.payload),
+            owner_id=trigger.owner_id,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="unknown webhook") from exc
+    return _firing_to_model(firing)
 
 
 # ---------------------------------------------------------------------------

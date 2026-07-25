@@ -1693,6 +1693,7 @@ export function App(): ReactElement {
             triggers={triggers}
             errorMessage={triggersError}
             isLoading={isLoadingTriggers}
+            pipeline={pipelineDef}
             onRefresh={() => {
               void refreshTriggers();
             }}

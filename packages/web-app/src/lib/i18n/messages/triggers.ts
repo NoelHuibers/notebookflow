@@ -33,6 +33,7 @@ export const en = {
   manualDescriptionPrefix: "Fires only when you click ",
   manualDescriptionFireNow: "Fire now",
   manualDescriptionSuffix: " in the list.",
+  pipelineSnapshotHint: "Runs a snapshot of the pipeline currently on your canvas.",
 
   // Create form — validation errors
   errorIdEmpty: "Trigger id can't be empty.",
@@ -67,8 +68,7 @@ export const en = {
   copyUrl: "Copy URL",
   copied: "Copied",
   webhookBodyHint: 'Content-Type: application/json · Body: {"payload": {...}}',
-  webhookAuthHint:
-    "If NOTEBOOKFLOW_AUTH_TOKEN is set on your engine, include Authorization: Bearer <token>.",
+  webhookAuthHint: "Keep this URL secret. Anyone who has it can run this trigger.",
 
   // List item — firings detail
   firingsHeading: "Firings (last {{count}})",
@@ -106,6 +106,8 @@ export const de: typeof en = {
   manualDescriptionPrefix: "Wird nur ausgelöst, wenn du in der Liste auf ",
   manualDescriptionFireNow: "Jetzt auslösen",
   manualDescriptionSuffix: " klickst.",
+  pipelineSnapshotHint:
+    "Führt einen Snapshot der Pipeline aus, die sich gerade auf deiner Arbeitsfläche befindet.",
 
   // Create form — validation errors
   errorIdEmpty: "Die Trigger-ID darf nicht leer sein.",
@@ -140,8 +142,7 @@ export const de: typeof en = {
   copyUrl: "URL kopieren",
   copied: "Kopiert",
   webhookBodyHint: 'Content-Type: application/json · Body: {"payload": {...}}',
-  webhookAuthHint:
-    "Wenn NOTEBOOKFLOW_AUTH_TOKEN auf deiner Engine gesetzt ist, füge Authorization: Bearer <token> hinzu.",
+  webhookAuthHint: "Halte diese URL geheim. Jeder, der sie kennt, kann diesen Trigger ausführen.",
 
   // List item — firings detail
   firingsHeading: "Auslösungen (letzte {{count}})",

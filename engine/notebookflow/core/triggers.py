@@ -16,13 +16,15 @@ forcing every host to wire its own listener.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Any, Literal
+from pathlib import Path
+from typing import Any, Literal, cast
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,9 @@ class Trigger:
     kind: TriggerKind
     pipeline_id: str
     config: dict[str, Any] = field(default_factory=dict)
+    pipeline: dict[str, Any] | None = None
+    owner_id: str | None = None
+    webhook_token: str | None = None
 
 
 @dataclass(slots=True)
@@ -54,18 +59,26 @@ class TriggerFiring:
     trigger_id: str
     fired_at: float  # unix timestamp
     payload: dict[str, Any] = field(default_factory=dict)
+    owner_id: str | None = None
 
 
 TriggerCallback = Callable[[Trigger, TriggerFiring], Awaitable[None]]
 
 
 class TriggerManager:
-    def __init__(self, *, max_firings: int = _MAX_FIRINGS) -> None:
-        self._triggers: dict[str, Trigger] = {}
-        self._tasks: dict[str, asyncio.Task[None]] = {}
+    def __init__(
+        self,
+        *,
+        max_firings: int = _MAX_FIRINGS,
+        state_path: Path | None = None,
+    ) -> None:
+        self._triggers: dict[tuple[str | None, str], Trigger] = {}
+        self._tasks: dict[tuple[str | None, str], asyncio.Task[None]] = {}
         self._callback: TriggerCallback | None = None
         self._firings: list[TriggerFiring] = []
         self._max_firings = max_firings
+        self._state_path = state_path
+        self._restore()
 
     # ------------------------------------------------------------------
     # Registration
@@ -82,51 +95,88 @@ class TriggerManager:
         self._callback = callback
 
     def register(self, trigger: Trigger) -> None:
-        if trigger.id in self._triggers:
+        key = self._key(trigger.id, trigger.owner_id)
+        if key in self._triggers:
             raise ValueError(f"Trigger id {trigger.id!r} already registered")
         if trigger.kind not in _KNOWN_KINDS:
             raise ValueError(f"Unknown trigger kind: {trigger.kind!r}")
-        self._triggers[trigger.id] = trigger
+        self._triggers[key] = trigger
+        self._start_watcher(trigger)
+        self._persist()
+
+    def _start_watcher(self, trigger: Trigger) -> None:
+        key = self._key(trigger.id, trigger.owner_id)
         if trigger.kind == "file_watch":
-            self._tasks[trigger.id] = asyncio.create_task(
+            self._tasks[key] = asyncio.create_task(
                 self._watch_files(trigger),
                 name=f"trigger-file_watch-{trigger.id}",
             )
         elif trigger.kind == "cron":
-            self._tasks[trigger.id] = asyncio.create_task(
+            self._tasks[key] = asyncio.create_task(
                 self._watch_cron(trigger),
                 name=f"trigger-cron-{trigger.id}",
             )
         # manual + webhook live without a watcher task; the host calls fire().
 
-    async def unregister(self, trigger_id: str) -> None:
-        if trigger_id not in self._triggers:
+    async def unregister(self, trigger_id: str, *, owner_id: str | None = None) -> None:
+        key = self._key(trigger_id, owner_id)
+        if key not in self._triggers:
             raise KeyError(trigger_id)
-        task = self._tasks.pop(trigger_id, None)
+        task = self._tasks.pop(key, None)
         if task is not None:
             task.cancel()
             with suppress(asyncio.CancelledError, Exception):
                 await task
-        self._triggers.pop(trigger_id, None)
+        self._triggers.pop(key, None)
+        self._firings = [
+            firing
+            for firing in self._firings
+            if not (firing.trigger_id == trigger_id and firing.owner_id == owner_id)
+        ]
+        self._persist()
+
+    async def unregister_owner(self, owner_id: str) -> None:
+        """Remove all trigger state owned by one authenticated tenant."""
+        for trigger in list(self.list_triggers(owner_id=owner_id)):
+            await self.unregister(trigger.id, owner_id=owner_id)
 
     # ------------------------------------------------------------------
     # Introspection
     # ------------------------------------------------------------------
 
-    def get(self, trigger_id: str) -> Trigger:
-        if trigger_id not in self._triggers:
+    def get(self, trigger_id: str, *, owner_id: str | None = None) -> Trigger:
+        key = self._key(trigger_id, owner_id)
+        if key not in self._triggers:
             raise KeyError(trigger_id)
-        return self._triggers[trigger_id]
+        return self._triggers[key]
 
-    def list_triggers(self) -> list[Trigger]:
-        """All registered triggers in registration order."""
-        return list(self._triggers.values())
+    def list_triggers(self, *, owner_id: str | None = None) -> list[Trigger]:
+        """All triggers for one tenant, in registration order."""
+        return [trigger for trigger in self._triggers.values() if trigger.owner_id == owner_id]
 
-    def firings(self, trigger_id: str | None = None) -> list[TriggerFiring]:
+    def firings(
+        self,
+        trigger_id: str | None = None,
+        *,
+        owner_id: str | None = None,
+    ) -> list[TriggerFiring]:
         """Ring buffer of recent firings, optionally filtered to one trigger."""
         if trigger_id is None:
-            return list(self._firings)
-        return [f for f in self._firings if f.trigger_id == trigger_id]
+            return [firing for firing in self._firings if firing.owner_id == owner_id]
+        return [
+            firing
+            for firing in self._firings
+            if firing.trigger_id == trigger_id and firing.owner_id == owner_id
+        ]
+
+    def get_by_webhook_token(self, token: str) -> Trigger:
+        """Resolve an opaque webhook capability token to its trigger."""
+        if token == "":
+            raise KeyError(token)
+        for trigger in self._triggers.values():
+            if trigger.kind == "webhook" and trigger.webhook_token == token:
+                return trigger
+        raise KeyError(token)
 
     # ------------------------------------------------------------------
     # Firing
@@ -136,17 +186,27 @@ class TriggerManager:
         self,
         trigger_id: str,
         payload: dict[str, Any] | None = None,
+        *,
+        owner_id: str | None = None,
     ) -> TriggerFiring:
         """Record + dispatch a firing. Returns the TriggerFiring entry."""
-        trigger = self.get(trigger_id)
+        trigger = self.get(trigger_id, owner_id=owner_id)
         firing = TriggerFiring(
             trigger_id=trigger_id,
             fired_at=time.time(),
             payload=payload or {},
+            owner_id=owner_id,
         )
         self._firings.append(firing)
-        if len(self._firings) > self._max_firings:
-            self._firings = self._firings[-self._max_firings :]
+        owned = [f for f in self._firings if f.owner_id == owner_id]
+        if len(owned) > self._max_firings:
+            oldest = next(
+                index
+                for index, candidate in enumerate(self._firings)
+                if candidate.owner_id == owner_id
+            )
+            self._firings.pop(oldest)
+        self._persist()
         if self._callback is not None:
             try:
                 await self._callback(trigger, firing)
@@ -155,10 +215,83 @@ class TriggerManager:
         return firing
 
     async def shutdown(self) -> None:
-        """Cancel every watcher task. Safe to call multiple times."""
-        for trigger_id in list(self._tasks.keys()):
-            with suppress(KeyError):
-                await self.unregister(trigger_id)
+        """Cancel watcher tasks without deleting the persisted registrations."""
+        tasks = list(self._tasks.values())
+        self._tasks.clear()
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with suppress(asyncio.CancelledError, Exception):
+                await task
+
+    @staticmethod
+    def _key(trigger_id: str, owner_id: str | None) -> tuple[str | None, str]:
+        return owner_id, trigger_id
+
+    def _persist(self) -> None:
+        if self._state_path is None:
+            return
+        self._state_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": 1,
+            "triggers": [asdict(trigger) for trigger in self._triggers.values()],
+            "firings": [asdict(firing) for firing in self._firings],
+        }
+        temporary = self._state_path.with_suffix(f"{self._state_path.suffix}.tmp")
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        temporary.replace(self._state_path)
+
+    def _restore(self) -> None:
+        if self._state_path is None or not self._state_path.is_file():
+            return
+        try:
+            payload = json.loads(self._state_path.read_text(encoding="utf-8"))
+            raw_triggers = payload.get("triggers", [])
+            raw_firings = payload.get("firings", [])
+            if not isinstance(raw_triggers, list) or not isinstance(raw_firings, list):
+                raise ValueError("trigger state lists are malformed")
+            for raw in raw_triggers:
+                if not isinstance(raw, dict):
+                    continue
+                kind = raw.get("kind")
+                if kind not in _KNOWN_KINDS:
+                    continue
+                trigger = Trigger(
+                    id=str(raw["id"]),
+                    kind=cast("TriggerKind", kind),
+                    pipeline_id=str(raw["pipeline_id"]),
+                    config=dict(raw.get("config", {})),
+                    pipeline=(
+                        dict(raw["pipeline"]) if isinstance(raw.get("pipeline"), dict) else None
+                    ),
+                    owner_id=raw.get("owner_id") if isinstance(raw.get("owner_id"), str) else None,
+                    webhook_token=(
+                        raw.get("webhook_token")
+                        if isinstance(raw.get("webhook_token"), str)
+                        else None
+                    ),
+                )
+                self._triggers[self._key(trigger.id, trigger.owner_id)] = trigger
+                self._start_watcher(trigger)
+            for raw in raw_firings:
+                if not isinstance(raw, dict):
+                    continue
+                payload_value = raw.get("payload", {})
+                self._firings.append(
+                    TriggerFiring(
+                        trigger_id=str(raw["trigger_id"]),
+                        fired_at=float(raw["fired_at"]),
+                        payload=dict(payload_value) if isinstance(payload_value, dict) else {},
+                        owner_id=(
+                            raw.get("owner_id") if isinstance(raw.get("owner_id"), str) else None
+                        ),
+                    )
+                )
+        except Exception:
+            logger.exception("Failed to restore trigger state from %s", self._state_path)
 
     # ------------------------------------------------------------------
     # Watcher coroutines
@@ -185,6 +318,7 @@ class TriggerManager:
                             for change, path in changes
                         ],
                     },
+                    owner_id=trigger.owner_id,
                 )
         except asyncio.CancelledError:
             raise
@@ -213,7 +347,11 @@ class TriggerManager:
                 sleep_s = (next_fire - datetime.now()).total_seconds()
                 if sleep_s > 0:
                     await asyncio.sleep(sleep_s)
-                await self.fire(trigger.id, {"scheduled": next_fire.isoformat()})
+                await self.fire(
+                    trigger.id,
+                    {"scheduled": next_fire.isoformat()},
+                    owner_id=trigger.owner_id,
+                )
         except asyncio.CancelledError:
             raise
         except Exception:

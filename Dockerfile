@@ -1,8 +1,8 @@
 # NotebookFlow engine — production container for Fly.io / Railway / Render / etc.
 #
 # Builds the FastAPI engine into a single-stage image. uv handles the Python
-# environment; the wheel bundles every nodebookflow.* module so `uv run
-# notebookflow` brings up the server immediately.
+# environment; the wheel bundles every notebookflow.* module and installs the
+# `notebookflow` server entry point.
 
 FROM python:3.12-slim AS runtime
 
@@ -28,4 +28,4 @@ EXPOSE 8765
 # Fly / Railway / most PaaS expose a PORT env var; server.py reads it.
 ENV PORT=8765
 
-CMD ["uv", "--project", "engine", "run", "notebookflow"]
+CMD ["notebookflow"]

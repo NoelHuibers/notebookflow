@@ -162,6 +162,8 @@ The repo includes `Dockerfile`, `fly.toml`, and `.dockerignore` at the root. Fly
 fly auth login
 # Set `app` in fly.toml to a globally unique Fly app name first.
 fly launch --no-deploy    # creates the app; keeps our fly.toml
+fly volumes create notebookflow_data --region fra --size 1
+fly scale count 1         # one authoritative scheduler + one attached volume
 fly deploy
 
 # Verify
@@ -169,14 +171,18 @@ curl https://<app>.fly.dev/health    # -> {"status":"ok"}
 curl https://<app>.fly.dev/nodes     # -> [...] (3 built-in manifests)
 ```
 
-The container reads `PORT` (Fly sets this), binds `0.0.0.0`, and runs `uv run notebookflow`. `auto_stop_machines = "stop"` plus `min_machines_running = 0` reduces idle compute.
+The container reads `PORT`, binds `0.0.0.0`, and runs the installed
+`notebookflow` entry point. The maintained Fly configuration keeps one machine
+running because cron and file-watch triggers are background tasks. Their
+tenant-scoped registrations, pipeline snapshots, webhook capabilities, and
+firing history are stored on the `notebookflow_data` volume.
 
 Before sharing the deployment, configure one authentication mode from
 [`.env.example`](.env.example): either the web app's JWKS URL with production
 issuer/audience checks, or a high-entropy `NOTEBOOKFLOW_AUTH_TOKEN` stored with
 `fly secrets set`. Restrict `NOTEBOOKFLOW_ALLOWED_ORIGINS` to the frontend's
-origin. If uploaded files must survive restarts, mount a Fly Volume and point
-`NOTEBOOKFLOW_DATA_DIR` at it.
+origin. Keep `NOTEBOOKFLOW_DATA_DIR` and `NOTEBOOKFLOW_TRIGGER_STATE_PATH` on
+the mounted volume so uploads and triggers survive restarts and deployments.
 
 After deploy, plug the URL into Vercel's env var (above), then redeploy the frontend.
 
