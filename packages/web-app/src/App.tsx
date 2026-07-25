@@ -1606,7 +1606,6 @@ export function App(): ReactElement {
           onToggleSettings={() => {
             setIsSettingsOpen((open) => !open);
           }}
-          notebookName={notebook.name}
           onDownloadWorkspace={handleDownloadWorkspace}
           onDownloadAll={() => {
             void handleDownloadAll();

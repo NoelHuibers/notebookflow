@@ -54,8 +54,6 @@ interface AppHeaderProps {
   /** Restarts the onboarding tour from the help popover. */
   onReplayTour: () => void;
   onToggleSettings: () => void;
-  /** Active notebook name — forwarded to the overflow menu's Jupyter action. */
-  notebookName: string;
   onDownloadWorkspace: () => void;
   onDownloadAll: () => void;
   onReingest: () => void;
@@ -80,7 +78,6 @@ export function AppHeader({
   onToggleShortcuts,
   onReplayTour,
   onToggleSettings,
-  notebookName,
   onDownloadWorkspace,
   onDownloadAll,
   onReingest,
@@ -217,7 +214,6 @@ export function AppHeader({
           <SettingsIcon className="size-4" />
         </Button>
         <ToolbarOverflowMenu
-          notebookName={notebookName}
           onDownloadWorkspace={onDownloadWorkspace}
           onDownloadAll={onDownloadAll}
           onReingest={onReingest}
