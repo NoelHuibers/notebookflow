@@ -42,6 +42,8 @@ export interface GraphNode {
   id: string;
   name: string;
   tag: NodeTag;
+  /** Which notebook container (CONTAINERS id) the node belongs to. */
+  container: string;
   /** Top-left in design space. */
   x: number;
   y: number;
@@ -59,6 +61,7 @@ export interface GraphNode {
 export const NODES: GraphNode[] = [
   {
     id: "load",
+    container: "pre",
     name: "Load customer data",
     tag: "input",
     x: 64,
@@ -68,6 +71,7 @@ export const NODES: GraphNode[] = [
   },
   {
     id: "clean",
+    container: "pre",
     name: "Clean features",
     tag: "transform",
     x: 316,
@@ -78,6 +82,7 @@ export const NODES: GraphNode[] = [
   },
   {
     id: "split",
+    container: "pre",
     name: "Train test split",
     tag: "transform",
     x: 568,
@@ -88,6 +93,7 @@ export const NODES: GraphNode[] = [
   },
   {
     id: "baseline",
+    container: "base",
     name: "Train baseline",
     tag: "transform",
     x: 326,
@@ -98,6 +104,7 @@ export const NODES: GraphNode[] = [
   },
   {
     id: "segmented",
+    container: "adv",
     name: "Train segmented model",
     tag: "transform",
     x: 326,
@@ -108,6 +115,7 @@ export const NODES: GraphNode[] = [
   },
   {
     id: "compare",
+    container: "post",
     name: "Compare models",
     tag: "transform",
     x: 704,
@@ -118,6 +126,7 @@ export const NODES: GraphNode[] = [
   },
   {
     id: "report",
+    container: "post",
     name: "Analyst report",
     tag: "output",
     x: 884,
@@ -148,7 +157,7 @@ export const EDGES: GraphEdge[] = [
   { id: "e-compare-report", from: "compare", to: "report", kind: "local" },
 ];
 
-/** The two notebook containers, as design-space rectangles. */
+/** The notebook containers, as design-space rectangles. */
 export interface Container {
   id: string;
   label: string;

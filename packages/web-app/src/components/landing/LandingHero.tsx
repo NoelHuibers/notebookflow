@@ -28,7 +28,18 @@ import {
 import { Trans } from "react-i18next";
 import { useI18n } from "@/lib/i18n";
 import { GraphScene } from "./GraphScene";
-import { DESIGN_H, DESIGN_W, IDLE_DOT, RUN_OK, RUN_ORDER, RUN_TEAL } from "./graph-data";
+import { DESIGN_H, DESIGN_W, IDLE_DOT, RUN_OK, RUN_TEAL } from "./graph-data";
+import {
+  LINKED_CONTAINERS_SELECTOR,
+  LINKED_LOCAL_WIRES_SELECTOR,
+  LINKED_NODES_SELECTOR,
+  LINKED_PORTS_SELECTOR,
+  RUN_STATUS_SELECTORS,
+  SOURCE_CONTAINER_SELECTOR,
+  SOURCE_NODES_SELECTOR,
+  SOURCE_PORTS_SELECTOR,
+  SOURCE_WIRES_SELECTOR,
+} from "./hero-selectors";
 import { useReducedMotion } from "./useReducedMotion";
 
 // GSAP + ScrollTrigger are loaded via dynamic import() inside a client effect so
@@ -123,8 +134,8 @@ export function LandingHero(): ReactElement {
         // ---- Initial "hero" state -----------------------------------------
         // Source notebook centre stage; nodes tucked away.
         gsap.set(q(".nf-source"), { opacity: 1, scale: 1, y: 0 });
-        gsap.set(q('.nf-node:not([data-node="forecast"])'), { opacity: 0, scale: 0.85, y: 24 });
-        gsap.set(q('.nf-node[data-node="forecast"]'), { opacity: 0, scale: 0.85, y: 64 });
+        gsap.set(q(SOURCE_NODES_SELECTOR), { opacity: 0, scale: 0.85, y: 24 });
+        gsap.set(q(LINKED_NODES_SELECTOR), { opacity: 0, scale: 0.85, y: 64 });
         gsap.set(q(".nf-port"), { opacity: 0 });
         gsap.set(q(".nf-container"), { opacity: 0, scale: 0.98 });
         gsap.set(q(".nf-pill"), { opacity: 0, y: 12 });
@@ -159,31 +170,37 @@ export function LandingHero(): ReactElement {
           },
         });
 
-        // Act 1 → 2: notebook recedes, cells lift into nodes, local wires draw.
+        // Act 1 → 2: notebook recedes, its cells lift into nodes, local wires draw.
         tl.to(q(".nf-scrollcue"), { opacity: 0, duration: 0.3 }, 0.1);
         tl.to(q('.nf-cap[data-cap="0"]'), { opacity: 0, y: -16, duration: 0.6 }, 0.4);
         tl.to(q(".nf-source"), { opacity: 0, scale: 0.6, y: -50, duration: 1 }, 0.4);
         tl.to(q('.nf-cap[data-cap="1"]'), { opacity: 1, y: 0, duration: 0.6 }, 0.7);
         tl.to(
-          q('.nf-node:not([data-node="forecast"])'),
+          q(SOURCE_NODES_SELECTOR),
           { opacity: 1, scale: 1, y: 0, stagger: 0.16, duration: 0.9 },
           0.7,
         );
-        tl.to(q(".nf-port"), { opacity: 1, duration: 0.5 }, 1.3);
-        tl.to(q(".nf-wire-local"), { strokeDashoffset: 0, stagger: 0.22, duration: 1 }, 1.1);
-        tl.to(q('.nf-container[data-c="a"]'), { opacity: 1, scale: 1, duration: 0.8 }, 1.7);
+        tl.to(q(SOURCE_PORTS_SELECTOR), { opacity: 1, duration: 0.5 }, 1.3);
+        tl.to(q(SOURCE_WIRES_SELECTOR), { strokeDashoffset: 0, stagger: 0.22, duration: 1 }, 1.1);
+        tl.to(q(SOURCE_CONTAINER_SELECTOR), { opacity: 1, scale: 1, duration: 0.8 }, 1.7);
 
-        // Act 3: link a second notebook in via the cross-notebook wire.
+        // Act 3: the downstream notebooks link in via cross-notebook wires.
         tl.to(q('.nf-cap[data-cap="1"]'), { opacity: 0, y: -16, duration: 0.5 }, 2.1);
         tl.to(q('.nf-cap[data-cap="2"]'), { opacity: 1, y: 0, duration: 0.6 }, 2.3);
         tl.to(q(".nf-stage"), { scale: 0.95, duration: 1, ease: "power1.inOut" }, 2.1);
-        tl.to(q('.nf-container[data-c="b"]'), { opacity: 1, scale: 1, duration: 0.7 }, 2.4);
         tl.to(
-          q('.nf-node[data-node="forecast"]'),
-          { opacity: 1, scale: 1, y: 0, duration: 0.7 },
+          q(LINKED_CONTAINERS_SELECTOR),
+          { opacity: 1, scale: 1, stagger: 0.1, duration: 0.7 },
+          2.4,
+        );
+        tl.to(
+          q(LINKED_NODES_SELECTOR),
+          { opacity: 1, scale: 1, y: 0, stagger: 0.14, duration: 0.7 },
           2.5,
         );
+        tl.to(q(LINKED_PORTS_SELECTOR), { opacity: 1, duration: 0.5 }, 2.6);
         tl.to(q(".nf-wire-cross"), { opacity: 1, duration: 0.6 }, 2.7);
+        tl.to(q(LINKED_LOCAL_WIRES_SELECTOR), { strokeDashoffset: 0, duration: 0.8 }, 2.8);
 
         // Marching-ants flow on the cross wire (runs continuously once revealed).
         gsap.to(q(".nf-wire-cross"), {
@@ -197,9 +214,9 @@ export function LandingHero(): ReactElement {
         const runStart = 3.0;
         tl.to(q('.nf-cap[data-cap="2"]'), { opacity: 0, y: -16, duration: 0.5 }, runStart - 0.1);
         tl.to(q('.nf-cap[data-cap="3"]'), { opacity: 1, y: 0, duration: 0.6 }, runStart + 0.1);
-        RUN_ORDER.forEach((id, i) => {
+        RUN_STATUS_SELECTORS.forEach((sel, i) => {
           const at = runStart + i * 0.4;
-          const dot = q(`.nf-status[data-node="${id}"]`);
+          const dot = q(sel);
           tl.to(
             dot,
             {
@@ -220,7 +237,7 @@ export function LandingHero(): ReactElement {
         tl.to(
           q(".nf-pill"),
           { opacity: 1, y: 0, duration: 0.4 },
-          runStart + RUN_ORDER.length * 0.4,
+          runStart + RUN_STATUS_SELECTORS.length * 0.4,
         );
       }, root);
 
