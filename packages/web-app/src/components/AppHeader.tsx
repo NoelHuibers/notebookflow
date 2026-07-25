@@ -122,6 +122,7 @@ export function AppHeader({
           </Button>
         )}
         <Button
+          data-tour="triggers"
           variant="ghost"
           size="sm"
           onClick={onOpenTriggers}

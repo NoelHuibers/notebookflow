@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { de, en } from "./i18n/messages/onboarding";
 import {
   clearOnboardingSeen,
   computeCardPlacement,
@@ -13,6 +14,18 @@ import {
   TOUR_STEPS,
   type TourRect,
 } from "./onboarding";
+
+/** `data-tour` targets that actually exist in the DOM (no `connect` target —
+ *  that step re-spotlights the canvas). Keep in sync with the app markup. */
+const VALID_TOUR_TARGETS = new Set([
+  "files",
+  "cells",
+  "canvas",
+  "palette",
+  "run",
+  "triggers",
+  "ask",
+]);
 
 function memoryStorage(initial: Record<string, string> = {}): StorageLike & {
   data: Map<string, string>;
@@ -75,13 +88,34 @@ describe("onboarding flag", () => {
 });
 
 describe("TOUR_STEPS", () => {
-  it("visits the five surfaces in the intended order", () => {
-    expect(TOUR_STEPS.map((step) => step.id)).toEqual(["files", "cells", "canvas", "run", "ask"]);
+  it("visits the eight surfaces in the intended order", () => {
+    expect(TOUR_STEPS.map((step) => step.id)).toEqual([
+      "files",
+      "cells",
+      "canvas",
+      "connect",
+      "palette",
+      "run",
+      "triggers",
+      "ask",
+    ]);
   });
 
-  it("uses the step id as its data-tour target", () => {
+  it("targets a data-tour attribute that exists in the DOM", () => {
     for (const step of TOUR_STEPS) {
-      expect(step.target).toBe(step.id);
+      expect(VALID_TOUR_TARGETS.has(step.target)).toBe(true);
+    }
+  });
+
+  it("uses the step id as its target unless it re-spotlights another region", () => {
+    for (const step of TOUR_STEPS) {
+      // `connect` deliberately reuses the canvas region; every other step owns
+      // a target named after itself.
+      if (step.id === "connect") {
+        expect(step.target).toBe("canvas");
+      } else {
+        expect(step.target).toBe(step.id);
+      }
     }
   });
 
@@ -94,6 +128,26 @@ describe("TOUR_STEPS", () => {
   it("has unique step ids", () => {
     const ids = TOUR_STEPS.map((step) => step.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("has a title + body for every step id in both EN and DE", () => {
+    for (const step of TOUR_STEPS) {
+      for (const catalog of [en, de]) {
+        const copy = catalog.steps[step.id];
+        expect(copy, `missing copy for step "${step.id}"`).toBeDefined();
+        expect(copy.title.length).toBeGreaterThan(0);
+        expect(copy.body.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("ships no orphaned step copy (every EN/DE step key is a real step)", () => {
+    const ids = new Set<string>(TOUR_STEPS.map((step) => step.id));
+    for (const catalog of [en, de]) {
+      for (const key of Object.keys(catalog.steps)) {
+        expect(ids.has(key), `orphaned step copy "${key}"`).toBe(true);
+      }
+    }
   });
 });
 
@@ -169,7 +223,12 @@ describe("computeCardPlacement", () => {
       files: { top: 45, left: 0, width: 176, height: 755 },
       cells: { top: 45, left: 176, width: 460, height: 560 },
       canvas: { top: 45, left: 646, width: 634, height: 560 },
+      // `connect` re-spotlights the canvas region.
+      connect: { top: 45, left: 646, width: 634, height: 560 },
+      // `palette` lives in the right sidebar, hugging the right edge.
+      palette: { top: 45, left: 1060, width: 220, height: 560 },
       run: { top: 6, left: 1010, width: 110, height: 32 },
+      triggers: { top: 6, left: 700, width: 110, height: 32 },
       ask: { top: 6, left: 905, width: 95, height: 32 },
     };
     for (const step of TOUR_STEPS) {

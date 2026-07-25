@@ -141,6 +141,13 @@ export function WelcomeCard({ onTakeTour, onSkip }: WelcomeCardProps): ReactElem
             {t("onboarding.welcome.skip")}
           </Button>
         </div>
+
+        <p
+          data-welcome-item
+          className="relative mt-4 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70"
+        >
+          {t("onboarding.welcome.meta")}
+        </p>
       </div>
     </div>,
     document.body,

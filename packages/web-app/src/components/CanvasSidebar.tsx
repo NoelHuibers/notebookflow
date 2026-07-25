@@ -129,6 +129,7 @@ export function CanvasSidebar(props: CanvasSidebarProps): ReactElement {
         onToggle={() => {
           setPaletteCollapsed((open) => !open);
         }}
+        dataTour="palette"
         fill
       >
         {nodes.length > 0 && (
