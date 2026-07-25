@@ -289,6 +289,15 @@ export function App(): ReactElement {
     DEFAULT_ENGINE_TOKEN !== "",
   );
 
+  // Whether the engine client currently holds a credential a require_auth
+  // endpoint will accept: a minted session JWT, a static self-host token, or a
+  // bring-your-own engine (assumed to carry its own auth). Distinct from
+  // `canRun`, which is already true for a signed-in user *before* their JWT has
+  // finished minting — calling require_auth endpoints in that window sends no
+  // bearer token and 401s.
+  const engineAuthReady =
+    engineJwt !== "" || DEFAULT_ENGINE_TOKEN !== "" || settings.engineUrlOverride !== "";
+
   // Rebuild the EngineClient when the engine URL changes, and (re)apply the
   // bring-your-own-key credentials whenever the LLM settings change, plus the
   // session JWT. All go through one effect so a fresh client never loses its
@@ -1062,6 +1071,16 @@ export function App(): ReactElement {
     if (!canRun) {
       setTriggers([]);
       setTriggersError(null);
+      setIsLoadingTriggers(false);
+      return;
+    }
+    // Signed in but the session JWT hasn't minted yet: stay in the loading state
+    // rather than firing a token-less request that 401s. This callback re-runs
+    // when engineAuthReady flips (via the effect below), sending the real
+    // request the moment the token lands.
+    if (!engineAuthReady) {
+      setTriggersError(null);
+      setIsLoadingTriggers(true);
       return;
     }
     setIsLoadingTriggers(true);
@@ -1075,7 +1094,7 @@ export function App(): ReactElement {
     } finally {
       setIsLoadingTriggers(false);
     }
-  }, [t, canRun]);
+  }, [t, canRun, engineAuthReady]);
 
   useEffect(() => {
     if (!isTriggersOpen) {
