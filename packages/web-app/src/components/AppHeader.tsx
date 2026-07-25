@@ -168,9 +168,13 @@ export function AppHeader({
             ⌘K
           </Badge>
         </Button>
-        {/* The disabled button has pointer-events-none, so the sign-in hint
-            tooltip lives on a wrapping span that still receives hover. */}
-        <span title={canRun ? undefined : t("app.toolbar.runSignedOut")} className="inline-flex">
+        {/* Disabled buttons do not receive pointer or focus events, so the
+            wrapper owns the signed-out popover interaction. */}
+        <span
+          className="group/run relative inline-flex"
+          tabIndex={canRun ? undefined : 0}
+          aria-describedby={canRun ? undefined : "run-pipeline-sign-in-hint"}
+        >
           <Button
             data-tour="run"
             variant="default"
@@ -181,6 +185,15 @@ export function AppHeader({
             <Play className="mr-1.5 size-3.5" />
             {isRunning ? t("app.toolbar.running") : t("app.toolbar.runPipeline")}
           </Button>
+          {!canRun && (
+            <span
+              id="run-pipeline-sign-in-hint"
+              role="tooltip"
+              className="pointer-events-none invisible absolute right-0 top-full z-50 mt-2 w-72 translate-y-1 rounded-md border bg-popover px-3 py-2 text-sm font-normal leading-snug text-popover-foreground opacity-0 shadow-md transition-[opacity,transform,visibility] duration-150 group-hover/run:visible group-hover/run:translate-y-0 group-hover/run:opacity-100 group-focus/run:visible group-focus/run:translate-y-0 group-focus/run:opacity-100"
+            >
+              {t("app.toolbar.runSignedOut")}
+            </span>
+          )}
         </span>
         <Button
           variant="ghost"
