@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { EngineClient } from "./EngineClient";
+import { EngineClient, EngineRequestError } from "./EngineClient";
 
 /**
  * Minimal WebSocket stand-in: records the URL it was opened with and lets the
@@ -179,5 +179,35 @@ describe("EngineClient.ping", () => {
   it("returns false when the engine is unreachable", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("refused")));
     expect(await new EngineClient("ws://localhost:8765/ws").ping()).toBe(false);
+  });
+});
+
+describe("EngineRequestError", () => {
+  it("listNodes throws a typed error carrying the HTTP status, message unchanged", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 401, statusText: "Unauthorized" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new EngineClient("ws://localhost:8765/ws");
+    const err: unknown = await client.listNodes().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(EngineRequestError);
+    expect((err as EngineRequestError).status).toBe(401);
+    // The message must stay identical to the plain Error thrown previously.
+    expect((err as EngineRequestError).message).toBe("EngineClient.listNodes: 401 Unauthorized");
+  });
+
+  it("carries the status for JSON-detail errors too", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: "quota exceeded" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new EngineClient("ws://localhost:8765/ws");
+    const err: unknown = await client.listDataFiles().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(EngineRequestError);
+    expect((err as EngineRequestError).status).toBe(403);
+    expect((err as EngineRequestError).message).toBe("EngineClient.listDataFiles: quota exceeded");
   });
 });

@@ -25,6 +25,8 @@ interface CanvasSidebarProps {
   nodes: NodeManifestDef[];
   filteredNodes: NodeManifestDef[];
   error: string | null;
+  /** Hosted engine wants a session JWT and the visitor is signed out — show a sign-in hint. */
+  authRequired: boolean;
   search: string;
   tagFilter: Set<NodeManifestDef["tag"]>;
   onSearchChange: (next: string) => void;
@@ -62,6 +64,7 @@ export function CanvasSidebar(props: CanvasSidebarProps): ReactElement {
     nodes,
     filteredNodes,
     error,
+    authRequired,
     search,
     tagFilter,
     onSearchChange,
@@ -175,7 +178,11 @@ export function CanvasSidebar(props: CanvasSidebarProps): ReactElement {
         )}
         <ScrollArea className="min-h-0 flex-1">
           <div className="flex flex-col gap-3 py-2">
-            {error !== null ? (
+            {authRequired ? (
+              <p className="text-[11px] italic text-muted-foreground">
+                {t("palette.signInToLoad")}
+              </p>
+            ) : error !== null ? (
               <p className="text-[11px] italic text-muted-foreground">{error}</p>
             ) : nodes.length === 0 ? (
               <p className="text-[11px] italic text-muted-foreground">{t("palette.loading")}</p>

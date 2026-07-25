@@ -29,6 +29,23 @@ import type {
   TriggerSpec,
 } from "./types";
 
+/**
+ * An engine HTTP request that came back non-OK; `status` carries the HTTP
+ * status code so hosts can react to specific failures (e.g. 401 from a hosted
+ * engine that requires sign-in) without parsing the message. The message is
+ * identical to the plain `Error` thrown before this class existed, so any
+ * message-based formatting keeps working unchanged.
+ */
+export class EngineRequestError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "EngineRequestError";
+    this.status = status;
+  }
+}
+
 export class EngineClient {
   private readonly url: string;
   private token: string;
@@ -167,7 +184,10 @@ export class EngineClient {
     const httpUrl = this.url.replace(/^ws/, "http").replace(/\/ws$/, "/nodes");
     const res = await fetch(httpUrl, { headers: this.authHeaders() });
     if (!res.ok) {
-      throw new Error(`EngineClient.listNodes: ${res.status} ${res.statusText}`);
+      throw new EngineRequestError(
+        `EngineClient.listNodes: ${res.status} ${res.statusText}`,
+        res.status,
+      );
     }
     return (await res.json()) as NodeManifestDef[];
   }
@@ -183,7 +203,7 @@ export class EngineClient {
     });
     if (!res.ok) {
       const message = await readErrorMessage(res);
-      throw new Error(`EngineClient.synthesizeNode: ${message}`);
+      throw new EngineRequestError(`EngineClient.synthesizeNode: ${message}`, res.status);
     }
     return (await res.json()) as NodeSynthesisResponse;
   }
@@ -210,7 +230,7 @@ export class EngineClient {
     });
     if (!res.ok) {
       const message = await readErrorMessage(res);
-      throw new Error(`EngineClient.explainPipeline: ${message}`);
+      throw new EngineRequestError(`EngineClient.explainPipeline: ${message}`, res.status);
     }
     return (await res.json()) as PipelineExplanation;
   }
@@ -237,7 +257,7 @@ export class EngineClient {
     });
     if (!res.ok) {
       const message = await readErrorMessage(res);
-      throw new Error(`EngineClient.askLLM: ${message}`);
+      throw new EngineRequestError(`EngineClient.askLLM: ${message}`, res.status);
     }
     return (await res.json()) as AskAnswer;
   }
@@ -264,7 +284,7 @@ export class EngineClient {
     });
     if (!res.ok) {
       const message = await readErrorMessage(res);
-      throw new Error(`EngineClient.proposePipeline: ${message}`);
+      throw new EngineRequestError(`EngineClient.proposePipeline: ${message}`, res.status);
     }
     return (await res.json()) as PipelineProposal;
   }
@@ -283,7 +303,10 @@ export class EngineClient {
   async listDataFiles(): Promise<DataFile[]> {
     const res = await fetch(this.filesUrl(), { headers: this.authHeaders() });
     if (!res.ok) {
-      throw new Error(`EngineClient.listDataFiles: ${await readErrorMessage(res)}`);
+      throw new EngineRequestError(
+        `EngineClient.listDataFiles: ${await readErrorMessage(res)}`,
+        res.status,
+      );
     }
     return (await res.json()) as DataFile[];
   }
@@ -298,7 +321,10 @@ export class EngineClient {
       body: form,
     });
     if (!res.ok) {
-      throw new Error(`EngineClient.uploadDataFile: ${await readErrorMessage(res)}`);
+      throw new EngineRequestError(
+        `EngineClient.uploadDataFile: ${await readErrorMessage(res)}`,
+        res.status,
+      );
     }
     return (await res.json()) as DataFile;
   }
@@ -306,7 +332,10 @@ export class EngineClient {
   async downloadDataFile(name: string): Promise<Blob> {
     const res = await fetch(this.filesUrl(name), { headers: this.authHeaders() });
     if (!res.ok) {
-      throw new Error(`EngineClient.downloadDataFile: ${await readErrorMessage(res)}`);
+      throw new EngineRequestError(
+        `EngineClient.downloadDataFile: ${await readErrorMessage(res)}`,
+        res.status,
+      );
     }
     return res.blob();
   }
@@ -317,7 +346,10 @@ export class EngineClient {
       headers: this.authHeaders(),
     });
     if (!res.ok) {
-      throw new Error(`EngineClient.deleteDataFile: ${await readErrorMessage(res)}`);
+      throw new EngineRequestError(
+        `EngineClient.deleteDataFile: ${await readErrorMessage(res)}`,
+        res.status,
+      );
     }
   }
 
@@ -328,7 +360,10 @@ export class EngineClient {
       headers: this.authHeaders(),
     });
     if (!res.ok) {
-      throw new Error(`EngineClient.deleteAccountData: ${await readErrorMessage(res)}`);
+      throw new EngineRequestError(
+        `EngineClient.deleteAccountData: ${await readErrorMessage(res)}`,
+        res.status,
+      );
     }
   }
 
@@ -347,7 +382,10 @@ export class EngineClient {
       headers: { ...this.authHeaders() },
     });
     if (!res.ok) {
-      throw new Error(`EngineClient.listTriggers: ${await readErrorMessage(res)}`);
+      throw new EngineRequestError(
+        `EngineClient.listTriggers: ${await readErrorMessage(res)}`,
+        res.status,
+      );
     }
     return (await res.json()) as TriggerSpec[];
   }
@@ -359,7 +397,10 @@ export class EngineClient {
       body: JSON.stringify(spec),
     });
     if (!res.ok) {
-      throw new Error(`EngineClient.registerTrigger: ${await readErrorMessage(res)}`);
+      throw new EngineRequestError(
+        `EngineClient.registerTrigger: ${await readErrorMessage(res)}`,
+        res.status,
+      );
     }
     return (await res.json()) as TriggerSpec;
   }
@@ -370,7 +411,10 @@ export class EngineClient {
       headers: { ...this.authHeaders() },
     });
     if (!res.ok) {
-      throw new Error(`EngineClient.unregisterTrigger: ${await readErrorMessage(res)}`);
+      throw new EngineRequestError(
+        `EngineClient.unregisterTrigger: ${await readErrorMessage(res)}`,
+        res.status,
+      );
     }
   }
 
@@ -381,7 +425,10 @@ export class EngineClient {
       body: JSON.stringify({ payload }),
     });
     if (!res.ok) {
-      throw new Error(`EngineClient.fireTrigger: ${await readErrorMessage(res)}`);
+      throw new EngineRequestError(
+        `EngineClient.fireTrigger: ${await readErrorMessage(res)}`,
+        res.status,
+      );
     }
     return (await res.json()) as TriggerFiring;
   }
@@ -391,7 +438,10 @@ export class EngineClient {
       headers: { ...this.authHeaders() },
     });
     if (!res.ok) {
-      throw new Error(`EngineClient.listFirings: ${await readErrorMessage(res)}`);
+      throw new EngineRequestError(
+        `EngineClient.listFirings: ${await readErrorMessage(res)}`,
+        res.status,
+      );
     }
     return (await res.json()) as TriggerFiring[];
   }

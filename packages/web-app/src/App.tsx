@@ -96,7 +96,7 @@ import type {
   PipelineProposal,
   TriggerSpec,
 } from "@/lib/EngineClient";
-import { EngineClient } from "@/lib/EngineClient";
+import { EngineClient, EngineRequestError } from "@/lib/EngineClient";
 import { formatError } from "@/lib/errors";
 import { pickSaveFileHandle, writeFileHandle } from "@/lib/fileSystemAccess";
 import { useI18n } from "@/lib/i18n";
@@ -210,6 +210,13 @@ export function App(): ReactElement {
   const [isConfigSubmitting, setIsConfigSubmitting] = useState(false);
   const [paletteNodes, setPaletteNodes] = useState<NodeManifestDef[]>([]);
   const [paletteError, setPaletteError] = useState<string | null>(null);
+  // Latched when the engine answers 401 to a token-less request — the hosted
+  // engine requires a session JWT. While set, the palette shows a sign-in hint
+  // (when signed out) and cell analysis pauses so we don't emit a 401 per
+  // keystroke. Cleared once the node registry loads (after sign-in or an
+  // engine-URL change). Self-host engines with auth disabled never 401, so
+  // this never engages there.
+  const [engineAuthRequired, setEngineAuthRequired] = useState(false);
   const [paletteSearch, setPaletteSearch] = useState("");
   const [paletteTagFilter, setPaletteTagFilter] = useState<Set<NodeManifestDef["tag"]>>(
     () => new Set(),
@@ -245,6 +252,7 @@ export function App(): ReactElement {
   // BetterAuth session (#59). When signed in, mint a short-lived JWT for the
   // engine; signed out, fall back to the engine's static self-host token.
   const session = useSession();
+  const signedIn = session.data !== null && session.data !== undefined;
   const [engineJwt, setEngineJwt] = useState("");
   useEffect(() => {
     if (!session.data) {
@@ -842,6 +850,13 @@ export function App(): ReactElement {
   useEffect(() => {
     let cancelled = false;
     const sources = notebook.cells.map((cell) => cell.source);
+    // The engine already rejected us with 401: every analyze request would
+    // 401 too — one per keystroke. Hold off until sign-in or an engine change
+    // clears the latch (via the registry effect below).
+    if (engineAuthRequired) {
+      setDefinedByCell(sources.map(() => []));
+      return;
+    }
     const timer = window.setTimeout(() => {
       void clientRef.current.analyzeCells(sources).then((result) => {
         if (!cancelled) {
@@ -853,8 +868,11 @@ export function App(): ReactElement {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [notebook.cells]);
+  }, [notebook.cells, engineAuthRequired]);
 
+  // Load the node registry. Re-runs when the session JWT lands or the engine
+  // URL changes so the palette recovers after sign-in / engine switch.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: engineUrlOverride is the intended refetch trigger (clientRef picks it up), not read in the body
   useEffect(() => {
     let cancelled = false;
     void clientRef.current
@@ -865,18 +883,35 @@ export function App(): ReactElement {
         }
         setPaletteNodes(sortPalette(nodes));
         setPaletteError(null);
+        setEngineAuthRequired(false);
       })
       .catch((err: unknown) => {
         if (cancelled) {
           return;
         }
+        // A 401 on a request without a session JWT isn't a fault to surface
+        // raw: the hosted engine simply requires sign-in. Signed out, the
+        // palette shows a sign-in hint; signed in with the JWT still minting,
+        // the effect re-runs as soon as it lands. A 401 *with* a JWT (token
+        // rejected) still surfaces as a real error, and self-host engines
+        // with auth disabled never 401 at all.
+        if (
+          err instanceof EngineRequestError &&
+          err.status === 401 &&
+          (!signedIn || engineJwt === "")
+        ) {
+          setEngineAuthRequired(true);
+          setPaletteError(null);
+          return;
+        }
+        setEngineAuthRequired(false);
         const message = formatError(t, err);
         setPaletteError(t("app.errors.loadRegistry", { message }));
       });
     return () => {
       cancelled = true;
     };
-  }, [t]);
+  }, [t, signedIn, engineJwt, settings.engineUrlOverride]);
 
   // Map each node to the variable names defined across its cell(s).
   const variablesByNode = useMemo<Record<string, string[]>>(() => {
@@ -1461,7 +1496,7 @@ export function App(): ReactElement {
           onSave={() => {
             void handleSave();
           }}
-          isSignedIn={Boolean(session.data)}
+          isSignedIn={signedIn}
           onOpenCloud={() => {
             setIsCloudOpen(true);
             void refreshCloudList();
@@ -1506,7 +1541,7 @@ export function App(): ReactElement {
             }}
             email={session.data?.user.email ?? null}
             onSignOut={() => void authClient.signOut()}
-            signedIn={session.data !== null && session.data !== undefined}
+            signedIn={signedIn}
             accountKeyState={accountKeyState}
             onSaveKeyToAccount={() => {
               void handleSaveKeyToAccount();
@@ -1838,6 +1873,7 @@ export function App(): ReactElement {
                         nodes={paletteNodes}
                         filteredNodes={filteredPaletteNodes}
                         error={paletteError}
+                        authRequired={engineAuthRequired && !signedIn}
                         search={paletteSearch}
                         tagFilter={paletteTagFilter}
                         onSearchChange={setPaletteSearch}

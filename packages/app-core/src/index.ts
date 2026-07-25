@@ -41,7 +41,7 @@ export {
   type ExplanationPanelLabels,
   type ExplanationPanelProps,
 } from "./components/ExplanationPanel";
-export { EngineClient } from "./EngineClient";
+export { EngineClient, EngineRequestError } from "./EngineClient";
 export {
   buildGenerationStatus,
   defaultEventLabels,
