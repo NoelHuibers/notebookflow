@@ -479,20 +479,20 @@ def test_health_remains_unauthenticated_when_token_set(
     assert r.status_code == 200
 
 
-def test_list_nodes_rejects_request_without_bearer_when_token_set(
+def test_list_files_rejects_request_without_bearer_when_token_set(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
-    r = client.get("/nodes")
+    r = client.get("/files")
     assert r.status_code == 401
     assert "bearer" in r.json()["detail"].lower()
 
 
-def test_list_nodes_rejects_request_with_wrong_token(
+def test_list_files_rejects_request_with_wrong_token(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
-    r = client.get("/nodes", headers={"Authorization": "Bearer not-the-right-one"})
+    r = client.get("/files", headers={"Authorization": "Bearer not-the-right-one"})
     assert r.status_code == 401
 
 
@@ -550,8 +550,8 @@ def test_empty_token_env_var_disables_auth(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "")
-    # No Authorization header -- should still succeed.
-    r = client.get("/nodes")
+    # No Authorization header -- should still succeed, even on a gated route.
+    r = client.get("/files")
     assert r.status_code == 200
 
 
@@ -640,9 +640,9 @@ def test_nodes_accepts_valid_jwt(client: TestClient, monkeypatch: pytest.MonkeyP
     assert r.status_code == 200
 
 
-def test_nodes_rejects_invalid_jwt(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_files_rejects_invalid_jwt(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     _mint_jwt(monkeypatch)  # configures JWKS; the presented token below is junk
-    r = client.get("/nodes", headers={"Authorization": "Bearer not-a-real-jwt"})
+    r = client.get("/files", headers={"Authorization": "Bearer not-a-real-jwt"})
     assert r.status_code == 401
 
 
@@ -650,7 +650,7 @@ def test_jwks_configured_rejects_missing_token(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("NOTEBOOKFLOW_JWKS_URL", "https://issuer.test/api/auth/jwks")
-    r = client.get("/nodes")
+    r = client.get("/files")
     assert r.status_code == 401
 
 
@@ -660,10 +660,10 @@ def test_static_token_and_jwt_both_authenticate(
     token = _mint_jwt(monkeypatch)  # sets JWKS
     monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "self-host-secret")
     assert (
-        client.get("/nodes", headers={"Authorization": "Bearer self-host-secret"}).status_code
+        client.get("/files", headers={"Authorization": "Bearer self-host-secret"}).status_code
         == 200
     )
-    assert client.get("/nodes", headers={"Authorization": f"Bearer {token}"}).status_code == 200
+    assert client.get("/files", headers={"Authorization": f"Bearer {token}"}).status_code == 200
 
 
 def test_ws_accepts_valid_jwt_query_param(
@@ -673,6 +673,238 @@ def test_ws_accepts_valid_jwt_query_param(
     with client.websocket_connect(f"/ws?token={token}") as ws:
         ws.send_json({"type": "run", "pipelineId": "auth", "pipeline": _linear_pipeline()})
         assert ws.receive_json()["type"] == "executionStarted"
+
+
+# ---------------------------------------------------------------------------
+# Signed-out surface: public palette/analyze, BYOK-only LLM for anonymous
+# ---------------------------------------------------------------------------
+
+
+def _stub_llm_complete(
+    monkeypatch: pytest.MonkeyPatch, answer: str = "stubbed llm answer"
+) -> list[dict[str, str]]:
+    """Route every LLMClient.complete call to an in-memory stub, recording the
+    credentials each call received so tests can assert which key was used."""
+    from notebookflow.llm.client import LLMClient
+
+    calls: list[dict[str, str]] = []
+
+    async def fake_complete(
+        self: Any,
+        *,
+        provider: str,
+        model: str,
+        api_key: str,
+        messages: list[dict[str, str]],
+        system: str = "",
+        max_tokens: int = 0,
+    ) -> str:
+        calls.append({"provider": provider, "model": model, "api_key": api_key})
+        return answer
+
+    monkeypatch.setattr(LLMClient, "complete", fake_complete)
+    return calls
+
+
+def test_nodes_public_for_anonymous_when_auth_configured(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    r = client.get("/nodes")
+    assert r.status_code == 200
+    assert isinstance(r.json(), list)
+
+
+def test_nodes_public_for_invalid_token_when_auth_configured(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A stale/garbage token degrades to anonymous rather than blocking the palette.
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    r = client.get("/nodes", headers={"Authorization": "Bearer stale-or-garbage"})
+    assert r.status_code == 200
+
+
+def test_analyze_public_for_anonymous_when_auth_configured(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    r = client.post("/cells/analyze", json={"cells": [{"source": "df = 1\n"}]})
+    assert r.status_code == 200
+    assert r.json()["cells"][0]["definedNames"] == ["df"]
+
+
+def test_ask_anonymous_with_body_credentials_uses_visitor_key(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    # Env key present -- must NOT be what the gateway sees for an anonymous call.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-host-env")
+    calls = _stub_llm_complete(monkeypatch)
+    r = client.post(
+        "/llm/ask",
+        json={
+            "prompt": "How do I run this?",
+            "credentials": {"provider": "anthropic", "model": "", "apiKey": "sk-visitor"},
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["backend"] == "anthropic"
+    assert [call["api_key"] for call in calls] == ["sk-visitor"]
+
+
+def test_ask_anonymous_without_credentials_401(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    r = client.post("/llm/ask", json={"prompt": "How do I run this?"})
+    assert r.status_code == 401
+    assert "credentials required" in r.json()["detail"].lower()
+
+
+def test_ask_anonymous_blank_key_401(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    r = client.post(
+        "/llm/ask",
+        json={"prompt": "hi", "credentials": {"provider": "anthropic", "apiKey": "   "}},
+    )
+    assert r.status_code == 401
+
+
+def test_ask_anonymous_env_key_never_used_as_fallback(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hosted env key must not be spendable by signed-out traffic: even with
+    the key set, an anonymous request without body credentials is 401 and the
+    gateway is never reached."""
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-host-env")
+    calls = _stub_llm_complete(monkeypatch)
+    r = client.post("/llm/ask", json={"prompt": "How do I run this?"})
+    assert r.status_code == 401
+    assert calls == []
+
+
+def test_synthesize_anonymous_without_credentials_401(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    r = client.post(
+        "/nodes/synthesize",
+        json={"manifestId": "notebookflow.parse_csv", "nodeName": "Parse CSV"},
+    )
+    assert r.status_code == 401
+    assert "credentials required" in r.json()["detail"].lower()
+
+
+def test_explain_anonymous_without_credentials_401(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    r = client.post("/pipelines/explain", json={"pipeline": _linear_pipeline()})
+    assert r.status_code == 401
+    assert "credentials required" in r.json()["detail"].lower()
+
+
+def test_propose_anonymous_without_credentials_401(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    r = client.post("/pipelines/propose", json={"prompt": "Load CSV and plot revenue"})
+    assert r.status_code == 401
+    assert "credentials required" in r.json()["detail"].lower()
+
+
+def test_execution_surface_still_gated_for_anonymous(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The exec surface (run / files / triggers) keeps hard sign-in gating --
+    it is exec() on a shared box and the JWT is the only RCE barrier."""
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    assert client.post("/pipelines/demo/run", json=_linear_pipeline()).status_code == 401
+    assert client.get("/files").status_code == 401
+    assert client.post("/files", files={"file": ("x.csv", b"a\n", "text/csv")}).status_code == 401
+    assert client.get("/triggers").status_code == 401
+    assert (
+        client.post(
+            "/triggers", json={"id": "t", "kind": "manual", "pipelineId": "p", "config": {}}
+        ).status_code
+        == 401
+    )
+
+
+def test_ask_authenticated_keeps_env_fallback(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-host-env")
+    calls = _stub_llm_complete(monkeypatch)
+    r = client.post(
+        "/llm/ask",
+        json={"prompt": "How do I run this?"},
+        headers={"Authorization": "Bearer shh-secret"},
+    )
+    assert r.status_code == 200
+    assert r.json()["backend"] == "anthropic"
+    assert [call["api_key"] for call in calls] == ["sk-host-env"]
+
+
+def test_ask_jwt_user_keeps_env_fallback(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    token = _mint_jwt(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-host-env")
+    calls = _stub_llm_complete(monkeypatch)
+    r = client.post(
+        "/llm/ask",
+        json={"prompt": "How do I run this?"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200
+    assert [call["api_key"] for call in calls] == ["sk-host-env"]
+
+
+def test_ask_authenticated_without_key_still_gets_template(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    r = client.post(
+        "/llm/ask",
+        json={"prompt": "How do I run this?"},
+        headers={"Authorization": "Bearer shh-secret"},
+    )
+    assert r.status_code == 200
+    assert r.json()["backend"] == "template"
+
+
+def test_synthesize_authenticated_without_credentials_unchanged(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    r = client.post(
+        "/nodes/synthesize",
+        json={
+            "manifestId": "notebookflow.parse_csv",
+            "nodeName": "Parse CSV",
+            "outputs": ["table"],
+            "config": {"path": "sales.csv"},
+        },
+        headers={"Authorization": "Bearer shh-secret"},
+    )
+    assert r.status_code == 200
+    assert r.json()["backend"] == "template"
+
+
+def test_ask_open_selfhost_env_fallback_unchanged(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Self-host (no auth configured): env fallback keeps working with no
+    credentials and no Authorization header -- today's semantics."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-selfhost-env")
+    calls = _stub_llm_complete(monkeypatch)
+    r = client.post("/llm/ask", json={"prompt": "How do I run this?"})
+    assert r.status_code == 200
+    assert r.json()["backend"] == "anthropic"
+    assert [call["api_key"] for call in calls] == ["sk-selfhost-env"]
 
 
 # ---------------------------------------------------------------------------
