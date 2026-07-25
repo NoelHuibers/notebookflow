@@ -46,6 +46,8 @@ interface TriggersDialogProps {
   triggers: TriggerSpec[];
   errorMessage: string | null;
   isLoading: boolean;
+  /** Hosted engine requires a session JWT and the visitor is signed out — show a sign-in hint instead of the (401-ing) trigger list. */
+  authRequired: boolean;
   pipeline: PipelineDef;
   onRefresh: () => void;
   onClose: () => void;
@@ -56,6 +58,7 @@ export function TriggersDialog({
   triggers,
   errorMessage,
   isLoading,
+  authRequired,
   pipeline,
   onRefresh,
   onClose,
@@ -74,7 +77,7 @@ export function TriggersDialog({
             </Badge>
           </span>
           <div className="flex items-center gap-1">
-            {!isCreating && (
+            {!isCreating && !authRequired && (
               <Button
                 variant="outline"
                 size="sm"
@@ -102,7 +105,11 @@ export function TriggersDialog({
             {errorMessage}
           </p>
         )}
-        {isCreating ? (
+        {authRequired ? (
+          <p className="min-h-[200px] flex items-center justify-center rounded border bg-muted/30 px-6 py-4 text-center text-[11px] text-muted-foreground">
+            {t("triggers.signInRequired")}
+          </p>
+        ) : isCreating ? (
           <TriggerCreateForm
             client={client}
             pipeline={pipeline}
