@@ -5,9 +5,9 @@
  * command is currently revealed).
  *
  * It is a *router*, not a rewrite of the AI flows: it opens on a filterable
- * list of AI commands (Ask, Create node [a Part A placeholder], Compose,
- * Explain). Picking Ask/Compose reveals that command's textarea + result inline
- * and calls back into the host's existing handlers; picking Explain fires the
+ * list of AI commands (Ask, Create node, Compose, Explain). Picking
+ * Ask/Compose/Create node reveals that command's textarea + result inline and
+ * calls back into the host's existing handlers; picking Explain fires the
  * host's explain handler immediately and closes (its banner shows the result).
  *
  * i18n follows the app-core labels pattern: every user-facing string is a label
@@ -27,8 +27,8 @@ import { ScrollArea } from "./ui/scroll-area";
 
 export type CommandId = "ask" | "createNode" | "compose" | "explain";
 
-/** One row in the command list. `disabled` rows (Part A: "Create node") render
- * greyed with a "coming soon" hint and can't be picked or navigated onto. */
+/** One row in the command list. `disabled` rows render greyed with a "coming
+ * soon" hint and can't be picked or navigated onto. */
 export interface CommandDescriptor {
   id: CommandId;
   title: string;
@@ -60,6 +60,10 @@ export interface CommandPaletteLabels {
   composeSubmit: string;
   composeDrafting: string;
   composeApply: string;
+  createNodePlaceholder: string;
+  createNodeSubmit: string;
+  createNodeCreating: string;
+  createNodePlaced: string;
 }
 
 // English defaults. The command bodies reuse the same wording the standalone
@@ -89,13 +93,15 @@ export const defaultCommandPaletteLabels: CommandPaletteLabels = {
   composeSubmit: "Draft pipeline",
   composeDrafting: "Drafting…",
   composeApply: "Replace notebook with draft",
+  createNodePlaceholder: "e.g. Keep only rows where revenue is above 1000",
+  createNodeSubmit: "Create node",
+  createNodeCreating: "Creating…",
+  createNodePlaced: "Node placed on the canvas.",
 };
 
 // --- Pure command-routing helpers (unit-tested in CommandPalette.test.ts) ---
 
-/** The command list in display order, built from the merged labels. "Create
- * node" is a Part A placeholder — present so the list shape is final, disabled
- * until the node builder lands in Part B. */
+/** The command list in display order, built from the merged labels. */
 export function buildCommands(labels: CommandPaletteLabels): CommandDescriptor[] {
   return [
     { id: "ask", title: labels.askTitle, description: labels.askDescription, disabled: false },
@@ -103,7 +109,7 @@ export function buildCommands(labels: CommandPaletteLabels): CommandDescriptor[]
       id: "createNode",
       title: labels.createNodeTitle,
       description: labels.createNodeDescription,
-      disabled: true,
+      disabled: false,
     },
     {
       id: "compose",
@@ -182,6 +188,23 @@ export interface CommandPaletteCompose {
   onApply: () => void;
 }
 
+/**
+ * Create-node command state (#19). One-shot: submitting authors a single node
+ * and auto-places it on the canvas. `backend` is set once a node has been
+ * placed (the inline confirmation + warnings then render); `warnings` carries
+ * the template-fallback notice when no key is configured. No regenerate.
+ */
+export interface CommandPaletteCreateNode {
+  prompt: string;
+  isCreating: boolean;
+  errorMessage: string | null;
+  /** The backend that authored the placed node, or null before one is placed. */
+  backend: string | null;
+  warnings: string[];
+  onPromptChange: (next: string) => void;
+  onSubmit: () => void;
+}
+
 /** Explain command — fire-and-close; the host's banner renders the result. */
 export interface CommandPaletteExplain {
   isExplaining: boolean;
@@ -190,13 +213,14 @@ export interface CommandPaletteExplain {
 
 export interface CommandPaletteProps {
   ask: CommandPaletteAsk;
+  createNode: CommandPaletteCreateNode;
   compose: CommandPaletteCompose;
   explain: CommandPaletteExplain;
   onClose: () => void;
   labels?: Partial<CommandPaletteLabels>;
 }
 
-type ActiveCommand = "ask" | "compose" | null;
+type ActiveCommand = "ask" | "createNode" | "compose" | null;
 
 function iconFor(id: CommandId): ReactElement {
   switch (id) {
@@ -213,6 +237,7 @@ function iconFor(id: CommandId): ReactElement {
 
 export function CommandPalette({
   ask,
+  createNode,
   compose,
   explain,
   onClose,
@@ -251,9 +276,6 @@ export function CommandPalette({
   }, [active]);
 
   function runCommand(id: CommandId): void {
-    if (id === "createNode") {
-      return;
-    }
     if (id === "explain") {
       explain.onExplain();
       onClose();
@@ -265,6 +287,8 @@ export function CommandPalette({
   function submitActive(): void {
     if (active === "ask") {
       ask.onSubmit();
+    } else if (active === "createNode") {
+      createNode.onSubmit();
     } else if (active === "compose") {
       compose.onSubmit();
     }
@@ -324,7 +348,13 @@ export function CommandPalette({
   );
 
   const headerTitle =
-    active === "ask" ? merged.askTitle : active === "compose" ? merged.composeTitle : merged.title;
+    active === "ask"
+      ? merged.askTitle
+      : active === "createNode"
+        ? merged.createNodeTitle
+        : active === "compose"
+          ? merged.composeTitle
+          : merged.title;
 
   return (
     <div
@@ -454,6 +484,57 @@ export function CommandPalette({
                   </ul>
                 )}
               </ScrollArea>
+            )}
+          </>
+        )}
+
+        {active === "createNode" && (
+          <>
+            {backButton}
+            <textarea
+              ref={textareaRef}
+              rows={3}
+              value={createNode.prompt}
+              onChange={(event) => {
+                createNode.onPromptChange(event.target.value);
+              }}
+              onKeyDown={handleTextareaKeyDown}
+              placeholder={merged.createNodePlaceholder}
+              aria-label={merged.createNodeTitle}
+              className="resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
+            />
+            {createNode.errorMessage !== null && (
+              <p className="rounded border border-destructive/40 bg-destructive/5 px-2 py-1 text-[11px] text-destructive">
+                {createNode.errorMessage}
+              </p>
+            )}
+            <div className="flex items-center gap-2">
+              <Button
+                variant="default"
+                size="sm"
+                onClick={createNode.onSubmit}
+                disabled={createNode.isCreating}
+              >
+                {createNode.isCreating ? merged.createNodeCreating : merged.createNodeSubmit}
+              </Button>
+              {createNode.backend !== null && (
+                <Badge variant="outline" className="font-mono text-[10px]">
+                  {createNode.backend}
+                </Badge>
+              )}
+              <span className="ml-auto text-[10px] text-muted-foreground">{merged.submitHint}</span>
+            </div>
+            {createNode.backend !== null && (
+              <div className="rounded border bg-muted/30 p-3 text-[11px]">
+                <p className="text-sm">{merged.createNodePlaced}</p>
+                {createNode.warnings.length > 0 && (
+                  <ul className="mt-2 flex flex-col gap-0.5 text-[10px] text-muted-foreground">
+                    {createNode.warnings.map((warning, idx) => (
+                      <li key={`create-warning-${String(idx)}`}>• {warning}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             )}
           </>
         )}

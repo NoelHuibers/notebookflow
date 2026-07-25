@@ -25,6 +25,10 @@ export const en = {
   composeSubmit: "Draft pipeline",
   composeDrafting: "Drafting…",
   composeApply: "Replace notebook with draft",
+  createNodePlaceholder: "e.g. Keep only rows where revenue is above 1000",
+  createNodeSubmit: "Create node",
+  createNodeCreating: "Creating…",
+  createNodePlaced: "Node placed on the canvas.",
 };
 
 export const de: typeof en = {
@@ -53,4 +57,8 @@ export const de: typeof en = {
   composeSubmit: "Entwurf erstellen",
   composeDrafting: "Entwurf wird erstellt…",
   composeApply: "Notebook durch Entwurf ersetzen",
+  createNodePlaceholder: "z. B. Nur Zeilen behalten, in denen der Umsatz über 1000 liegt",
+  createNodeSubmit: "Node erstellen",
+  createNodeCreating: "Wird erstellt…",
+  createNodePlaced: "Node auf der Canvas platziert.",
 };

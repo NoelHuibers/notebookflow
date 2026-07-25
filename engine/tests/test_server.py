@@ -796,6 +796,90 @@ def test_synthesize_anonymous_without_credentials_401(
     assert "credentials required" in r.json()["detail"].lower()
 
 
+def test_author_node_template_fallback_without_credentials(client: TestClient) -> None:
+    r = client.post(
+        "/nodes/author",
+        json={
+            "description": "keep only high-revenue rows",
+            "context": {"upstream": [{"nodeName": "Load CSV", "outputPorts": ["df"]}]},
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["backend"] == "template"
+    assert body["inputs"] == ["df<-Load CSV.df"]
+    assert body["body"].strip() != ""
+    assert any("No AI provider configured" in w for w in body["warnings"])
+
+
+def test_author_node_gateway_returns_structured_node(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from notebookflow.llm.client import LLMClient
+
+    payload = (
+        '{"name": "Filter EU", "tag": "transform", '
+        '"inputs": ["df<-Load CSV.df"], "outputs": ["filtered"], '
+        '"body": "filtered = df[df[\\"region\\"] == \\"EU\\"]\\n"}'
+    )
+
+    async def fake_complete(self: Any, **_kwargs: Any) -> str:
+        return payload
+
+    monkeypatch.setattr(LLMClient, "complete", fake_complete)
+    r = client.post(
+        "/nodes/author",
+        json={
+            "description": "keep EU rows",
+            "context": {"upstream": [{"nodeName": "Load CSV", "outputPorts": ["df"]}]},
+            "credentials": {"provider": "anthropic", "model": "claude-x", "apiKey": "sk-test"},
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["backend"] == "anthropic"
+    assert body["name"] == "Filter EU"
+    assert body["inputs"] == ["df<-Load CSV.df"]
+    assert body["outputs"] == ["filtered"]
+
+
+def test_author_node_empty_description_400(client: TestClient) -> None:
+    r = client.post("/nodes/author", json={"description": "   "})
+    assert r.status_code == 400
+
+
+def test_author_anonymous_without_credentials_401(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    r = client.post("/nodes/author", json={"description": "keep EU rows"})
+    assert r.status_code == 401
+    assert "credentials required" in r.json()["detail"].lower()
+
+
+def test_author_anonymous_with_body_key_200(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOKFLOW_AUTH_TOKEN", "shh-secret")
+    calls = _stub_llm_complete(
+        monkeypatch,
+        answer=(
+            '{"name": "N", "tag": "transform", "inputs": [], '
+            '"outputs": ["out"], "body": "out = 1\\n"}'
+        ),
+    )
+    r = client.post(
+        "/nodes/author",
+        json={
+            "description": "make a node",
+            "credentials": {"provider": "anthropic", "model": "", "apiKey": "sk-visitor"},
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["backend"] == "anthropic"
+    assert [call["api_key"] for call in calls] == ["sk-visitor"]
+
+
 def test_explain_anonymous_without_credentials_401(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

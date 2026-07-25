@@ -6,7 +6,7 @@
 import type { GraphModel } from "@notebookflow/graph-canvas";
 import type { NotebookCell } from "@notebookflow/graph-canvas/sync";
 
-import type { PipelineDef } from "./types";
+import type { NodeAuthorContext, PipelineDef } from "./types";
 
 export function buildPipelineDef(
   graph: GraphModel,
@@ -40,6 +40,20 @@ export function buildPipelineDef(
     targetPort: wire.targetPort,
   }));
   return { nodes, edges };
+}
+
+/**
+ * Build the upstream context the engine's NodeAuthor needs to wire a new node:
+ * every node currently on the canvas, by name, with its output port names.
+ * Nodes with no outputs (nothing to bind to) are omitted; blank names are
+ * skipped so the binding grammar's `Node.port` source stays resolvable.
+ * `notebookName` is advisory prompt context (the active file).
+ */
+export function buildNodeAuthorContext(graph: GraphModel, notebookName = ""): NodeAuthorContext {
+  const upstream = Object.values(graph.nodes)
+    .filter((node) => node.name.trim() !== "" && node.outputs.length > 0)
+    .map((node) => ({ nodeName: node.name, outputPorts: [...node.outputs] }));
+  return notebookName !== "" ? { upstream, notebookName } : { upstream };
 }
 
 export function stripMarkerLine(source: string): string {
