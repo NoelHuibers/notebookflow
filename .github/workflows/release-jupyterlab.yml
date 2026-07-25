@@ -95,9 +95,19 @@ jobs:
 
       - name: Verify JupyterLab discovers the extension
         run: |
-          .smoke-venv/bin/python -m jupyterlab.labextensions list 2>&1 | tee labextensions.txt
-          grep -F "@notebookflow/jupyterlab-extension v" labextensions.txt
-          grep -iF "enabled ok" labextensions.txt
+          .smoke-venv/bin/python - <<'PY'
+          from pathlib import Path
+
+          from jupyter_core.paths import jupyter_path
+          from jupyterlab_server.config import get_federated_extensions
+
+          paths = [str(Path(path) / "labextensions") for path in jupyter_path()]
+          extensions = get_federated_extensions(paths)
+          extension = extensions["@notebookflow/jupyterlab-extension"]
+          assert extension["version"] == "0.1.0"
+          assert extension["install"]["packageName"] == "notebookflow-app"
+          print("@notebookflow/jupyterlab-extension v0.1.0 discovered")
+          PY
 
       - name: Verify the named proxy starts the engine
         run: |
@@ -113,9 +123,12 @@ jobs:
 
           curl \
             --fail \
+            --silent \
+            --show-error \
             --retry 60 \
             --retry-delay 1 \
             --retry-all-errors \
+            --retry-max-time 180 \
             --max-time 120 \
             http://127.0.0.1:8899/notebookflow/health \
             | tee health.json
