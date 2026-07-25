@@ -11,6 +11,19 @@ import {
   useI18n,
 } from "@/lib/i18n";
 
+// Self-hosted Plex family (issue #50). Vite bundles the woff2 same-origin so the
+// strict `font-src 'self' data:` CSP (vercel.json) is satisfied — no Google Fonts.
+// Latin subset only: the app ships DE + EN, both covered by the latin range. Only
+// the weights the UI actually renders are imported to keep the bundle lean —
+// mono 400/500/600 (app chrome tops out at semibold), sans 400/500/600/700 (prose bold).
+import "@fontsource/ibm-plex-mono/latin-400.css";
+import "@fontsource/ibm-plex-mono/latin-500.css";
+import "@fontsource/ibm-plex-mono/latin-600.css";
+import "@fontsource/ibm-plex-sans/latin-400.css";
+import "@fontsource/ibm-plex-sans/latin-500.css";
+import "@fontsource/ibm-plex-sans/latin-600.css";
+import "@fontsource/ibm-plex-sans/latin-700.css";
+
 import "reactflow/dist/style.css";
 import "../index.css";
 

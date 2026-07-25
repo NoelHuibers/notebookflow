@@ -58,7 +58,7 @@ import {
   PanelRightClose,
   Upload,
 } from "lucide-react";
-import type { ReactElement } from "react";
+import type { CSSProperties, ReactElement } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
 import { CanvasSidebar } from "@/components/CanvasSidebar";
@@ -1538,7 +1538,15 @@ export function App(): ReactElement {
 
   return (
     <FileDropZone onFile={handleFile}>
-      <div className="flex h-screen overflow-hidden flex-col bg-background text-foreground font-sans">
+      {/* App product surface identity (issue #50): the editor shell defaults to
+          IBM Plex Mono so all chrome (toolbar, cells, dialogs, badges) inherits it.
+          `--notebookflow-font-family` is the CSS var the shared graph-canvas nodes
+          read (NODE_FONT_FAMILY in graph-canvas), pointed at the mono token here so
+          canvas nodes match — without touching the graph-canvas package. */}
+      <div
+        className="flex h-screen overflow-hidden flex-col bg-background text-foreground font-mono"
+        style={{ "--notebookflow-font-family": "var(--font-mono)" } as CSSProperties}
+      >
         <AppHeader
           engineClient={clientRef.current}
           saveStatus={saveStatus}

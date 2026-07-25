@@ -219,7 +219,9 @@ export function TourOverlay({ onBeforeStep, onClose }: TourOverlayProps): ReactE
           <h2 className="mt-2 text-base font-semibold tracking-tight">
             {t(`onboarding.steps.${renderedStep.id}.title`)}
           </h2>
-          <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+          {/* Progress label + title stay mono (tool identity, tied to the app the
+              tour spotlights); the reading body opts into Plex Sans (issue #50). */}
+          <p className="mt-1.5 font-sans text-[13px] leading-relaxed text-muted-foreground">
             {t(`onboarding.steps.${renderedStep.id}.body`)}
           </p>
         </div>
