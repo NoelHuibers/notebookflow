@@ -2,13 +2,26 @@
 
 n8n-style workflow orchestration for computational notebooks. Visually wire together Jupyter notebooks and cell groups into pipelines, with AI assistance, a node library, and full bidirectional sync between the visual graph and the actual notebook cells.
 
+## Install in JupyterLab
+
+```bash
+pip install notebookflow-app
+jupyter lab
+```
+
+That single Python package installs the prebuilt JupyterLab extension and its
+local execution engine. Node, pnpm, and a repository checkout are not required.
+The engine starts automatically when the extension connects.
+
 ## Quick start
+
+The rest of this section is for contributors working from a source checkout.
 
 ### 1. Prerequisites
 
 | Tool   | Version  | Notes                                                                |
 |--------|----------|----------------------------------------------------------------------|
-| Node   | `>=20`   | Required by every TS package.                                        |
+| Node   | `>=20.19` | Required by every TS package.                                       |
 | pnpm   | `>=10`   | Pinned via `packageManager` in [package.json](package.json) — `corepack enable` will pick it up. |
 | Python | `>=3.11` | Required by the engine.                                              |
 | uv     | latest   | Astral's package manager — used for the engine.                      |
@@ -23,11 +36,9 @@ pnpm bootstrap
 
 1. `pnpm install` — workspace deps.
 2. `uv --project engine sync --all-extras` — engine venv with all dev extras.
-3. `uv --project engine add --optional dev jupyterlab` — adds JupyterLab to the engine's dev group (no-op on repeat runs).
-4. `pnpm --filter @notebookflow/jupyterlab-extension add -D @jupyterlab/builder` — adds the labextension webpack builder.
-5. `pnpm --filter @notebookflow/jupyterlab-extension build:lab` — produces the labextension bundle into `engine/notebookflow/labextension/`.
-6. `pnpm jupyter:install` — copies the labextension bundle into `engine/.venv/share/jupyter/labextensions/` so JupyterLab discovers it on launch.
-7. `turbo run build` — builds every TS package (graph-canvas, web-app, vscode-extension, jupyterlab-extension).
+3. `pnpm --filter @notebookflow/jupyterlab-extension build:lab` — produces the labextension bundle into `engine/notebookflow/labextension/`.
+4. `pnpm jupyter:install` — copies the labextension bundle into `engine/.venv/share/jupyter/labextensions/` so JupyterLab discovers it on launch.
+5. `turbo run build` — builds every TS package (graph-canvas, web-app, vscode-extension, jupyterlab-extension).
 
 It's idempotent — re-run after pulling.
 
@@ -39,7 +50,7 @@ It's idempotent — re-run after pulling.
 |----------------------|-----------------------------------------------------------------------------------------------------------|
 | `pnpm start:web`     | Engine + Vite web app side-by-side via `concurrently`. Open the printed URL (`http://localhost:5173/`).   |
 | `pnpm start:vscode`  | Builds the extension, then auto-launches a VS Code dev host with the multi-notebook analyst pipeline in `examples/` already open. Engine spawns automatically once you run the **NotebookFlow: Open Canvas** command. |
-| `pnpm start:jupyter` | Builds the labextension bundle, then runs engine and JupyterLab side-by-side via `concurrently`. Lab opens the multi-notebook analyst pipeline in `examples/`. |
+| `pnpm start:jupyter` | Builds the labextension bundle, then runs JupyterLab. The named proxy starts the engine on first use. Lab opens the multi-notebook analyst pipeline in `examples/`. |
 
 Ctrl+C in any `start:*` command tears down all child processes via `concurrently`'s `--kill-others-on-fail`.
 
@@ -67,7 +78,7 @@ A sample file is included at `.env.example`.
 
 - **Web app** — SyncEngine + Canvas only (the web-app fixture is in-browser; no notebook write-back, no execution).
 - **VS Code** — full loop: live notebook editing (`WorkspaceEdit` cell patches), rename round-trip, pipeline execution over WebSocket via the auto-spawned engine.
-- **JupyterLab** — full loop: live notebook editing via JL's shared (CRDT) model, rename round-trip, pipeline execution over WebSocket to the parallel engine.
+- **JupyterLab** — full loop: live notebook editing via JL's shared (CRDT) model, rename round-trip, pipeline execution over WebSocket to the automatically started local engine.
 
 ## Why NotebookFlow
 
@@ -210,7 +221,7 @@ Same Dockerfile works on Railway, Render, Modal, DigitalOcean App Platform, or a
 ### Platform communication
 
 - **VS Code:** Extension auto-launches the engine as a child process on first canvas open, connects the webview to its WebSocket. Implemented.
-- **JupyterLab:** Canvas connects to a manually-started engine over WebSocket today; a `jupyter-server-proxy` shim that auto-launches FastAPI is on the roadmap.
+- **JupyterLab:** The prebuilt extension connects through a named `jupyter-server-proxy` route, which launches the local FastAPI engine on first use.
 - **Standalone Web App:** Connects to a remotely hosted FastAPI instance, or a locally running one. (Currently exercises only the in-browser SyncEngine.)
 
 The real engine always lives in FastAPI; each adapter is a thin host around it.

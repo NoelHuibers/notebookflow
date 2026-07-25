@@ -46,6 +46,9 @@ jobs:
       - name: Vitest (app-core)
         run: pnpm --filter @notebookflow/app-core test
 
+      - name: Vitest (JupyterLab adapter)
+        run: pnpm --filter @notebookflow/jupyterlab-extension test
+
   python:
     name: Python (pytest + ruff + ty)
     runs-on: ubuntu-latest

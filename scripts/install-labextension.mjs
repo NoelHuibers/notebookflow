@@ -4,16 +4,16 @@
  *
  * JupyterLab discovers federated extensions from
  * ``<sys.prefix>/share/jupyter/labextensions/<name>/``. The official
- * ``jupyter labextension develop`` command wraps a ``pip install -e`` plus
- * a symlink into that dir, but it requires the source to be a Python
- * package — which our JS-only ``packages/jupyterlab-extension`` isn't.
+ * Published installs receive the bundle as shared data in the
+ * ``notebookflow-app`` wheel. Source-checkout development still needs this
+ * direct copy because the generated bundle is intentionally not committed.
  *
  * This script does the linkage directly: copy the webpack output produced
  * by ``pnpm --filter @notebookflow/jupyterlab-extension build:lab`` into
  * ``engine/.venv/share/jupyter/labextensions/@notebookflow/jupyterlab-extension/``.
  * Hard-copies (not symlinks) so it works on Windows without developer mode.
- * Re-run after every rebuild — that's why ``setup:jupyter`` and
- * ``start:jupyter`` both invoke it after ``build:lab``.
+ * Re-run after every rebuild — that's why ``bootstrap:jupyter`` invokes it
+ * after ``build:lab``.
  */
 
 import fs from "node:fs";

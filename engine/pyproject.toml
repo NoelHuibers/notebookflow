@@ -1,11 +1,25 @@
 [project]
-name = "notebookflow"
-version = "0.0.0"
-description = "NotebookFlow execution engine — DAG builder, executor, data bus, FastAPI server"
+name = "notebookflow-app"
+version = "0.1.0"
+description = "Visual pipeline editor and local execution engine for JupyterLab"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "NotebookFlow contributors" }]
+keywords = ["jupyter", "jupyterlab", "notebook", "pipeline", "workflow"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Jupyter",
+    "Framework :: Jupyter :: JupyterLab",
+    "Framework :: Jupyter :: JupyterLab :: 4",
+    "Framework :: Jupyter :: JupyterLab :: Extensions",
+    "Framework :: Jupyter :: JupyterLab :: Extensions :: Prebuilt",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 
 dependencies = [
     "fastapi>=0.139.2",
@@ -27,11 +41,17 @@ dependencies = [
     # Hold at the last universal-wheel line until upstream publishes win/mac wheels.
     "litellm>=1.91.4,<1.92",
     "pyjwt[crypto]>=2.10.1",
+    "jupyterlab>=4.6.1,<5",
+    "jupyter-server-proxy>=4.5,<5",
 ]
+
+[project.urls]
+Homepage = "https://notebookflow.app"
+Repository = "https://github.com/NoelHuibers/notebookflow"
+Issues = "https://github.com/NoelHuibers/notebookflow/issues"
 
 [project.optional-dependencies]
 dev = [
-    "jupyterlab>=4.6.1",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.3.0",
     "ruff>=0.15.22",
@@ -58,6 +78,14 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["notebookflow"]
+exclude = ["notebookflow/labextension"]
+
+[tool.hatch.build.targets.wheel.shared-data]
+"notebookflow/labextension" = "share/jupyter/labextensions/@notebookflow/jupyterlab-extension"
+
+[tool.hatch.build.targets.sdist]
+include = ["notebookflow", "README.md", "LICENSE", "pyproject.toml"]
+artifacts = ["notebookflow/labextension"]
 
 [tool.ruff]
 line-length = 100

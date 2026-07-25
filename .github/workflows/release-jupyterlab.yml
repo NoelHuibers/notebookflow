@@ -1,0 +1,142 @@
+name: Release JupyterLab
+
+on:
+  push:
+    tags:
+      - "jupyterlab-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Python distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.4
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: engine/uv.lock
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: |
+          pnpm install --frozen-lockfile
+          uv --project engine sync --all-extras --frozen --python 3.12
+
+      - name: Validate release tag
+        if: github.ref_type == 'tag'
+        run: |
+          version="$(node -p "require('./packages/jupyterlab-extension/package.json').version")"
+          test "${GITHUB_REF_NAME}" = "jupyterlab-v${version}" || {
+            echo "Tag ${GITHUB_REF_NAME} does not match package version ${version}"
+            exit 1
+          }
+
+      - name: Build prebuilt JupyterLab extension
+        run: pnpm --filter @notebookflow/jupyterlab-extension build:lab
+
+      - name: Build Python wheel and source archive
+        run: uv build engine --out-dir engine/dist --clear
+
+      - name: Verify distribution contents
+        run: |
+          python scripts/verify_jupyterlab_distribution.py engine/dist
+          uv tool run twine check engine/dist/*
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v6
+        with:
+          name: jupyterlab-distributions
+          path: engine/dist/
+          if-no-files-found: error
+
+  smoke:
+    name: Clean install and launch
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Download distributions
+        uses: actions/download-artifact@v7
+        with:
+          name: jupyterlab-distributions
+          path: dist
+
+      - name: Install wheel without Node
+        run: |
+          uv venv .smoke-venv --python 3.12
+          uv pip install --python .smoke-venv/bin/python dist/*.whl
+
+      - name: Verify JupyterLab discovers the extension
+        run: |
+          .smoke-venv/bin/python -m jupyterlab.labextensions list 2>&1 | tee labextensions.txt
+          grep -F "@notebookflow/jupyterlab-extension v" labextensions.txt
+          grep -iF "enabled ok" labextensions.txt
+
+      - name: Verify the named proxy starts the engine
+        run: |
+          export PATH="${PWD}/.smoke-venv/bin:${PATH}"
+          python -m jupyterlab \
+            --no-browser \
+            --ServerApp.port=8899 \
+            --ServerApp.port_retries=0 \
+            --IdentityProvider.token='' \
+            >jupyter-smoke.log 2>&1 &
+          jupyter_pid=$!
+          trap 'kill "${jupyter_pid}" 2>/dev/null || true' EXIT
+
+          curl \
+            --fail \
+            --retry 60 \
+            --retry-delay 1 \
+            --retry-all-errors \
+            --max-time 120 \
+            http://127.0.0.1:8899/notebookflow/health \
+            | tee health.json
+          grep -F '"status":"ok"' health.json
+
+  publish:
+    name: Publish to PyPI
+    if: github.ref_type == 'tag'
+    needs: [build, smoke]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/notebookflow-app/
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v7
+        with:
+          name: jupyterlab-distributions
+          path: dist
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1

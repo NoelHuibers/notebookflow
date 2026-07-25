@@ -1,9 +1,8 @@
 """jupyter-server-proxy configuration.
 
-Exposes the engine through Jupyter's `/proxy/<port>/` endpoint when
-jupyter-server-proxy is installed alongside JupyterLab. With this hooked up,
-the JupyterLab adapter can connect via the relative URL `/proxy/8765/ws`
-instead of relying on a separately-launched engine on a known host:port.
+Exposes the engine through Jupyter's named `/notebookflow/` route. The first
+request to that route starts the engine, so the JupyterLab adapter does not
+depend on a separately launched process or a fixed port.
 
 Wired via the `jupyter_serverproxy_servers` entry point in pyproject.toml:
 
@@ -27,13 +26,17 @@ def server_proxy_config() -> dict[str, Any]:
     return {
         "command": ["notebookflow"],
         "environment": {"PORT": "{port}"},
-        # `absolute_url=False` keeps the proxy rooted at /proxy/<port>/ so a
-        # relative WebSocket URL ("/proxy/<port>/ws") works from the JL UI.
+        # `absolute_url=False` strips the `/notebookflow/` prefix before
+        # forwarding the request; the engine continues to expose `/ws`,
+        # `/health`, and its other routes at the root.
         "absolute_url": False,
         # The launcher icon in JL's launcher screen.
         "launcher_entry": {
             "title": "NotebookFlow engine",
             "enabled": False,
         },
-        "timeout": 30,
+        # Cold imports can take more than 30 seconds on Windows and small
+        # hosted machines. Keep the first canvas connection alive while the
+        # local engine boots.
+        "timeout": 90,
     }

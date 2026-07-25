@@ -19,13 +19,13 @@
     "clean": "turbo run clean && rimraf node_modules",
     "bootstrap": "pnpm install && pnpm bootstrap:engine && pnpm bootstrap:jupyter && turbo run build",
     "bootstrap:engine": "uv --project engine sync --all-extras",
-    "bootstrap:jupyter": "uv --project engine add --optional dev jupyterlab && pnpm --filter @notebookflow/jupyterlab-extension add -D @jupyterlab/builder && pnpm --filter @notebookflow/jupyterlab-extension build:lab && pnpm jupyter:install",
+    "bootstrap:jupyter": "pnpm --filter @notebookflow/jupyterlab-extension build:lab && pnpm jupyter:install",
     "engine": "uv --project engine run notebookflow",
     "jupyter:lab": "uv --project engine run jupyter lab examples/preprocessing.ipynb examples/model_baseline.ipynb examples/model_advanced.ipynb examples/postprocessing.ipynb",
     "jupyter:install": "node scripts/install-labextension.mjs",
     "start:web": "concurrently --names \"engine,web\" --prefix-colors \"yellow,cyan\" --kill-others-on-fail \"pnpm engine\" \"turbo run dev --filter=@notebookflow/web-app\"",
     "start:vscode": "pnpm --filter @notebookflow/vscode-extension build && node scripts/launch-vscode.mjs",
-    "start:jupyter": "pnpm --filter @notebookflow/jupyterlab-extension build:lab && concurrently --names \"engine,lab\" --prefix-colors \"yellow,magenta\" --kill-others-on-fail \"pnpm engine\" \"pnpm jupyter:lab\""
+    "start:jupyter": "pnpm --filter @notebookflow/jupyterlab-extension build:lab && pnpm jupyter:lab"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
@@ -35,7 +35,7 @@
     "typescript": "^6.0.3"
   },
   "engines": {
-    "node": ">=20",
+    "node": ">=20.19",
     "pnpm": ">=10"
   },
   "pnpm": {

@@ -3,20 +3,19 @@
  *
  * The shared app-core EngineClient is host-agnostic and requires a URL; this
  * module supplies the JupyterLab-specific default (the engine reached through
- * jupyter-server-proxy at the page's Jupyter base URL) and honours the
+ * its named jupyter-server-proxy route at the page's Jupyter base URL) and honours the
  * `engineUrlOverride` plugin setting when the user points at an engine
  * directly.
  */
 
 const FALLBACK_ENGINE_URL = "ws://127.0.0.1:8765/ws";
-const PROXY_PORT = 8765;
 
 /**
- * Build the engine WebSocket URL that runs through jupyter-server-proxy when
- * we're inside a JupyterLab page. Strips the trailing /lab[...] from the
- * current pathname so the proxy is rooted at the Jupyter base URL -- works
- * for vanilla `localhost:8888/lab` and for JupyterHub paths like
- * `localhost:8888/user/me/lab`.
+ * Build the engine WebSocket URL for the `notebookflow` named proxy server.
+ * The first request to this route makes jupyter-server-proxy launch the engine,
+ * so users do not need to start a second process. Strips the trailing
+ * /lab[...] from the current pathname so it works for both vanilla JupyterLab
+ * and JupyterHub paths such as `/user/me/lab`.
  *
  * Falls back to the loopback URL for tests + non-browser hosts.
  */
@@ -31,7 +30,7 @@ export function resolveDefaultEngineUrl(): string {
   const wsProto = loc.protocol === "https:" ? "wss" : "ws";
   const trimmedPath = (loc.pathname || "/").replace(/\/+$/, "");
   const baseRoot = trimmedPath.replace(/\/lab(\/.*)?$/, "") || "";
-  return `${wsProto}://${loc.host}${baseRoot}/proxy/${String(PROXY_PORT)}/ws`;
+  return `${wsProto}://${loc.host}${baseRoot}/notebookflow/ws`;
 }
 
 /**

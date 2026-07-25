@@ -18,8 +18,8 @@ def test_server_proxy_config_passes_port_through_environment() -> None:
 
 def test_server_proxy_config_uses_relative_urls() -> None:
     config = server_proxy_config()
-    # absolute_url=False keeps the engine rooted under /proxy/<port>/, which
-    # is what the JL adapter relies on to build the WS URL.
+    # absolute_url=False strips the named /notebookflow/ route before requests
+    # reach the engine.
     assert config["absolute_url"] is False
 
 
@@ -28,3 +28,8 @@ def test_server_proxy_config_disables_launcher_tile_by_default() -> None:
     config = server_proxy_config()
     assert config["launcher_entry"]["enabled"] is False
     assert "NotebookFlow" in config["launcher_entry"]["title"]
+
+
+def test_server_proxy_config_allows_for_a_cold_engine_start() -> None:
+    config = server_proxy_config()
+    assert config["timeout"] == 90
