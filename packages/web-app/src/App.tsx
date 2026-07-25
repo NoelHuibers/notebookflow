@@ -302,14 +302,16 @@ export function App(): ReactElement {
     engineJwt,
   ]);
 
-  // Global shortcuts. Modifier combos fire anywhere; bare keys (m, ?) are
-  // suppressed while typing in an input / textarea / CodeMirror so they don't
-  // hijack editing.
+  // Global shortcuts. Modifier combos fire anywhere; bare keys (Escape, ?, m)
+  // are suppressed while typing in an input / textarea / CodeMirror so they
+  // don't hijack editing. ⌘K is open-only (idempotent) so it never fights a
+  // focused editor — the palette owns closing itself (its Escape
+  // stopPropagation()s, keeping the canvas-Escape branch below out of it).
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       if ((event.metaKey || event.ctrlKey) && (event.key === "k" || event.key === "K")) {
         event.preventDefault();
-        setIsCommandPaletteOpen((open) => !open);
+        setIsCommandPaletteOpen(true);
         return;
       }
       if (event.altKey && (event.key === "a" || event.key === "A")) {
@@ -317,12 +319,16 @@ export function App(): ReactElement {
         setIsSidebarCollapsed((collapsed) => !collapsed);
         return;
       }
+      if (isTypingTarget(event.target)) {
+        return;
+      }
+      // Escape lives below the typing guard: while typing or inside a modal
+      // (e.g. the command palette, which stops propagation), that surface owns
+      // Escape. On the bare canvas it still collapses the sidebar / closes the
+      // shortcuts dialog.
       if (event.key === "Escape") {
         setIsSidebarCollapsed((collapsed) => (collapsed ? collapsed : true));
         setIsShortcutsOpen((open) => (open ? false : open));
-        return;
-      }
-      if (isTypingTarget(event.target)) {
         return;
       }
       if (event.key === "?") {
