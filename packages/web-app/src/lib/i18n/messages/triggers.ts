@@ -11,6 +11,8 @@ export const en = {
   dismiss: "Dismiss",
   loading: "Loading triggers…",
   empty: "No triggers yet. Click 'New trigger' to register one.",
+  signInRequired:
+    "Sign in to create and manage triggers on the hosted engine — or connect your own engine in Settings.",
 
   // Trigger kind labels
   kindManual: "Manual",
@@ -83,6 +85,8 @@ export const de: typeof en = {
   dismiss: "Schließen",
   loading: "Trigger werden geladen…",
   empty: "Noch keine Trigger. Klicke auf „Neuer Trigger“, um einen zu registrieren.",
+  signInRequired:
+    "Melde dich an, um Trigger auf der gehosteten Engine zu erstellen und zu verwalten – oder verbinde in den Einstellungen deine eigene Engine.",
 
   // Trigger kind labels
   kindManual: "Manuell",

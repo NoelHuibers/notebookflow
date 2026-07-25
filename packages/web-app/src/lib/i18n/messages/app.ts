@@ -26,7 +26,6 @@ export const en = {
     downloadWorkspace: "Download workspace (.json)",
     downloadAllZip: "Download all (.zip)",
     reingest: "Re-ingest",
-    editInJupyter: "Edit in JupyterLab",
   },
   panels: {
     showCode: "Show code",
@@ -114,7 +113,6 @@ export const de: typeof en = {
     downloadWorkspace: "Workspace herunterladen (.json)",
     downloadAllZip: "Alle herunterladen (.zip)",
     reingest: "Neu einlesen",
-    editInJupyter: "In JupyterLab bearbeiten",
   },
   panels: {
     showCode: "Code anzeigen",

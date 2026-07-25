@@ -92,6 +92,7 @@ import type {
 } from "@/lib/EngineClient";
 import { DEFAULT_ENGINE_TOKEN, EngineClient, EngineRequestError } from "@/lib/EngineClient";
 import { canRunPipeline, isEngineCredentialsError } from "@/lib/engineAccess";
+import { engineTokenRefreshDelayMs } from "@/lib/engineToken";
 import { formatError } from "@/lib/errors";
 import { pickSaveFileHandle, writeFileHandle } from "@/lib/fileSystemAccess";
 import { useI18n } from "@/lib/i18n";
@@ -251,16 +252,30 @@ export function App(): ReactElement {
       return;
     }
     let cancelled = false;
-    fetch("/api/auth/token", { credentials: "include" })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((body: { token?: string } | null) => {
-        if (!cancelled) setEngineJwt(body?.token ?? "");
-      })
-      .catch(() => {
-        if (!cancelled) setEngineJwt("");
-      });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // BetterAuth mints short-lived (~15 min) JWTs, so re-mint before each one
+    // expires; otherwise every require_auth engine call (Run, triggers, cloud
+    // sync) starts answering 401 once the first token goes stale.
+    async function refresh(): Promise<void> {
+      try {
+        const res = await fetch("/api/auth/token", { credentials: "include" });
+        const body = res.ok ? ((await res.json()) as { token?: string } | null) : null;
+        if (cancelled) return;
+        const token = body?.token ?? "";
+        setEngineJwt(token);
+        const delay = token === "" ? 60_000 : engineTokenRefreshDelayMs(token, Date.now());
+        timer = setTimeout(() => void refresh(), delay);
+      } catch {
+        if (cancelled) return;
+        setEngineJwt("");
+        // Transient failure: retry soon rather than stranding the session token-less.
+        timer = setTimeout(() => void refresh(), 60_000);
+      }
+    }
+    void refresh();
     return () => {
       cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
     };
   }, [session.data]);
 
@@ -1041,6 +1056,14 @@ export function App(): ReactElement {
   }, [composePrompt, t]);
 
   const refreshTriggers = useCallback(async (): Promise<void> => {
+    // Triggers persist server-side and fire pipelines = remote execution, so the
+    // engine requires auth. Skip the call when the visitor can't run (the dialog
+    // shows a sign-in hint instead of surfacing a raw 401).
+    if (!canRun) {
+      setTriggers([]);
+      setTriggersError(null);
+      return;
+    }
     setIsLoadingTriggers(true);
     setTriggersError(null);
     try {
@@ -1052,7 +1075,7 @@ export function App(): ReactElement {
     } finally {
       setIsLoadingTriggers(false);
     }
-  }, [t]);
+  }, [t, canRun]);
 
   useEffect(() => {
     if (!isTriggersOpen) {
@@ -1570,7 +1593,6 @@ export function App(): ReactElement {
           onToggleSettings={() => {
             setIsSettingsOpen((open) => !open);
           }}
-          notebookName={notebook.name}
           onDownloadWorkspace={handleDownloadWorkspace}
           onDownloadAll={() => {
             void handleDownloadAll();
@@ -1692,6 +1714,7 @@ export function App(): ReactElement {
             triggers={triggers}
             errorMessage={triggersError}
             isLoading={isLoadingTriggers}
+            authRequired={!canRun}
             pipeline={pipelineDef}
             onRefresh={() => {
               void refreshTriggers();
