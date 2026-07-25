@@ -100,7 +100,9 @@ export function WelcomeCard({ onTakeTour, onSkip }: WelcomeCardProps): ReactElem
     >
       <div
         ref={cardRef}
-        className="relative w-full max-w-md overflow-hidden rounded-2xl border border-border bg-card/90 p-8 shadow-2xl backdrop-blur-xl"
+        // Welcome is a long-form prose moment: opt into Plex Sans (issue #50) so
+        // the reading copy is legible — it renders inside the mono app shell.
+        className="relative w-full max-w-md overflow-hidden rounded-2xl border border-border bg-card/90 p-8 font-sans shadow-2xl backdrop-blur-xl"
         style={reduced ? undefined : { opacity: 0 }}
       >
         {/* Soft teal wash along the card's top edge */}
