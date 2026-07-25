@@ -43,6 +43,12 @@ interface AppHeaderProps {
   onOpenCompose: () => void;
   onOpenAsk: () => void;
   isRunning: boolean;
+  /**
+   * Whether the Run action is available. False for signed-out visitors
+   * targeting the hosted engine (execution is sign-in gated); the button is
+   * disabled with a localized sign-in hint as its tooltip.
+   */
+  canRun: boolean;
   onRun: () => void;
   onToggleShortcuts: () => void;
   /** Restarts the onboarding tour from the help popover. */
@@ -69,6 +75,7 @@ export function AppHeader({
   onOpenCompose,
   onOpenAsk,
   isRunning,
+  canRun,
   onRun,
   onToggleShortcuts,
   onReplayTour,
@@ -160,10 +167,20 @@ export function AppHeader({
             ⌘K
           </Badge>
         </Button>
-        <Button data-tour="run" variant="default" size="sm" onClick={onRun} disabled={isRunning}>
-          <Play className="mr-1.5 size-3.5" />
-          {isRunning ? t("app.toolbar.running") : t("app.toolbar.runPipeline")}
-        </Button>
+        {/* The disabled button has pointer-events-none, so the sign-in hint
+            tooltip lives on a wrapping span that still receives hover. */}
+        <span title={canRun ? undefined : t("app.toolbar.runSignedOut")} className="inline-flex">
+          <Button
+            data-tour="run"
+            variant="default"
+            size="sm"
+            onClick={onRun}
+            disabled={isRunning || !canRun}
+          >
+            <Play className="mr-1.5 size-3.5" />
+            {isRunning ? t("app.toolbar.running") : t("app.toolbar.runPipeline")}
+          </Button>
+        </span>
         <Button
           variant="ghost"
           size="sm"

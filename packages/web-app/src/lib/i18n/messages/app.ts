@@ -26,6 +26,7 @@ export const en = {
     askAiTitle: "Ask AI anything about your pipeline (Cmd/Ctrl+K)",
     running: "Running…",
     runPipeline: "Run pipeline",
+    runSignedOut: "Sign in to run on the hosted engine — or connect your own engine in Settings.",
     shortcuts: "Keyboard shortcuts",
     shortcutsTitle: "Keyboard shortcuts (?)",
     settings: "Settings",
@@ -89,6 +90,7 @@ export const en = {
     workspaceNoNotebooks: "NotebookFlow workspace has no notebooks",
     cloudRequestFailed: "Cloud request failed ({{status}})",
     downloadFailed: "Could not export the workspace: {{message}}",
+    aiNeedsKey: "Add your API key in Settings (or sign in) to use AI features.",
   },
   engine: {
     label: "engine",
@@ -120,6 +122,8 @@ export const de: typeof en = {
     askAiTitle: "Frag die KI alles über deine Pipeline (Cmd/Ctrl+K)",
     running: "Wird ausgeführt…",
     runPipeline: "Pipeline ausführen",
+    runSignedOut:
+      "Melde dich an, um auf der gehosteten Engine auszuführen — oder verbinde deine eigene Engine in den Einstellungen.",
     shortcuts: "Tastenkürzel",
     shortcutsTitle: "Tastenkürzel (?)",
     settings: "Einstellungen",
@@ -183,6 +187,8 @@ export const de: typeof en = {
     workspaceNoNotebooks: "NotebookFlow-Workspace enthält keine Notebooks",
     cloudRequestFailed: "Cloud-Anfrage fehlgeschlagen ({{status}})",
     downloadFailed: "Workspace konnte nicht exportiert werden: {{message}}",
+    aiNeedsKey:
+      "Hinterlege deinen API-Schlüssel in den Einstellungen (oder melde dich an), um KI-Funktionen zu nutzen.",
   },
   engine: {
     label: "engine",

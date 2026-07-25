@@ -23,6 +23,7 @@ import shutil
 import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -111,6 +112,42 @@ def require_auth(request: Request) -> AuthPrincipal:
         return authenticate(presented)
     except AuthError as exc:
         raise HTTPException(status_code=401, detail=exc.detail) from exc
+
+
+@dataclass(frozen=True)
+class OptionalPrincipal:
+    """The caller of an endpoint that also serves signed-out visitors.
+
+    ``authenticated`` is True when auth is off entirely (self-host / open
+    deploys are fully trusted, preserving their historical behaviour) or when
+    the request presented a valid credential. ``user_id`` mirrors
+    :class:`AuthPrincipal` -- the JWT ``sub`` for a hosted user, ``None`` for
+    static-token / open access.
+    """
+
+    authenticated: bool
+    user_id: str | None = None
+
+
+def optional_auth(request: Request) -> OptionalPrincipal:
+    """FastAPI dependency: like :func:`require_auth`, but a missing or invalid
+    credential yields an anonymous marker instead of a 401.
+
+    Used by the endpoints the hosted product exposes to signed-out visitors
+    (node palette, cell analysis, BYOK LLM features). Endpoints that gate work
+    on the caller's key decide what anonymity means; the rate limiter keys
+    anonymous requests by client IP independently (see ``request_identity``).
+    """
+    if not auth_configured():
+        return OptionalPrincipal(authenticated=True, user_id=None)
+    header = request.headers.get("Authorization", "")
+    if not header.startswith("Bearer "):
+        return OptionalPrincipal(authenticated=False)
+    try:
+        principal = authenticate(header.removeprefix("Bearer ").strip())
+    except AuthError:
+        return OptionalPrincipal(authenticated=False)
+    return OptionalPrincipal(authenticated=True, user_id=principal.user_id)
 
 
 class _APIModel(BaseModel):
@@ -390,6 +427,29 @@ def _resolve_creds(credentials: CredentialsModel | None) -> CredentialContext | 
     return resolve_credentials(credentials.provider, credentials.model, credentials.api_key)
 
 
+def _llm_credentials(
+    credentials: CredentialsModel | None, principal: OptionalPrincipal
+) -> CredentialContext | None:
+    """Resolve LLM credentials according to the caller's auth state.
+
+    Authenticated callers -- and every caller on an open self-host deploy --
+    keep the exact historical resolution: per-request key, else env key, else
+    None (template backend). Anonymous callers on an auth-configured deploy
+    must bring their own key (401 otherwise) and never inherit the host's env
+    keys, so signed-out traffic can't spend the hosted deploy's LLM budget.
+    """
+    if principal.authenticated:
+        return _resolve_creds(credentials)
+    if credentials is None or credentials.api_key.strip() == "":
+        raise HTTPException(status_code=401, detail="credentials required when not signed in")
+    return resolve_credentials(
+        credentials.provider,
+        credentials.model,
+        credentials.api_key,
+        allow_env_fallback=False,
+    )
+
+
 def _base_data_dir(app_ref: FastAPI) -> Path:
     """Root uploads directory. Per-tenant stores are subdirectories of this;
     self-host / unauthenticated use reads and writes it directly. Configurable
@@ -625,17 +685,23 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/nodes", dependencies=[Depends(require_auth)])
+@app.get("/nodes", dependencies=[Depends(optional_auth)])
 async def list_nodes() -> list[dict[str, object]]:
+    """Registered node manifests. Public: the hosted product shows the palette
+    to signed-out visitors, and manifests contain nothing sensitive."""
     return [m.model_dump(mode="json", by_alias=True) for m in _registry(app).all()]
 
 
 @app.post(
     "/nodes/synthesize",
     response_model=SynthesizeNodeResponse,
-    dependencies=[Depends(require_auth), Depends(rate_limited("nodes-synthesize", 10, 60))],
+    dependencies=[Depends(rate_limited("nodes-synthesize", 10, 60))],
 )
-async def synthesize_node(request: SynthesizeNodeRequest) -> SynthesizeNodeResponse:
+async def synthesize_node(
+    request: SynthesizeNodeRequest,
+    principal: Annotated[OptionalPrincipal, Depends(optional_auth)],
+) -> SynthesizeNodeResponse:
+    credentials = _llm_credentials(request.credentials, principal)
     registry = _registry(app)
     try:
         manifest = registry.get(request.manifest_id)
@@ -652,7 +718,7 @@ async def synthesize_node(request: SynthesizeNodeRequest) -> SynthesizeNodeRespo
         outputs=request.outputs,
         config=request.config,
         current_source=request.current_source,
-        credentials=_resolve_creds(request.credentials),
+        credentials=credentials,
     )
     return SynthesizeNodeResponse(
         source=result.source,
@@ -664,7 +730,7 @@ async def synthesize_node(request: SynthesizeNodeRequest) -> SynthesizeNodeRespo
 @app.post(
     "/cells/analyze",
     response_model=AnalyzeResponse,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(optional_auth)],
 )
 async def analyze_cells(request: AnalyzeRequest) -> AnalyzeResponse:
     """Static analysis used by the canvas to autocomplete port variable names.
@@ -672,6 +738,9 @@ async def analyze_cells(request: AnalyzeRequest) -> AnalyzeResponse:
     Returns, per cell, the names bound at module top level. Cells with syntax
     errors yield an empty list plus the error message rather than failing the
     whole request, so the canvas keeps working while the user is mid-edit.
+
+    Public: signed-out visitors get autocomplete too. Safe because analysis is
+    pure ``ast.parse`` -- the source is never executed.
     """
     return AnalyzeResponse(cells=[_analyze_cell(cell.source) for cell in request.cells])
 
@@ -774,21 +843,26 @@ async def run_pipeline(
 @app.post(
     "/pipelines/explain",
     response_model=ExplainPipelineResponse,
-    dependencies=[Depends(require_auth), Depends(rate_limited("pipelines-explain", 10, 60))],
+    dependencies=[Depends(rate_limited("pipelines-explain", 10, 60))],
 )
-async def explain_pipeline(request: ExplainPipelineRequest) -> ExplainPipelineResponse:
+async def explain_pipeline(
+    request: ExplainPipelineRequest,
+    principal: Annotated[OptionalPrincipal, Depends(optional_auth)],
+) -> ExplainPipelineResponse:
     """Return a literate prose walkthrough of the pipeline.
 
     Runs through the LLMClient gateway with the per-request provider/key
     (bring-your-own-key) or a self-host env key; falls back to a deterministic
     template outline otherwise so the canvas sidebar always has something.
+    Anonymous hosted callers must bring their own key (401 otherwise).
     """
+    credentials = _llm_credentials(request.credentials, principal)
     try:
         dag = _build_dag(request.pipeline)
         result = await _explainer(app).explain(
             dag,
             instruction=request.instruction,
-            credentials=_resolve_creds(request.credentials),
+            credentials=credentials,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -803,9 +877,12 @@ async def explain_pipeline(request: ExplainPipelineRequest) -> ExplainPipelineRe
 @app.post(
     "/pipelines/propose",
     response_model=ProposePipelineResponse,
-    dependencies=[Depends(require_auth), Depends(rate_limited("pipelines-propose", 10, 60))],
+    dependencies=[Depends(rate_limited("pipelines-propose", 10, 60))],
 )
-async def propose_pipeline(request: ProposePipelineRequest) -> ProposePipelineResponse:
+async def propose_pipeline(
+    request: ProposePipelineRequest,
+    principal: Annotated[OptionalPrincipal, Depends(optional_auth)],
+) -> ProposePipelineResponse:
     """Draft a new pipeline from a natural-language prompt.
 
     Runs through the LLMClient gateway with the per-request provider/key
@@ -813,7 +890,9 @@ async def propose_pipeline(request: ProposePipelineRequest) -> ProposePipelineRe
     template draft otherwise, so the canvas always gets something usable. The
     response is everything the web-app needs to swap the current notebook
     contents with the draft (cell_sources) or render a preview (nodes + edges).
+    Anonymous hosted callers must bring their own key (401 otherwise).
     """
+    credentials = _llm_credentials(request.credentials, principal)
     if request.prompt.strip() == "":
         raise HTTPException(
             status_code=400,
@@ -822,7 +901,7 @@ async def propose_pipeline(request: ProposePipelineRequest) -> ProposePipelineRe
     draft = await _pipeline_author(app).propose(
         request.prompt,
         notebook_path=request.notebook_path,
-        credentials=_resolve_creds(request.credentials),
+        credentials=credentials,
     )
     return ProposePipelineResponse(
         notebook_path=draft.notebook_path,
@@ -932,15 +1011,20 @@ async def list_firings(trigger_id: str) -> list[dict[str, Any]]:
 @app.post(
     "/llm/ask",
     response_model=AskResponse,
-    dependencies=[Depends(require_auth), Depends(rate_limited("llm-ask", 10, 60))],
+    dependencies=[Depends(rate_limited("llm-ask", 10, 60))],
 )
-async def ask_llm(request: AskRequest) -> AskResponse:
+async def ask_llm(
+    request: AskRequest,
+    principal: Annotated[OptionalPrincipal, Depends(optional_auth)],
+) -> AskResponse:
     """Free-form Q&A backing the web-app's Cmd/Ctrl+K command palette.
 
     Runs through the LLMClient gateway using the per-request provider/key
     (bring-your-own-key), or a self-host env key, and otherwise falls back to
-    a keyword-driven template hint.
+    a keyword-driven template hint. Anonymous hosted callers must bring their
+    own key (401 otherwise).
     """
+    credentials = _llm_credentials(request.credentials, principal)
     if request.prompt.strip() == "":
         raise HTTPException(status_code=400, detail="prompt must not be empty")
     dag: DAG | None = None
@@ -952,7 +1036,7 @@ async def ask_llm(request: AskRequest) -> AskResponse:
     result = await _ask(app).ask(
         request.prompt,
         dag=dag,
-        credentials=_resolve_creds(request.credentials),
+        credentials=credentials,
     )
     return AskResponse(answer=result.answer, backend=result.backend, warnings=result.warnings)
 

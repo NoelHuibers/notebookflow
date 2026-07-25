@@ -68,3 +68,21 @@ def test_generic_env_key_with_provider(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_nothing_configured_returns_none() -> None:
     assert resolve_credentials() is None
     assert resolve_credentials(provider="openai", model="gpt-4o", api_key="   ") is None
+
+
+def test_env_fallback_disabled_ignores_env_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Anonymous hosted callers must never inherit the host's env keys."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-env")
+    monkeypatch.setenv("NOTEBOOKFLOW_LLM_API_KEY", "sk-generic-env")
+    assert resolve_credentials(allow_env_fallback=False) is None
+
+
+def test_env_fallback_disabled_still_honours_request_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-env")
+    creds = resolve_credentials(
+        provider="openai", model="gpt-4o", api_key="sk-user", allow_env_fallback=False
+    )
+    assert creds is not None
+    assert (creds.provider, creds.api_key) == ("openai", "sk-user")

@@ -96,7 +96,8 @@ import type {
   PipelineProposal,
   TriggerSpec,
 } from "@/lib/EngineClient";
-import { EngineClient, EngineRequestError } from "@/lib/EngineClient";
+import { DEFAULT_ENGINE_TOKEN, EngineClient, EngineRequestError } from "@/lib/EngineClient";
+import { canRunPipeline, isEngineCredentialsError } from "@/lib/engineAccess";
 import { formatError } from "@/lib/errors";
 import { pickSaveFileHandle, writeFileHandle } from "@/lib/fileSystemAccess";
 import { useI18n } from "@/lib/i18n";
@@ -210,12 +211,14 @@ export function App(): ReactElement {
   const [isConfigSubmitting, setIsConfigSubmitting] = useState(false);
   const [paletteNodes, setPaletteNodes] = useState<NodeManifestDef[]>([]);
   const [paletteError, setPaletteError] = useState<string | null>(null);
-  // Latched when the engine answers 401 to a token-less request — the hosted
-  // engine requires a session JWT. While set, the palette shows a sign-in hint
-  // (when signed out) and cell analysis pauses so we don't emit a 401 per
-  // keystroke. Cleared once the node registry loads (after sign-in or an
-  // engine-URL change). Self-host engines with auth disabled never 401, so
-  // this never engages there.
+  // Latched when the engine answers 401 to a token-less /nodes request.
+  // Current engines serve the registry and cell analysis to signed-out
+  // visitors, so on the hosted product this stays off; it only engages
+  // against OLD engines that still gate /nodes behind auth. While set, the
+  // palette shows a sign-in hint (when signed out) and cell analysis pauses
+  // so we don't emit a 401 per keystroke. Cleared once the node registry
+  // loads (after sign-in or an engine-URL change). Self-host engines with
+  // auth disabled never 401, so this never engages there.
   const [engineAuthRequired, setEngineAuthRequired] = useState(false);
   const [paletteSearch, setPaletteSearch] = useState("");
   const [paletteTagFilter, setPaletteTagFilter] = useState<Set<NodeManifestDef["tag"]>>(
@@ -272,6 +275,16 @@ export function App(): ReactElement {
       cancelled = true;
     };
   }, [session.data]);
+
+  // Hosted-engine run gating: signed-out visitors get the palette,
+  // autocomplete, and BYOK AI, but execution needs the session JWT (it is
+  // exec() on a shared box). A custom engine URL (bring-your-own engine) or a
+  // static self-host token keeps Run available while signed out.
+  const canRun = canRunPipeline(
+    signedIn,
+    settings.engineUrlOverride !== "",
+    DEFAULT_ENGINE_TOKEN !== "",
+  );
 
   // Rebuild the EngineClient when the engine URL changes, and (re)apply the
   // bring-your-own-key credentials whenever the LLM settings change, plus the
@@ -850,9 +863,10 @@ export function App(): ReactElement {
   useEffect(() => {
     let cancelled = false;
     const sources = notebook.cells.map((cell) => cell.source);
-    // The engine already rejected us with 401: every analyze request would
-    // 401 too — one per keystroke. Hold off until sign-in or an engine change
-    // clears the latch (via the registry effect below).
+    // Old-engine fallback: /cells/analyze is public on current engines, but a
+    // pre-#anonymous-surface engine that 401'd /nodes would 401 every analyze
+    // request too — one per keystroke. Hold off until sign-in or an engine
+    // change clears the latch (via the registry effect below).
     if (engineAuthRequired) {
       setDefinedByCell(sources.map(() => []));
       return;
@@ -889,12 +903,13 @@ export function App(): ReactElement {
         if (cancelled) {
           return;
         }
-        // A 401 on a request without a session JWT isn't a fault to surface
-        // raw: the hosted engine simply requires sign-in. Signed out, the
-        // palette shows a sign-in hint; signed in with the JWT still minting,
-        // the effect re-runs as soon as it lands. A 401 *with* a JWT (token
-        // rejected) still surfaces as a real error, and self-host engines
-        // with auth disabled never 401 at all.
+        // Current engines serve /nodes to signed-out visitors, so this is
+        // the old-engine fallback: a 401 on a request without a session JWT
+        // isn't a fault to surface raw — that engine simply requires sign-in.
+        // Signed out, the palette shows a sign-in hint; signed in with the
+        // JWT still minting, the effect re-runs as soon as it lands. A 401
+        // *with* a JWT (token rejected) still surfaces as a real error, and
+        // self-host engines with auth disabled never 401 at all.
         if (
           err instanceof EngineRequestError &&
           err.status === 401 &&
@@ -993,6 +1008,12 @@ export function App(): ReactElement {
       const result = await clientRef.current.explainPipeline(pipelineDef);
       setExplanation(result);
     } catch (err: unknown) {
+      // Signed out with no key in Settings: the engine's 401 means "bring a
+      // key or sign in", not a fault — show the friendly hint.
+      if (isEngineCredentialsError(err)) {
+        setError(t("app.errors.aiNeedsKey"));
+        return;
+      }
       const message = formatError(t, err);
       setError(t("app.errors.explainPipeline", { message }));
     } finally {
@@ -1011,6 +1032,10 @@ export function App(): ReactElement {
       const result = await clientRef.current.proposePipeline(composePrompt.trim());
       setComposeResult(result);
     } catch (err: unknown) {
+      if (isEngineCredentialsError(err)) {
+        setComposeError(t("app.errors.aiNeedsKey"));
+        return;
+      }
       const message = formatError(t, err);
       setComposeError(t("app.errors.composePipeline", { message }));
     } finally {
@@ -1054,6 +1079,10 @@ export function App(): ReactElement {
       const result = await clientRef.current.askLLM(askPrompt.trim(), pipeline);
       setAskResult(result);
     } catch (err: unknown) {
+      if (isEngineCredentialsError(err)) {
+        setAskError(t("app.errors.aiNeedsKey"));
+        return;
+      }
       const message = formatError(t, err);
       setAskError(t("app.errors.reachEngine", { message }));
     } finally {
@@ -1229,6 +1258,10 @@ export function App(): ReactElement {
         setConfigStatus(buildGenerationStatus(readNotebookflowMetadata(metadata)));
       })
       .catch((err: unknown) => {
+        if (isEngineCredentialsError(err)) {
+          setConfigError(t("app.errors.aiNeedsKey"));
+          return;
+        }
         const message = formatError(t, err);
         setConfigError(t("app.errors.updateNode", { name: selected.name, message }));
       })
@@ -1239,6 +1272,12 @@ export function App(): ReactElement {
 
   const handleRun = useCallback((): void => {
     if (isRunning) {
+      return;
+    }
+    // The header button is disabled while blocked, but keyboard / programmatic
+    // paths land here too — surface the same sign-in hint where run errors go.
+    if (!canRun) {
+      setError(t("app.toolbar.runSignedOut"));
       return;
     }
     setEvents([]);
@@ -1325,7 +1364,15 @@ export function App(): ReactElement {
         setStreamingCellIndex(null);
         setStreamingNotebookPath(null);
       });
-  }, [isRunning, clearOutputsForOpenFiles, pipelineDef, graph, updateOutputsForNotebookPath, t]);
+  }, [
+    isRunning,
+    canRun,
+    clearOutputsForOpenFiles,
+    pipelineDef,
+    graph,
+    updateOutputsForNotebookPath,
+    t,
+  ]);
 
   // Workspace export: collect the full workspace document and the two
   // download handlers. The cloud save below reuses collectWorkspaceDocument.
@@ -1516,6 +1563,7 @@ export function App(): ReactElement {
             setIsAskOpen(true);
           }}
           isRunning={isRunning}
+          canRun={canRun}
           onRun={handleRun}
           onToggleShortcuts={() => {
             setIsShortcutsOpen((open) => !open);

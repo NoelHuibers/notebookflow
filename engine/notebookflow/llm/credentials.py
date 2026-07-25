@@ -44,13 +44,23 @@ def resolve_credentials(
     provider: str = "",
     model: str = "",
     api_key: str = "",
+    allow_env_fallback: bool = True,
 ) -> CredentialContext | None:
     """Per-request credentials win; otherwise fall back to a self-host env key.
-    Returns None when nothing is configured (caller uses its template backend)."""
+    Returns None when nothing is configured (caller uses its template backend).
+
+    ``allow_env_fallback=False`` skips step 2 entirely: anonymous callers on an
+    auth-configured deploy must bring their own key and must never inherit the
+    host's env keys (the hosted product would otherwise foot the bill for
+    unauthenticated traffic). Authenticated and self-host callers keep the
+    default fallback.
+    """
     if api_key.strip() != "":
         prov = (provider.strip() or _DEFAULT_PROVIDER).lower()
         chosen = model.strip() or default_model_for(prov)
         return CredentialContext(prov, chosen, api_key.strip())
+    if not allow_env_fallback:
+        return None
     return _env_credentials()
 
 
