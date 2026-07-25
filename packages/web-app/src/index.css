@@ -69,6 +69,12 @@
 }
 
 @theme inline {
+  /* Plex family (issue #50). Tailwind's `font-mono`/`font-sans` utilities resolve
+     here, so existing font-mono usages (cells, code, badges) become Plex Mono and
+     prose containers opting into font-sans become Plex Sans. Fonts are self-hosted
+     via @fontsource imports in __root.tsx (CSP-safe, no CDN). */
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -104,7 +110,10 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    /* Default document face is Plex Sans for long-form legibility (landing, legal,
+       onboarding prose). The app editor shell opts into font-mono for its tool
+       identity — see App.tsx root container. */
+    @apply bg-background text-foreground font-sans;
   }
 }
 
@@ -115,7 +124,7 @@
   border: 1px solid var(--border);
   background: color-mix(in oklch, var(--muted) 70%, var(--card));
   padding: 0.05rem 0.35rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 0.85em;
   color: color-mix(in oklch, var(--primary) 85%, var(--foreground));
 }
