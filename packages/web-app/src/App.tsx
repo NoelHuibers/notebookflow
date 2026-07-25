@@ -13,6 +13,7 @@
 import type { CommandPaletteLabels, ExplanationPanelLabels } from "@notebookflow/app-core";
 import {
   buildGenerationStatus,
+  buildNodeAuthorContext,
   buildPipelineDef,
   CommandPalette,
   defaultCommandPaletteLabels,
@@ -26,6 +27,7 @@ import type {
   CanvasLabels,
   GraphModel,
   NodeManifestDef,
+  NodeTag,
   RunSummary,
   RuntimeState,
   WireModel,
@@ -226,6 +228,13 @@ export function App(): ReactElement {
   const [isAsking, setIsAsking] = useState(false);
   const [askResult, setAskResult] = useState<AskAnswer | null>(null);
   const [askError, setAskError] = useState<string | null>(null);
+  // Create-node command (#19): one-shot author + auto-place. `backend` is the
+  // provider that authored the last placed node (null before one is placed).
+  const [createNodePrompt, setCreateNodePrompt] = useState("");
+  const [isCreatingNode, setIsCreatingNode] = useState(false);
+  const [createNodeError, setCreateNodeError] = useState<string | null>(null);
+  const [createNodeBackend, setCreateNodeBackend] = useState<string | null>(null);
+  const [createNodeWarnings, setCreateNodeWarnings] = useState<string[]>([]);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [isTriggersOpen, setIsTriggersOpen] = useState(false);
   // Server-side encrypted provider key (#61): "saved" once one exists in the account.
@@ -1087,6 +1096,58 @@ export function App(): ReactElement {
     }
   }, [askPrompt, pipelineDef, t]);
 
+  // Create-node command (#19): describe one node in plain English, the engine
+  // authors a structured NodeDraft, and we auto-place it on the active notebook.
+  // draft.inputs are contract-binding strings (`local<-Node.port`) written into
+  // the new node's `in=` marker, so SyncEngine.recomputeAllWires resolves them
+  // to wires against the upstream nodes we passed as context.
+  const handleAuthorNode = useCallback(async (): Promise<void> => {
+    const description = createNodePrompt.trim();
+    if (description === "") {
+      setCreateNodeError(t("app.errors.createNodeEmpty"));
+      return;
+    }
+    const engine = engineRef.current;
+    if (engine === null) {
+      setCreateNodeError(t("app.errors.addNode", { message: "" }));
+      return;
+    }
+    setIsCreatingNode(true);
+    setCreateNodeError(null);
+    setCreateNodeBackend(null);
+    setCreateNodeWarnings([]);
+    try {
+      const context = buildNodeAuthorContext(graph, notebook.name);
+      const draft = await clientRef.current.authorNode(description, context);
+      await engine.createNode(
+        notebook.name,
+        {
+          name: draft.name,
+          tag: draft.tag as NodeTag,
+          inputs: draft.inputs,
+          outputs: draft.outputs,
+          bodySource: draft.body,
+          metadata: writeNotebookflowMetadata(undefined, {
+            lastGeneratedAt: new Date().toISOString(),
+            lastGenerationBackend: draft.backend,
+          }),
+        },
+        Date.now(),
+      );
+      setCreateNodeBackend(draft.backend);
+      setCreateNodeWarnings(draft.warnings);
+    } catch (err: unknown) {
+      if (isEngineCredentialsError(err)) {
+        setCreateNodeError(t("app.errors.aiNeedsKey"));
+        return;
+      }
+      const message = formatError(t, err);
+      setCreateNodeError(t("app.errors.createNode", { message }));
+    } finally {
+      setIsCreatingNode(false);
+    }
+  }, [createNodePrompt, graph, notebook.name, t]);
+
   const handleApplyProposal = useCallback((): void => {
     if (composeResult === null || composeResult.cellSources.length === 0) {
       return;
@@ -1661,6 +1722,22 @@ export function App(): ReactElement {
                 void handleAsk();
               },
             }}
+            createNode={{
+              prompt: createNodePrompt,
+              isCreating: isCreatingNode,
+              errorMessage: createNodeError,
+              backend: createNodeBackend,
+              warnings: createNodeWarnings,
+              onPromptChange: (next) => {
+                setCreateNodePrompt(next);
+                // A fresh description clears the previous placement confirmation.
+                setCreateNodeBackend(null);
+                setCreateNodeWarnings([]);
+              },
+              onSubmit: () => {
+                void handleAuthorNode();
+              },
+            }}
             compose={{
               prompt: composePrompt,
               isComposing,
@@ -1682,6 +1759,9 @@ export function App(): ReactElement {
               setIsCommandPaletteOpen(false);
               setComposeResult(null);
               setComposeError(null);
+              setCreateNodeError(null);
+              setCreateNodeBackend(null);
+              setCreateNodeWarnings([]);
             }}
           />
         )}

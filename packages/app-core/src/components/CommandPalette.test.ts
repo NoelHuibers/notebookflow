@@ -12,16 +12,14 @@ import {
 const commands: CommandDescriptor[] = buildCommands(defaultCommandPaletteLabels);
 
 describe("buildCommands", () => {
-  it("lists the four AI commands with Create node disabled (Part A placeholder)", () => {
+  it("lists the four AI commands, all enabled", () => {
     expect(commands.map((command) => command.id)).toEqual([
       "ask",
       "createNode",
       "compose",
       "explain",
     ]);
-    expect(commands.filter((command) => command.disabled).map((command) => command.id)).toEqual([
-      "createNode",
-    ]);
+    expect(commands.filter((command) => command.disabled)).toEqual([]);
   });
 });
 
@@ -47,9 +45,17 @@ describe("filterCommands", () => {
 });
 
 describe("nextSelectableIndex", () => {
-  it("skips the disabled Create node row when stepping down", () => {
+  it("steps to the next enabled row", () => {
+    // ask(0) -> createNode(1)
+    expect(nextSelectableIndex(commands, 0, 1)).toBe(1);
+  });
+
+  it("skips a disabled row when stepping down", () => {
+    const withDisabled: CommandDescriptor[] = commands.map((command) =>
+      command.id === "createNode" ? { ...command, disabled: true } : command,
+    );
     // ask(0) -> createNode(1, disabled) -> compose(2)
-    expect(nextSelectableIndex(commands, 0, 1)).toBe(2);
+    expect(nextSelectableIndex(withDisabled, 0, 1)).toBe(2);
   });
 
   it("wraps around the ends", () => {
