@@ -10,18 +10,12 @@
  * - Click Download to save the patched `.ipynb` or the full workspace back to disk.
  */
 
-import type {
-  AskPaletteLabels,
-  ComposeDialogLabels,
-  ExplanationPanelLabels,
-} from "@notebookflow/app-core";
+import type { CommandPaletteLabels, ExplanationPanelLabels } from "@notebookflow/app-core";
 import {
-  AskPalette,
   buildGenerationStatus,
   buildPipelineDef,
-  ComposeDialog,
-  defaultAskPaletteLabels,
-  defaultComposeDialogLabels,
+  CommandPalette,
+  defaultCommandPaletteLabels,
   defaultExplanationPanelLabels,
   ExplanationPanel,
   extractSourceFilename,
@@ -132,20 +126,13 @@ export function App(): ReactElement {
     }
     return out;
   }, [t]);
-  // Same pattern for the shared AI dialogs (components live in app-core; the
-  // `ask` / `compose` / `explanation` catalogs here stay the translation
-  // source and mirror the label keys 1:1).
-  const askLabels = useMemo<AskPaletteLabels>(() => {
-    const out = {} as AskPaletteLabels;
-    for (const key of Object.keys(defaultAskPaletteLabels) as (keyof AskPaletteLabels)[]) {
-      out[key] = t(`ask.${key}`);
-    }
-    return out;
-  }, [t]);
-  const composeLabels = useMemo<ComposeDialogLabels>(() => {
-    const out = {} as ComposeDialogLabels;
-    for (const key of Object.keys(defaultComposeDialogLabels) as (keyof ComposeDialogLabels)[]) {
-      out[key] = t(`compose.${key}`);
+  // Same pattern for the shared AI surface (components live in app-core; the
+  // `command` / `explanation` catalogs here stay the translation source and
+  // mirror the label keys 1:1).
+  const commandLabels = useMemo<CommandPaletteLabels>(() => {
+    const out = {} as CommandPaletteLabels;
+    for (const key of Object.keys(defaultCommandPaletteLabels) as (keyof CommandPaletteLabels)[]) {
+      out[key] = t(`command.${key}`);
     }
     return out;
   }, [t]);
@@ -228,12 +215,13 @@ export function App(): ReactElement {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [explanation, setExplanation] = useState<PipelineExplanation | null>(null);
   const [isExplaining, setIsExplaining] = useState(false);
-  const [isComposeOpen, setIsComposeOpen] = useState(false);
+  // One ⌘K command palette replaces the separate Ask / Compose opens; each
+  // command keeps its own prompt / busy / result / error state below.
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [composePrompt, setComposePrompt] = useState("");
   const [isComposing, setIsComposing] = useState(false);
   const [composeResult, setComposeResult] = useState<PipelineProposal | null>(null);
   const [composeError, setComposeError] = useState<string | null>(null);
-  const [isAskOpen, setIsAskOpen] = useState(false);
   const [askPrompt, setAskPrompt] = useState("");
   const [isAsking, setIsAsking] = useState(false);
   const [askResult, setAskResult] = useState<AskAnswer | null>(null);
@@ -314,14 +302,16 @@ export function App(): ReactElement {
     engineJwt,
   ]);
 
-  // Global shortcuts. Modifier combos fire anywhere; bare keys (m, ?) are
-  // suppressed while typing in an input / textarea / CodeMirror so they don't
-  // hijack editing.
+  // Global shortcuts. Modifier combos fire anywhere; bare keys (Escape, ?, m)
+  // are suppressed while typing in an input / textarea / CodeMirror so they
+  // don't hijack editing. ⌘K is open-only (idempotent) so it never fights a
+  // focused editor — the palette owns closing itself (its Escape
+  // stopPropagation()s, keeping the canvas-Escape branch below out of it).
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       if ((event.metaKey || event.ctrlKey) && (event.key === "k" || event.key === "K")) {
         event.preventDefault();
-        setIsAskOpen((open) => !open);
+        setIsCommandPaletteOpen(true);
         return;
       }
       if (event.altKey && (event.key === "a" || event.key === "A")) {
@@ -329,12 +319,16 @@ export function App(): ReactElement {
         setIsSidebarCollapsed((collapsed) => !collapsed);
         return;
       }
+      if (isTypingTarget(event.target)) {
+        return;
+      }
+      // Escape lives below the typing guard: while typing or inside a modal
+      // (e.g. the command palette, which stops propagation), that surface owns
+      // Escape. On the bare canvas it still collapses the sidebar / closes the
+      // shortcuts dialog.
       if (event.key === "Escape") {
         setIsSidebarCollapsed((collapsed) => (collapsed ? collapsed : true));
         setIsShortcutsOpen((open) => (open ? false : open));
-        return;
-      }
-      if (isTypingTarget(event.target)) {
         return;
       }
       if (event.key === "?") {
@@ -1126,7 +1120,7 @@ export function App(): ReactElement {
     setExplanation(null);
     fileHandleRef.current = null;
     setSaveStatus("idle");
-    setIsComposeOpen(false);
+    setIsCommandPaletteOpen(false);
     setComposeResult(null);
     setComposePrompt("");
     setComposeError(null);
@@ -1563,20 +1557,13 @@ export function App(): ReactElement {
           onOpenTriggers={() => {
             setIsTriggersOpen(true);
           }}
-          isExplaining={isExplaining}
-          onExplain={() => {
-            void handleExplain();
-          }}
-          onOpenCompose={() => {
-            setIsComposeOpen(true);
-          }}
-          onOpenAsk={() => {
-            setIsAskOpen(true);
+          onOpenCommandPalette={() => {
+            setIsCommandPaletteOpen(true);
           }}
           isRunning={isRunning}
           canRun={canRun}
           onRun={handleRun}
-          onToggleShortcuts={() => {
+          onOpenShortcuts={() => {
             setIsShortcutsOpen((open) => !open);
           }}
           onReplayTour={handleReplayTour}
@@ -1661,39 +1648,40 @@ export function App(): ReactElement {
           />
         )}
 
-        {isComposeOpen && (
-          <ComposeDialog
-            prompt={composePrompt}
-            labels={composeLabels}
-            isComposing={isComposing}
-            result={composeResult}
-            errorMessage={composeError}
-            onPromptChange={setComposePrompt}
-            onSubmit={() => {
-              void handleCompose();
+        {isCommandPaletteOpen && (
+          <CommandPalette
+            labels={commandLabels}
+            ask={{
+              prompt: askPrompt,
+              isAsking,
+              result: askResult,
+              errorMessage: askError,
+              onPromptChange: setAskPrompt,
+              onSubmit: () => {
+                void handleAsk();
+              },
             }}
-            onApply={handleApplyProposal}
+            compose={{
+              prompt: composePrompt,
+              isComposing,
+              result: composeResult,
+              errorMessage: composeError,
+              onPromptChange: setComposePrompt,
+              onSubmit: () => {
+                void handleCompose();
+              },
+              onApply: handleApplyProposal,
+            }}
+            explain={{
+              isExplaining,
+              onExplain: () => {
+                void handleExplain();
+              },
+            }}
             onClose={() => {
-              setIsComposeOpen(false);
+              setIsCommandPaletteOpen(false);
               setComposeResult(null);
               setComposeError(null);
-            }}
-          />
-        )}
-
-        {isAskOpen && (
-          <AskPalette
-            prompt={askPrompt}
-            labels={askLabels}
-            isAsking={isAsking}
-            result={askResult}
-            errorMessage={askError}
-            onPromptChange={setAskPrompt}
-            onSubmit={() => {
-              void handleAsk();
-            }}
-            onClose={() => {
-              setIsAskOpen(false);
             }}
           />
         )}
