@@ -30,6 +30,21 @@ export {
   defaultCellOutputsLabels,
 } from "./components/CellOutputs";
 export {
+  buildCommands,
+  type CommandDescriptor,
+  type CommandId,
+  CommandPalette,
+  type CommandPaletteAsk,
+  type CommandPaletteCompose,
+  type CommandPaletteExplain,
+  type CommandPaletteLabels,
+  type CommandPaletteProps,
+  defaultCommandPaletteLabels,
+  filterCommands,
+  firstSelectableIndex,
+  nextSelectableIndex,
+} from "./components/CommandPalette";
+export {
   ComposeDialog,
   type ComposeDialogLabels,
   type ComposeDialogProps,
