@@ -796,8 +796,8 @@ function buildNodes(
     }
 
     const manualPosition = manualGroupPositions.get(group.id);
-    const groupX = manualPosition?.x ?? (horizontalCells ? 0 : nextGroupX);
-    const groupY = manualPosition?.y ?? (horizontalCells ? nextGroupY : GROUP_Y);
+    const groupX = manualPosition?.x ?? (horizontalCells ? nextGroupX : 0);
+    const groupY = manualPosition?.y ?? (horizontalCells ? GROUP_Y : nextGroupY);
     const groupData: NodeGroupData = {
       ...group,
       ...(activeGroupId === undefined ? {} : { active: activeGroupId === group.id }),
@@ -884,10 +884,12 @@ function buildNodes(
       },
     });
 
-    if (horizontalCells) {
-      nextGroupY += groupHeight + COLUMN_GAP;
-    } else {
-      nextGroupX += groupWidth + COLUMN_GAP;
+    if (manualPosition === undefined) {
+      if (horizontalCells) {
+        nextGroupX += groupWidth + COLUMN_GAP;
+      } else {
+        nextGroupY += groupHeight + COLUMN_GAP;
+      }
     }
 
     if (group.collapsed) {

@@ -18,8 +18,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { WorkspaceUiState } from "@/lib/notebooksApi";
 import {
+  clampFilesWidthValue,
   clampOptionalRatio,
   clampSidebarWidthValue,
+  DEFAULT_FILES_WIDTH_PX,
   DEFAULT_MAIN_RATIO,
   DEFAULT_NOTEBOOK_RATIO,
   DEFAULT_SIDEBAR_WIDTH_PX,
@@ -49,6 +51,8 @@ export interface PanelLayout {
   setIsSidebarCollapsed: Dispatch<SetStateAction<boolean>>;
   showMinimap: boolean;
   setShowMinimap: Dispatch<SetStateAction<boolean>>;
+  filesWidth: number;
+  workspaceRowRef: MutableRefObject<HTMLDivElement | null>;
   contentRef: MutableRefObject<HTMLDivElement | null>;
   topPaneRef: MutableRefObject<HTMLDivElement | null>;
   canvasPaneRef: MutableRefObject<HTMLDivElement | null>;
@@ -63,6 +67,8 @@ export interface PanelLayout {
   handleHorizontalDividerKeyDown: DividerKeyHandler;
   handleSidebarDividerPointerDown: DividerPointerHandler;
   handleSidebarDividerKeyDown: DividerKeyHandler;
+  handleFilesDividerPointerDown: DividerPointerHandler;
+  handleFilesDividerKeyDown: DividerKeyHandler;
   applyWorkspaceUi: (ui: WorkspaceUiState | undefined) => void;
   collectUiState: () => WorkspaceUiState;
 }
@@ -80,6 +86,7 @@ export function usePanelLayout(): PanelLayout {
   );
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH_PX);
   const lastOpenSidebarWidthRef = useRef(DEFAULT_SIDEBAR_WIDTH_PX);
+  const [filesWidth, setFilesWidth] = useState(DEFAULT_FILES_WIDTH_PX);
   const [showMinimap, setShowMinimap] = useState(false);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(
     () => readPanelLayout().inspectorCollapsed,
@@ -89,6 +96,11 @@ export function usePanelLayout(): PanelLayout {
     startCoord: number;
     startWidth: number;
   } | null>(null);
+  const [filesDragState, setFilesDragState] = useState<{
+    startCoord: number;
+    startWidth: number;
+  } | null>(null);
+  const workspaceRowRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const topPaneRef = useRef<HTMLDivElement | null>(null);
   const canvasPaneRef = useRef<HTMLDivElement | null>(null);
@@ -128,6 +140,9 @@ export function usePanelLayout(): PanelLayout {
       setSidebarWidth(nextSidebarWidth);
       lastOpenSidebarWidthRef.current = nextSidebarWidth;
     }
+    if (typeof ui.filesWidth === "number") {
+      setFilesWidth(clampFilesWidthValue(ui.filesWidth, workspaceRowRef.current));
+    }
     if (typeof ui.filesCollapsed === "boolean") {
       setIsFilesCollapsed(ui.filesCollapsed);
     }
@@ -154,6 +169,7 @@ export function usePanelLayout(): PanelLayout {
       inspectorCollapsed: isInspectorCollapsed,
       sidebarCollapsed: isSidebarCollapsed,
       sidebarWidth,
+      filesWidth,
       showMinimap,
     }),
     [
@@ -164,6 +180,7 @@ export function usePanelLayout(): PanelLayout {
       isInspectorCollapsed,
       isSidebarCollapsed,
       sidebarWidth,
+      filesWidth,
       showMinimap,
     ],
   );
@@ -379,6 +396,73 @@ export function usePanelLayout(): PanelLayout {
     [clampSidebarWidth],
   );
 
+  const clampFilesWidth = useCallback((value: number): number => {
+    return clampFilesWidthValue(value, workspaceRowRef.current);
+  }, []);
+
+  useEffect(() => {
+    if (filesDragState === null) {
+      return;
+    }
+
+    const handlePointerMove = (event: PointerEvent): void => {
+      // Files rail sits on the left, so dragging right (positive delta) grows it.
+      const nextWidth = filesDragState.startWidth + (event.clientX - filesDragState.startCoord);
+      setFilesWidth(clampFilesWidth(nextWidth));
+    };
+
+    const handlePointerUp = (): void => {
+      setFilesDragState(null);
+    };
+
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+
+    return () => {
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [clampFilesWidth, filesDragState]);
+
+  useEffect(() => {
+    const handleResize = (): void => {
+      if (!isFilesCollapsed) {
+        setFilesWidth((current) => clampFilesWidth(current));
+      }
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [clampFilesWidth, isFilesCollapsed]);
+
+  const handleFilesDividerPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>): void => {
+      event.preventDefault();
+      setFilesDragState({ startCoord: event.clientX, startWidth: filesWidth });
+    },
+    [filesWidth],
+  );
+
+  const handleFilesDividerKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLButtonElement>): void => {
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setFilesWidth((current) => clampFilesWidth(current - KEYBOARD_RESIZE_STEP * 8));
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setFilesWidth((current) => clampFilesWidth(current + KEYBOARD_RESIZE_STEP * 8));
+      }
+    },
+    [clampFilesWidth],
+  );
+
   const contentStyle = useMemo(
     () =>
       isInspectorCollapsed
@@ -422,6 +506,8 @@ export function usePanelLayout(): PanelLayout {
     setIsSidebarCollapsed,
     showMinimap,
     setShowMinimap,
+    filesWidth,
+    workspaceRowRef,
     contentRef,
     topPaneRef,
     canvasPaneRef,
@@ -436,6 +522,8 @@ export function usePanelLayout(): PanelLayout {
     handleHorizontalDividerKeyDown,
     handleSidebarDividerPointerDown,
     handleSidebarDividerKeyDown,
+    handleFilesDividerPointerDown,
+    handleFilesDividerKeyDown,
     applyWorkspaceUi,
     collectUiState,
   };

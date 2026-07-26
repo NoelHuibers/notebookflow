@@ -32,6 +32,7 @@ export interface WorkspaceUiState {
   inspectorCollapsed?: boolean;
   sidebarCollapsed?: boolean;
   sidebarWidth?: number;
+  filesWidth?: number;
   showMinimap?: boolean;
 }
 
@@ -70,7 +71,7 @@ export class WorkspaceParseError extends Error {
   }
 }
 
-type WorkspaceUiNumberKey = "notebookRatio" | "mainRatio" | "sidebarWidth";
+type WorkspaceUiNumberKey = "notebookRatio" | "mainRatio" | "sidebarWidth" | "filesWidth";
 type WorkspaceUiBooleanKey =
   | "filesCollapsed"
   | "cellsCollapsed"
@@ -160,6 +161,7 @@ function parseWorkspaceUi(value: unknown): WorkspaceUiState | undefined {
   copyFiniteNumber(value, ui, "notebookRatio");
   copyFiniteNumber(value, ui, "mainRatio");
   copyFiniteNumber(value, ui, "sidebarWidth");
+  copyFiniteNumber(value, ui, "filesWidth");
   copyBoolean(value, ui, "filesCollapsed");
   copyBoolean(value, ui, "cellsCollapsed");
   copyBoolean(value, ui, "inspectorCollapsed");

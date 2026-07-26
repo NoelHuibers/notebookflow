@@ -30,7 +30,7 @@ export function PaneDivider({
       onKeyDown={onKeyDown}
       className={cn(
         "group relative flex shrink-0 touch-none select-none items-center justify-center border-0 bg-muted/70 p-0",
-        isVertical ? "h-full cursor-col-resize" : "w-full cursor-row-resize",
+        isVertical ? "h-full w-full cursor-col-resize" : "h-full w-full cursor-row-resize",
       )}
     >
       <div

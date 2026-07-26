@@ -12,6 +12,8 @@ export const MIN_NOTEBOOK_WIDTH_PX = 280;
 export const MIN_CANVAS_BODY_WIDTH_PX = 320;
 export const MIN_SIDEBAR_WIDTH_PX = 240;
 export const DEFAULT_SIDEBAR_WIDTH_PX = 288;
+export const MIN_FILES_WIDTH_PX = 160;
+export const DEFAULT_FILES_WIDTH_PX = 176;
 export const MIN_MAIN_HEIGHT_PX = 220;
 export const MIN_INSPECTOR_HEIGHT_PX = 140;
 export const DEFAULT_NOTEBOOK_RATIO = 50;
@@ -31,6 +33,18 @@ export function clampSidebarWidthValue(value: number, host: HTMLElement | null):
     MIN_SIDEBAR_WIDTH_PX,
   );
   return clamp(value, MIN_SIDEBAR_WIDTH_PX, maxWidth);
+}
+
+// Files rail resizes against the whole workspace row (files + notebook +
+// canvas), reserving room for the notebook and canvas panes' own minimums so
+// dragging it wide never crushes either of them below usability.
+export function clampFilesWidthValue(value: number, host: HTMLElement | null): number {
+  if (host === null) {
+    return Math.max(MIN_FILES_WIDTH_PX, value);
+  }
+  const reservedForRest = MIN_NOTEBOOK_WIDTH_PX + MIN_CANVAS_BODY_WIDTH_PX + DIVIDER_SIZE_PX * 2;
+  const maxWidth = Math.max(host.clientWidth - reservedForRest, MIN_FILES_WIDTH_PX);
+  return clamp(value, MIN_FILES_WIDTH_PX, maxWidth);
 }
 
 export const PANEL_STORAGE_KEY = "notebookflow.panels.v2";

@@ -13,6 +13,8 @@ interface FilesRailProps {
   activeFileId: string;
   activeDirty: boolean;
   collapsed: boolean;
+  /** Rail width in px when expanded. Dragged via the divider next to it, like the other panes. */
+  width: number;
   dataFiles: DataFile[];
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
@@ -43,6 +45,7 @@ export function FilesRail({
   activeFileId,
   activeDirty,
   collapsed,
+  width,
   dataFiles,
   onSelect,
   onClose,
@@ -75,7 +78,11 @@ export function FilesRail({
     );
   }
   return (
-    <aside data-tour="files" className="flex w-44 shrink-0 flex-col border-r bg-muted/30">
+    <aside
+      data-tour="files"
+      className="flex shrink-0 flex-col overflow-hidden border-r bg-muted/30"
+      style={{ width }}
+    >
       <div className="flex items-center justify-between border-b pl-3 pr-1.5 py-2 text-xs text-muted-foreground">
         <span className="font-medium">{t("files.files")}</span>
         <div className="flex items-center gap-0.5">
@@ -119,7 +126,7 @@ export function FilesRail({
               <li key={file.id}>
                 <div
                   className={cn(
-                    "group flex items-center gap-1.5 rounded border px-2 py-1 text-[12px]",
+                    "group flex min-w-0 items-center gap-1.5 rounded border px-2 py-1 text-[12px]",
                     isActive
                       ? "border-primary/60 font-medium text-foreground"
                       : "border-transparent hover:bg-muted/60",

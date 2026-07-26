@@ -50,6 +50,7 @@ export const en = {
     resizeNotebookCanvas: "Resize notebook and canvas panes",
     resizeEditorInspector: "Resize editor and inspector panes",
     resizeCanvasSidebar: "Resize canvas and sidebar",
+    resizeFiles: "Resize files pane",
   },
   save: {
     pickerDescription: "Jupyter notebook",
@@ -139,6 +140,7 @@ export const de: typeof en = {
     resizeNotebookCanvas: "Notebook- und Canvas-Bereiche anpassen",
     resizeEditorInspector: "Editor- und Inspector-Bereiche anpassen",
     resizeCanvasSidebar: "Canvas- und Seitenleisten-Bereich anpassen",
+    resizeFiles: "Dateien-Bereich anpassen",
   },
   save: {
     pickerDescription: "Jupyter-Notebook",

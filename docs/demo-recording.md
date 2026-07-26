@@ -30,20 +30,32 @@ still completes.
    not filter rows.” Wire `Filter Rows.df` to this node and its `raw_df` output
    onward. The preprocessing notebook includes this optional feature when it is
    present, so the AI-created step affects the model rather than being cosmetic.
-5. Import `preprocessing.ipynb`. Its `Validate customer data` node intentionally
+5. Add a final code cell to the first notebook to preview the prepared data:
+   ```python
+   # @node: Preview prepared data [output] in=raw_df<-Add traffic tier.raw_df
+   display(raw_df.head(10))
+   ```
+   Draw `Add traffic tier.raw_df` to the preview node. This gives the audience
+   a concrete look at the filtered, enriched DataFrame before reuse begins.
+6. Hover the first notebook in **Files**, select its pencil icon, and rename it
+   to `campaign_preparation.ipynb`. NotebookFlow updates cross-notebook
+   references when a notebook is renamed.
+7. Press **M** to show the minimap. After importing or moving notebooks, use
+   the canvas **fit view** control to frame the whole pipeline.
+8. Import `preprocessing.ipynb`. Its `Validate customer data` node intentionally
    displays the `raw_df` inlet but has no resolved upstream wire yet. Draw the
    data-preparation output to that inlet. This replaces the placeholder input
    reference and persists the real connection in the notebook.
-6. Import the two model notebooks and `postprocessing.ipynb`. Wire
+9. Import the two model notebooks and `postprocessing.ipynb`. Wire
    `Train test split` to both model notebooks, then wire both score/prediction
    outputs into postprocessing. Use the port labels already shown on the
    canvas; do not pre-wire these notebooks before the recording.
-7. Run the full pipeline. The final `Analyst report` node prints a recommended
+10. Run the full pipeline. The final `Analyst report` node prints a recommended
    model, a comparison table, and an actual-versus-predicted chart.
-8. Open the AI command palette and select **Explain**. Ask: “Explain this
+11. Open the AI command palette and select **Explain**. Ask: “Explain this
    pipeline for a new analyst: its data flow, transformations, models, and
    final output.”
-9. Open **Triggers**, create a **Manual** trigger named `demo-revenue-run`,
+12. Open **Triggers**, create a **Manual** trigger named `demo-revenue-run`,
    then use **Fire now**. This is the most reliable live trigger demonstration;
    mention that the same dialog also supports Cron, file-watch, and webhook
    triggers.

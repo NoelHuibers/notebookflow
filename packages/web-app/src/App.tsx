@@ -107,6 +107,7 @@ import {
   type TourStep,
 } from "@/lib/onboarding";
 import { sortPalette } from "@/lib/palette";
+import { DIVIDER_SIZE_PX } from "@/lib/panels";
 import { deleteProviderKey, getProviderKey, saveProviderKey } from "@/lib/providerKeyApi";
 import type { UserSettings } from "@/lib/settings";
 import { applyTheme, readUserSettings, SETTINGS_STORAGE_KEY } from "@/lib/settings";
@@ -161,6 +162,8 @@ export function App(): ReactElement {
     setIsSidebarCollapsed,
     showMinimap,
     setShowMinimap,
+    filesWidth,
+    workspaceRowRef,
     contentRef,
     topPaneRef,
     canvasPaneRef,
@@ -175,6 +178,8 @@ export function App(): ReactElement {
     handleHorizontalDividerKeyDown,
     handleSidebarDividerPointerDown,
     handleSidebarDividerKeyDown,
+    handleFilesDividerPointerDown,
+    handleFilesDividerKeyDown,
     applyWorkspaceUi,
     collectUiState,
   } = usePanelLayout();
@@ -1831,12 +1836,13 @@ export function App(): ReactElement {
           </div>
         )}
 
-        <div className="flex min-h-0 flex-1 overflow-hidden">
+        <div ref={workspaceRowRef} className="flex min-h-0 flex-1 overflow-hidden">
           <FilesRail
             files={openFiles}
             activeFileId={activeFileId}
             activeDirty={isDirty}
             collapsed={isFilesCollapsed}
+            width={filesWidth}
             dataFiles={dataFiles}
             onSelect={switchToFile}
             onClose={closeFile}
@@ -1850,6 +1856,19 @@ export function App(): ReactElement {
               setIsFilesCollapsed((c) => !c);
             }}
           />
+          {!isFilesCollapsed && (
+            // Outside the grid layouts the other dividers live in, so its
+            // track width needs to be set explicitly here to match their
+            // thickness instead of shrinking to the drag handle's own size.
+            <div className="shrink-0" style={{ width: DIVIDER_SIZE_PX }}>
+              <PaneDivider
+                orientation="vertical"
+                label={t("app.panels.resizeFiles")}
+                onPointerDown={handleFilesDividerPointerDown}
+                onKeyDown={handleFilesDividerKeyDown}
+              />
+            </div>
+          )}
           <div
             ref={contentRef}
             className="grid min-h-0 flex-1 overflow-hidden"
