@@ -24,10 +24,16 @@ export async function addManifestNode(
   options: AddManifestNodeOptions,
 ): Promise<string> {
   const config = options.config ?? defaultConfigForManifest(options.manifest);
+  const inputNames = options.manifest.inputs.map((port) => port.name);
+  // Start every manifest node with named, unresolved inputs. This preserves the
+  // variable names its template uses (for example, `df`) when the user later
+  // draws a wire: SyncEngine replaces the placeholder source, not the local
+  // name on the left side of the binding.
+  const inputBindings = inputNames.map((name) => `${name}<-Pipeline input.${name}`);
   const outputNames = options.manifest.outputs.map((port) => port.name);
   const bodySource = renderManifestTemplate(options.manifest, {
     nodeName: options.manifest.name,
-    inputVars: [],
+    inputVars: inputNames,
     outputVars: outputNames,
     config,
   });
@@ -42,6 +48,7 @@ export async function addManifestNode(
     {
       name: options.manifest.name,
       tag: options.manifest.tag,
+      inputs: inputBindings,
       outputs: outputNames,
       bodySource,
       metadata,
@@ -56,7 +63,7 @@ export async function addManifestNode(
     void synthesize({
       manifestId: options.manifest.id,
       nodeName: options.manifest.name,
-      inputs: [],
+      inputs: inputNames,
       outputs: outputNames,
       config,
       currentSource: bodySource,
