@@ -345,9 +345,12 @@ export function applyMeasuredGroupLayout(
   const groupStyles = new Map<string, { width: number; height: number }>();
   const groupPositions = new Map<string, { x: number; y: number }>();
 
+  // Groups stack along X in horizontal-cell layout, along Y otherwise (mirrors
+  // buildNodes' group placement) -- sort along that same stacking axis so
+  // "prior" widths/heights accumulate in on-canvas order.
   const sortedGroups = horizontalCells
-    ? [...groupNodes].sort((a, b) => a.position.y - b.position.y)
-    : [...groupNodes].sort((a, b) => a.position.x - b.position.x);
+    ? [...groupNodes].sort((a, b) => a.position.x - b.position.x)
+    : [...groupNodes].sort((a, b) => a.position.y - b.position.y);
   const priorGroupWidths: number[] = [];
   const priorGroupHeights: number[] = [];
 
@@ -457,16 +460,21 @@ export function applyMeasuredGroupLayout(
         ? group.position
         : horizontalCells
           ? {
-              x: group.position.x,
-              y: groupRowY(priorGroupHeights, constants.columnGap),
-            }
-          : {
               x: groupColumnX(priorGroupWidths, constants.columnGap),
               y: group.position.y,
+            }
+          : {
+              x: group.position.x,
+              y: groupRowY(priorGroupHeights, constants.columnGap),
             },
     );
-    priorGroupWidths.push(groupWidth);
-    priorGroupHeights.push(groupHeight);
+    // A manually-dragged group can sit anywhere and shouldn't reserve a slot
+    // in the auto-stack -- otherwise a notebook dragged away still leaves a
+    // gap where the next auto-placed one lands (mirrors buildNodes).
+    if (!preservePosition) {
+      priorGroupWidths.push(groupWidth);
+      priorGroupHeights.push(groupHeight);
+    }
   }
 
   return nodes.map((node) => {

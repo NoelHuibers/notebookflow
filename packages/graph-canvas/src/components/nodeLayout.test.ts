@@ -141,29 +141,32 @@ describe("nodeLayout", () => {
     expect((group?.style as { width?: number })?.width).toBe(16 + 380 + 16);
   });
 
-  it("spaces multiple stacked groups by measured width without overlap", () => {
+  it("spaces multiple stacked groups by measured height without overlap", () => {
     const g1 = "group:g1";
     const g2 = "group:g2";
     const nodes = [
       groupNode(g1),
       notebookNode("a", 0, g1),
-      { ...groupNode(g2), position: { x: 352, y: 0 } },
+      { ...groupNode(g2), position: { x: 0, y: 400 } },
       notebookNode("b", 0, g2),
     ];
     const measured = new Map([
-      ["a", { width: 380, height: 100 }],
-      ["b", { width: 220, height: 100 }],
+      ["a", { width: 200, height: 380 }],
+      ["b", { width: 200, height: 100 }],
     ]);
     const fallback = (): { width: number; height: number } => ({ width: 200, height: 100 });
     const laidOut = applyMeasuredGroupLayout(nodes, measured, false, GROUP_LAYOUT, fallback);
 
     const group1 = laidOut.find((node) => node.id === g1);
     const group2 = laidOut.find((node) => node.id === g2);
-    const wideWidth = 16 + 380 + 16;
+    const tallHeight = NODE_GROUP_HEADER_HEIGHT + 16 + 380 + 24;
 
-    expect(group1?.position.x).toBe(0);
-    expect((group1?.style as { width?: number })?.width).toBe(wideWidth);
-    expect(group2?.position.x).toBe(wideWidth + GROUP_LAYOUT.columnGap);
+    expect(group1?.position).toEqual({ x: 0, y: 0 });
+    expect((group1?.style as { height?: number })?.height).toBe(tallHeight);
+    // Stacked groups keep whatever X they already have (0 here, or a manual
+    // drag offset) -- only Y accumulates, so two vertically-stacked notebooks
+    // land directly beneath one another instead of drifting sideways.
+    expect(group2?.position).toEqual({ x: 0, y: tallHeight + GROUP_LAYOUT.columnGap });
   });
 
   it("preserves manually positioned stacked groups", () => {
@@ -225,27 +228,30 @@ describe("nodeLayout", () => {
     );
   });
 
-  it("stacks multiple horizontal-view groups vertically without overlap", () => {
+  it("spaces multiple horizontal-view groups by measured width without overlap", () => {
     const g1 = "group:g1";
     const g2 = "group:g2";
-    const tallHeight = NODE_GROUP_HEADER_HEIGHT + 16 + 140 + 24;
     const nodes = [
       groupNode(g1),
       notebookNode("a", 0, g1),
-      { ...groupNode(g2), position: { x: 0, y: 400 } },
+      { ...groupNode(g2), position: { x: 352, y: 0 } },
       notebookNode("b", 0, g2),
     ];
     const measured = new Map([
-      ["a", { width: 180, height: 140 }],
-      ["b", { width: 220, height: 110 }],
+      ["a", { width: 380, height: 100 }],
+      ["b", { width: 220, height: 100 }],
     ]);
     const fallback = (): { width: number; height: number } => ({ width: 200, height: 100 });
     const laidOut = applyMeasuredGroupLayout(nodes, measured, true, GROUP_LAYOUT, fallback);
 
     const group1 = laidOut.find((node) => node.id === g1);
     const group2 = laidOut.find((node) => node.id === g2);
+    const wideWidth = 16 + 380 + 16;
 
     expect(group1?.position).toEqual({ x: 0, y: 0 });
-    expect(group2?.position.y).toBe(tallHeight + GROUP_LAYOUT.columnGap);
+    expect((group1?.style as { width?: number })?.width).toBe(wideWidth);
+    // Horizontal-view groups keep whatever Y they already have -- only X
+    // accumulates, so groups placed side by side stay aligned on one row.
+    expect(group2?.position).toEqual({ x: wideWidth + GROUP_LAYOUT.columnGap, y: 0 });
   });
 });

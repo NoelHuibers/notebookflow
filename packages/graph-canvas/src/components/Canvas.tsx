@@ -780,7 +780,11 @@ function buildNodes(
   const metas = metaByNode ?? {};
   const unresolved = unresolvedByNode ?? {};
   const rfNodes: Node[] = [];
-  const groupIds = Object.keys(graph.groups).sort();
+  // Insertion order == import/creation order (SyncEngine only appends new
+  // group keys, never reorders existing ones), which is what new groups
+  // should stack after. Sorting alphabetically here would place a freshly
+  // imported notebook above an existing one whenever its name sorts earlier.
+  const groupIds = Object.keys(graph.groups);
   let nextGroupX = 0;
   let nextGroupY = 0;
   const horizontalCells = portPlacement === "sides";
