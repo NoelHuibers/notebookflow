@@ -139,6 +139,9 @@
   .min-h-\[120px\] {
     min-height: 120px;
   }
+  .min-h-\[160px\] {
+    min-height: 160px;
+  }
   .w-2\.5 {
     width: calc(var(--spacing) * 2.5);
   }
@@ -179,6 +182,9 @@
   .animate-pulse {
     animation: var(--animate-pulse);
   }
+  .cursor-not-allowed {
+    cursor: not-allowed;
+  }
   .touch-none {
     touch-action: none;
   }
@@ -217,6 +223,14 @@
   }
   .gap-3 {
     gap: calc(var(--spacing) * 3);
+  }
+  .self-start {
+    align-self: flex-start;
+  }
+  .truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .overflow-hidden {
     overflow: hidden;
@@ -300,6 +314,9 @@
       background-color: color-mix(in oklab, var(--destructive) 5%, transparent);
     }
   }
+  .bg-muted {
+    background-color: var(--muted);
+  }
   .bg-muted\/30 {
     background-color: var(--muted);
     @supports (color: color-mix(in lab, red, red)) {
@@ -330,6 +347,9 @@
   .p-px {
     padding: 1px;
   }
+  .px-1 {
+    padding-inline: var(--spacing);
+  }
   .px-1\.5 {
     padding-inline: calc(var(--spacing) * 1.5);
   }
@@ -359,6 +379,9 @@
   }
   .pt-\[15vh\] {
     padding-top: 15vh;
+  }
+  .text-left {
+    text-align: left;
   }
   .align-middle {
     vertical-align: middle;
@@ -438,6 +461,9 @@
   .underline-offset-4 {
     text-underline-offset: 4px;
   }
+  .opacity-50 {
+    opacity: 50%;
+  }
   .opacity-80 {
     opacity: 80%;
   }
@@ -499,6 +525,14 @@
         background-color: color-mix(in oklab, var(--destructive) 90%, transparent);
       }
     }
+    .hover\:bg-muted\/60:hover {
+      background-color: var(--muted);
+    }
+    @supports (color: color-mix(in lab, red, red)) {
+      .hover\:bg-muted\/60:hover {
+        background-color: color-mix(in oklab, var(--muted) 60%, transparent);
+      }
+    }
     .hover\:bg-primary\/90:hover {
       background-color: var(--primary);
     }
@@ -517,6 +551,9 @@
     }
     .hover\:text-accent-foreground:hover {
       color: var(--accent-foreground);
+    }
+    .hover\:text-foreground:hover {
+      color: var(--foreground);
     }
     .hover\:underline:hover {
       text-decoration-line: underline;

@@ -6,7 +6,6 @@
 
 import type { NotebookCell } from "@notebookflow/graph-canvas/sync";
 
-import { bootstrapNotebookFixtures } from "@/lib/bootstrap";
 import { toIpynbCell } from "@/lib/notebook";
 import type { CellOutputsByCell, LoadedNotebook, OpenFileMeta } from "@/types/workspace";
 
@@ -52,11 +51,7 @@ export interface InitialWorkspaceFile {
 }
 
 export function createInitialWorkspaceFiles(): InitialWorkspaceFile[] {
-  const notebooks = bootstrapNotebookFixtures();
-  if (notebooks.length === 0) {
-    return [{ id: makeFileId(), notebook: createBlankNotebook("preprocessing.ipynb") }];
-  }
-  return notebooks.map((notebook) => ({ id: makeFileId(), notebook }));
+  return [{ id: makeFileId(), notebook: createBlankNotebook("Untitled.ipynb") }];
 }
 
 export function firstInitialWorkspaceFile(files: InitialWorkspaceFile[]): InitialWorkspaceFile {

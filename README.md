@@ -146,12 +146,12 @@ notebookflow/
 
 The `examples/` directory contains a self-contained analyst workflow split across four notebooks:
 
-- `preprocessing.ipynb` generates synthetic customer revenue data, cleans it, engineers features, and publishes train/test splits.
+- `preprocessing.ipynb` validates uploaded customer revenue data, cleans it, engineers features, and publishes train/test splits.
 - `model_baseline.ipynb` trains a global linear baseline from the preprocessing outputs.
 - `model_advanced.ipynb` trains a channel-segmented model from the same split.
 - `postprocessing.ipynb` compares model metrics, selects the winner, and renders an analyst-facing report.
 
-The web app boots with `preprocessing.ipynb` only; open the model/report notebooks when you want to inspect the full cross-notebook graph. The extension launchers open all four example notebooks, whose markers demonstrate refs such as `preprocessing:Train test split.train_df`.
+The web app boots with one empty notebook. Import the example notebooks as needed and draw the cross-notebook wires yourself; their declared input ports remain visible before they are connected.
 
 ## Deploying
 

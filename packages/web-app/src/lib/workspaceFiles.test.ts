@@ -5,6 +5,7 @@ import type { CellOutputsByCell, OpenFileMeta } from "@/types/workspace";
 
 import {
   createBlankNotebook,
+  createInitialWorkspaceFiles,
   isLikelyWorkspaceFilename,
   shiftOutputsAfterDelete,
   shiftOutputsAfterInsert,
@@ -46,6 +47,16 @@ describe("createBlankNotebook", () => {
     expect(notebook.doc.metadata).toEqual({
       kernelspec: { display_name: "Python 3", language: "python", name: "python3" },
     });
+  });
+});
+
+describe("createInitialWorkspaceFiles", () => {
+  it("starts a new web workspace with one blank notebook", () => {
+    const initial = createInitialWorkspaceFiles();
+
+    expect(initial).toHaveLength(1);
+    expect(initial[0]?.notebook.name).toBe("Untitled.ipynb");
+    expect(initial[0]?.notebook.cells).toEqual([{ cellType: "code", source: "" }]);
   });
 });
 
