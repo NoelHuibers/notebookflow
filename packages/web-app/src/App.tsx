@@ -475,6 +475,7 @@ export function App(): ReactElement {
     cellsByPath,
     applyWorkspaceDocument,
     switchToFile,
+    renameNotebook,
     handleFile,
     handleCreateNotebook,
     closeFile,
@@ -1839,6 +1840,7 @@ export function App(): ReactElement {
             dataFiles={dataFiles}
             onSelect={switchToFile}
             onClose={closeFile}
+            onRename={renameNotebook}
             onCreate={handleCreateNotebook}
             onOpen={triggerOpenFile}
             onUploadData={triggerUploadData}

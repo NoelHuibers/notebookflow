@@ -58,9 +58,7 @@ describe("addManifestNode", () => {
     expect(patches).toHaveLength(1);
     expect(patches[0]?.newSource).toContain("result = None");
     expect(patches[0]?.newSource).toContain("in=df<-Pipeline input.df");
-    expect(synthesize).toHaveBeenCalledWith(
-      expect.objectContaining({ inputs: ["df"] }),
-    );
+    expect(synthesize).toHaveBeenCalledWith(expect.objectContaining({ inputs: ["df"] }));
 
     await engine.ingestNotebook(
       "/nb.ipynb",

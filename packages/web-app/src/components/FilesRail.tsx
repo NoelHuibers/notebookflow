@@ -1,4 +1,4 @@
-import { Database, FilePlus, Files, PanelLeftClose, Plus, Upload, X } from "lucide-react";
+import { Database, FilePlus, Files, PanelLeftClose, Pencil, Plus, Upload, X } from "lucide-react";
 import type { ReactElement } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ interface FilesRailProps {
   dataFiles: DataFile[];
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
+  onRename: (id: string, name: string) => void;
   onCreate: () => void;
   onOpen: () => void;
   onUploadData: () => void;
@@ -45,6 +46,7 @@ export function FilesRail({
   dataFiles,
   onSelect,
   onClose,
+  onRename,
   onCreate,
   onOpen,
   onUploadData,
@@ -140,6 +142,18 @@ export function FilesRail({
                       />
                     )}
                     <span className="truncate font-mono text-[11px]">{file.name}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const name = window.prompt("Rename notebook", file.name);
+                      if (name !== null) onRename(file.id, name);
+                    }}
+                    className="shrink-0 rounded text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"
+                    aria-label={`Rename ${file.name}`}
+                    title="Rename notebook"
+                  >
+                    <Pencil className="size-3" />
                   </button>
                   {files.length > 1 && (
                     <button
