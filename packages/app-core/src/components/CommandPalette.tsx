@@ -227,7 +227,7 @@ function iconFor(id: CommandId): ReactElement {
     case "ask":
       return <CommandIcon className="size-4 text-primary" />;
     case "createNode":
-      return <Plus className="size-4 text-muted-foreground" />;
+      return <Plus className="size-4 text-primary" />;
     case "compose":
       return <Wand2 className="size-4 text-primary" />;
     case "explain":
