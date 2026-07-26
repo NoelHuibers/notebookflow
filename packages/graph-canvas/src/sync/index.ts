@@ -12,7 +12,13 @@ export type {
   ParseError,
   ParseResult,
 } from "./MarkerParser";
-export { formatInputBinding, MarkerParser, parseInputBinding, parseRef } from "./MarkerParser";
+export {
+  defaultAliasForPath,
+  formatInputBinding,
+  MarkerParser,
+  parseInputBinding,
+  parseRef,
+} from "./MarkerParser";
 export type {
   CellPatch,
   ConflictResolution,

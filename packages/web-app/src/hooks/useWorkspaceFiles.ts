@@ -9,7 +9,7 @@
  */
 
 import type { CanvasGroupPosition } from "@notebookflow/graph-canvas";
-import type { NotebookCell } from "@notebookflow/graph-canvas/sync";
+import { defaultAliasForPath, type NotebookCell } from "@notebookflow/graph-canvas/sync";
 import type { TFunction } from "i18next";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -78,6 +78,7 @@ export interface WorkspaceFiles {
   cellsByPath: Map<string, NotebookCell[]>;
   applyWorkspaceDocument: (workspace: ParsedWorkspace) => void;
   switchToFile: (targetId: string) => void;
+  renameNotebook: (id: string, name: string) => void;
   handleFile: (text: string, name: string) => void;
   handleCreateNotebook: () => void;
   closeFile: (id: string) => void;
@@ -261,7 +262,7 @@ export function useWorkspaceFiles({
 
   // Identity of the open-file set; changes only when a file is opened/closed,
   // not on edits or switches.
-  const openFilesKey = openFiles.map((f) => f.id).join("|");
+  const openFilesKey = openFiles.map((f) => `${f.id}:${f.name}`).join("|");
 
   // Keep the Files rail label in sync when the active notebook is renamed
   // (e.g. applying a Compose draft swaps in a new filename).
@@ -457,6 +458,44 @@ export function useWorkspaceFiles({
     [openFiles, activeFileId, switchToFile],
   );
 
+  const renameNotebook = useCallback(
+    (id: string, nextName: string): void => {
+      const name = nextName.trim();
+      const target = openFilesRef.current.find((file) => file.id === id);
+      if (target === undefined || name === "" || name === target.name) return;
+      if (openFilesRef.current.some((file) => file.id !== id && file.name === name)) {
+        onError(`A notebook named ${name} is already open.`);
+        return;
+      }
+      const oldAlias = defaultAliasForPath(target.name);
+      const newAlias = defaultAliasForPath(name);
+      const rewrite = (cells: NotebookCell[]) =>
+        cells.map((cell) => ({
+          ...cell,
+          source: cell.source.replaceAll(`${oldAlias}:`, `${newAlias}:`),
+        }));
+      if (id === activeFileIdRef.current) {
+        setNotebook((current) => ({ ...current, name, cells: rewrite(current.cells) }));
+      } else {
+        const snapshot = snapshotsRef.current.get(id);
+        if (snapshot !== undefined)
+          snapshotsRef.current.set(id, { ...snapshot, cells: rewrite(snapshot.cells) });
+      }
+      for (const file of openFilesRef.current) {
+        if (file.id === id) continue;
+        const snapshot = snapshotsRef.current.get(file.id);
+        if (snapshot !== undefined)
+          snapshotsRef.current.set(file.id, { ...snapshot, cells: rewrite(snapshot.cells) });
+      }
+      if (id !== activeFileIdRef.current)
+        setNotebook((current) => ({ ...current, cells: rewrite(current.cells) }));
+      setOpenFiles((files) => files.map((file) => (file.id === id ? { ...file, name } : file)));
+      setWorkspaceRevision((revision) => revision + 1);
+      onError(null);
+    },
+    [onError],
+  );
+
   // Open the OS file picker and load the chosen notebook into the workspace.
   const triggerOpenFile = useCallback((): void => {
     const input = document.createElement("input");
@@ -509,6 +548,7 @@ export function useWorkspaceFiles({
     cellsByPath,
     applyWorkspaceDocument,
     switchToFile,
+    renameNotebook,
     handleFile,
     handleCreateNotebook,
     closeFile,
