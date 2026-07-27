@@ -52,6 +52,7 @@ import {
   type NodeLayoutHints,
   stackedGroupWidth,
 } from "./nodeLayout";
+import { reconcileNodes } from "./nodeReconcile";
 import { isPaletteDrag, readPaletteDragManifestId } from "./paletteDragData";
 import { collectInputRefs, collectOutputSuggestions } from "./portSuggestions";
 import type { WireData } from "./Wire";
@@ -348,7 +349,7 @@ function CanvasInner(props: CanvasProps): ReactElement {
     return byNode;
   }, [graph, variablesByNode]);
 
-  const baseNodes = useMemo<Node[]>(() => {
+  const rawNodes = useMemo<Node[]>(() => {
     return buildNodes(graph, {
       onNodeRename,
       selectedNodeId,
@@ -382,6 +383,19 @@ function CanvasInner(props: CanvasProps): ReactElement {
     portPlacement,
     manualGroupPositions,
   ]);
+
+  // `buildNodes` rebuilds every node object whenever any overlay map changes
+  // (runtime/timing/meta/unresolved), so a single run event would hand React
+  // Flow N brand-new nodes and re-render the whole canvas. Reconcile against the
+  // previous build so nodes whose content is unchanged keep a stable object
+  // identity — React Flow then skips re-rendering them. The array stays
+  // value-identical to the fresh build, so nothing renders differently.
+  const prevBaseNodesRef = useRef<Node[]>([]);
+  const baseNodes = useMemo<Node[]>(() => {
+    const reconciled = reconcileNodes(prevBaseNodesRef.current, rawNodes);
+    prevBaseNodesRef.current = reconciled;
+    return reconciled;
+  }, [rawNodes]);
 
   const manualGroupIds = useMemo(
     () => new Set(manualGroupPositions.keys()),
