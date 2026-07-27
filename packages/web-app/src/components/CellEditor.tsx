@@ -30,19 +30,6 @@ export interface CellEditorProps {
    * renders so the `memo` wrapper below actually skips unchanged cells.
    */
   onChangeAt: (index: number, next: string) => void;
-  /**
-   * Cell virtualization: when false the live CodeMirror editor is not mounted
-   * and the lightweight read-only fallback is shown instead. `CellList` sets
-   * this for cells far outside the viewport. Defaults to true (mount the
-   * editor) so every other caller keeps today's behavior.
-   */
-  renderFullEditor?: boolean;
-  /**
-   * Frozen wrapper height (px) captured just before this cell demoted to the
-   * fallback, applied as the fallback's `min-height` so the surrounding scroll
-   * position can't shift when a tall editor collapses to a short `<pre>`.
-   */
-  fallbackMinHeight?: number | null;
 }
 
 function CellEditorImpl({
@@ -51,8 +38,6 @@ function CellEditorImpl({
   outputs = EMPTY_OUTPUTS,
   isStreaming = false,
   onChangeAt,
-  renderFullEditor = true,
-  fallbackMinHeight = null,
 }: CellEditorProps): ReactElement {
   const { t } = useI18n();
   // Translate the shared CellOutputs labels (component lives in app-core; the
@@ -83,17 +68,13 @@ function CellEditorImpl({
         <span className="font-mono">{t("cells.cellLabel", { index })}</span>
         <span className="uppercase tracking-wider">{t(typeLabelKey)}</span>
       </div>
-      {renderFullEditor ? (
-        <Suspense fallback={<EditorFallback source={cell.source} />}>
-          <CodeMirrorEditor
-            value={cell.source}
-            isCode={cell.cellType === "code"}
-            onChange={handleChange}
-          />
-        </Suspense>
-      ) : (
-        <EditorFallback source={cell.source} minHeight={fallbackMinHeight} />
-      )}
+      <Suspense fallback={<EditorFallback source={cell.source} />}>
+        <CodeMirrorEditor
+          value={cell.source}
+          isCode={cell.cellType === "code"}
+          onChange={handleChange}
+        />
+      </Suspense>
       <CellOutputs outputs={outputs} isStreaming={isStreaming} labels={outputsLabels} />
     </div>
   );
@@ -106,20 +87,9 @@ function CellEditorImpl({
  */
 export const CellEditor = memo(CellEditorImpl);
 
-function EditorFallback({
-  source,
-  minHeight = null,
-}: {
-  source: string;
-  minHeight?: number | null;
-}): ReactElement {
+function EditorFallback({ source }: { source: string }): ReactElement {
   return (
-    <pre
-      className="min-h-[40px] overflow-hidden whitespace-pre-wrap break-words bg-[#282c34] px-3 py-2 font-mono text-[12px] text-[#abb2bf]"
-      style={
-        minHeight !== null && minHeight > 0 ? { minHeight: `${String(minHeight)}px` } : undefined
-      }
-    >
+    <pre className="min-h-[40px] overflow-hidden whitespace-pre-wrap break-words bg-[#282c34] px-3 py-2 font-mono text-[12px] text-[#abb2bf]">
       {source === "" ? " " : source}
     </pre>
   );
