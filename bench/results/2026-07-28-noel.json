@@ -1,0 +1,408 @@
+{
+  "suite": "notebookflow-perf",
+  "generatedAtIso": "2026-07-27T22:33:50.105Z",
+  "machine": {
+    "os": "Windows_NT win32",
+    "osRelease": "10.0.26200",
+    "arch": "x64",
+    "cpuModel": "Intel(R) Core(TM) i7-1065G7 CPU @ 1.30GHz",
+    "logicalCores": 8,
+    "ramGiB": 15.6,
+    "nodeVersion": "v26.1.0",
+    "v8Version": "14.6.202.34-node.19",
+    "gitCommit": "753e97adc1f22f923ef2717d1cb7b9b6b125c73c",
+    "hostname": "noel",
+    "capturedAtIso": "2026-07-27T22:25:15.375Z",
+    "pythonVersion": "3.12.6",
+    "pandasVersion": "3.0.5",
+    "numpyVersion": "2.4.4"
+  },
+  "benchmarks": {
+    "sync_engine_ingest": {
+      "benchmark": "sync_engine_ingest",
+      "machine": {
+        "os": "Windows_NT win32",
+        "osRelease": "10.0.26200",
+        "arch": "x64",
+        "cpuModel": "Intel(R) Core(TM) i7-1065G7 CPU @ 1.30GHz",
+        "logicalCores": 8,
+        "ramGiB": 15.6,
+        "nodeVersion": "v26.1.0",
+        "v8Version": "14.6.202.34-node.19",
+        "gitCommit": "753e97adc1f22f923ef2717d1cb7b9b6b125c73c",
+        "capturedAtIso": "2026-07-27T22:25:23.246Z",
+        "hostname": "noel"
+      },
+      "config": {
+        "sizes": [
+          10,
+          25,
+          50,
+          100,
+          200,
+          400,
+          800,
+          1600,
+          3200
+        ],
+        "warmups": 5,
+        "reps": 15,
+        "notebookPath": "bench.ipynb"
+      },
+      "results": [
+        {
+          "cells": 10,
+          "nodes": 8,
+          "wires": 7,
+          "freshMedianMs": 0.289,
+          "freshMinMs": 0.205,
+          "freshMaxMs": 0.4291,
+          "reingestMedianMs": 0.4651,
+          "reingestMinMs": 0.291,
+          "reingestMaxMs": 0.6146
+        },
+        {
+          "cells": 25,
+          "nodes": 20,
+          "wires": 19,
+          "freshMedianMs": 1.116,
+          "freshMinMs": 0.8492,
+          "freshMaxMs": 2.5409,
+          "reingestMedianMs": 0.9418,
+          "reingestMinMs": 0.3932,
+          "reingestMaxMs": 3.8621
+        },
+        {
+          "cells": 50,
+          "nodes": 40,
+          "wires": 39,
+          "freshMedianMs": 1.3664,
+          "freshMinMs": 1.0919,
+          "freshMaxMs": 4.888,
+          "reingestMedianMs": 1.412,
+          "reingestMinMs": 0.991,
+          "reingestMaxMs": 3.0805
+        },
+        {
+          "cells": 100,
+          "nodes": 80,
+          "wires": 79,
+          "freshMedianMs": 2.8692,
+          "freshMinMs": 1.9906,
+          "freshMaxMs": 10.9425,
+          "reingestMedianMs": 3.0771,
+          "reingestMinMs": 1.7345,
+          "reingestMaxMs": 6.2643
+        },
+        {
+          "cells": 200,
+          "nodes": 160,
+          "wires": 159,
+          "freshMedianMs": 6.2257,
+          "freshMinMs": 3.7085,
+          "freshMaxMs": 10.578,
+          "reingestMedianMs": 6.0079,
+          "reingestMinMs": 3.1155,
+          "reingestMaxMs": 16.9834
+        },
+        {
+          "cells": 400,
+          "nodes": 320,
+          "wires": 319,
+          "freshMedianMs": 10.8098,
+          "freshMinMs": 8.9949,
+          "freshMaxMs": 20.2591,
+          "reingestMedianMs": 12.779,
+          "reingestMinMs": 8.0588,
+          "reingestMaxMs": 17.7365
+        },
+        {
+          "cells": 800,
+          "nodes": 640,
+          "wires": 639,
+          "freshMedianMs": 24.4977,
+          "freshMinMs": 19.7897,
+          "freshMaxMs": 37.8873,
+          "reingestMedianMs": 23.7089,
+          "reingestMinMs": 17.3396,
+          "reingestMaxMs": 31.4268
+        },
+        {
+          "cells": 1600,
+          "nodes": 1280,
+          "wires": 1279,
+          "freshMedianMs": 43.1861,
+          "freshMinMs": 38.5031,
+          "freshMaxMs": 59.3585,
+          "reingestMedianMs": 43.3907,
+          "reingestMinMs": 33.7594,
+          "reingestMaxMs": 214.7091
+        },
+        {
+          "cells": 3200,
+          "nodes": 2560,
+          "wires": 2559,
+          "freshMedianMs": 75.9572,
+          "freshMinMs": 51.4138,
+          "freshMaxMs": 120.8621,
+          "reingestMedianMs": 62.0464,
+          "reingestMinMs": 48.036,
+          "reingestMaxMs": 82.7111
+        }
+      ],
+      "scaling": {
+        "msPerCellAtMax": 0.023737,
+        "doublingRatios": [
+          {
+            "fromCells": 10,
+            "toCells": 25,
+            "ratio": 3.862
+          },
+          {
+            "fromCells": 25,
+            "toCells": 50,
+            "ratio": 1.224
+          },
+          {
+            "fromCells": 50,
+            "toCells": 100,
+            "ratio": 2.1
+          },
+          {
+            "fromCells": 100,
+            "toCells": 200,
+            "ratio": 2.17
+          },
+          {
+            "fromCells": 200,
+            "toCells": 400,
+            "ratio": 1.736
+          },
+          {
+            "fromCells": 400,
+            "toCells": 800,
+            "ratio": 2.266
+          },
+          {
+            "fromCells": 800,
+            "toCells": 1600,
+            "ratio": 1.763
+          },
+          {
+            "fromCells": 1600,
+            "toCells": 3200,
+            "ratio": 1.759
+          }
+        ]
+      }
+    },
+    "databus_dataframe": {
+      "benchmark": "databus_dataframe",
+      "machine": {
+        "os": "Windows",
+        "os_release": "11",
+        "os_version": "10.0.26200",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "arch": "AMD64",
+        "cpu_model": "Intel64 Family 6 Model 126 Stepping 5, GenuineIntel",
+        "logical_cores": 8,
+        "ram_gib": 15.6,
+        "python_version": "3.12.6",
+        "pandas_version": "3.0.5",
+        "numpy_version": "2.4.4",
+        "git_commit": "753e97adc1f22f923ef2717d1cb7b9b6b125c73c",
+        "captured_at_iso": "2026-07-27T22:25:37.194308+00:00",
+        "hostname": "noel"
+      },
+      "config": {
+        "seed": 12345,
+        "latency_rows": [
+          1000,
+          50000,
+          500000
+        ],
+        "sequential_n": [
+          50,
+          100,
+          300
+        ],
+        "sequential_rows": 50000,
+        "sequential_trials": 3,
+        "warmups": 3,
+        "reps": 9,
+        "default_threshold_bytes": 8000000
+      },
+      "latency": [
+        {
+          "rows": 1000,
+          "mode": "forced_spill",
+          "size_bytes": 66266,
+          "size_mb": 0.066,
+          "spilled": true,
+          "put_median_ms": 34.3232,
+          "get_median_ms": 58.9522,
+          "putget_median_ms": 93.3742,
+          "putget_min_ms": 81.5335,
+          "putget_max_ms": 123.2901
+        },
+        {
+          "rows": 1000,
+          "mode": "default",
+          "size_bytes": 66266,
+          "size_mb": 0.066,
+          "spilled": false,
+          "put_median_ms": 4.836,
+          "get_median_ms": 0.4439,
+          "putget_median_ms": 5.5284,
+          "putget_min_ms": 3.4293,
+          "putget_max_ms": 9.3637
+        },
+        {
+          "rows": 50000,
+          "mode": "forced_spill",
+          "size_bytes": 3309738,
+          "size_mb": 3.31,
+          "spilled": true,
+          "put_median_ms": 194.6215,
+          "get_median_ms": 68.5111,
+          "putget_median_ms": 263.1326,
+          "putget_min_ms": 210.6324,
+          "putget_max_ms": 397.5769
+        },
+        {
+          "rows": 50000,
+          "mode": "default",
+          "size_bytes": 3309738,
+          "size_mb": 3.31,
+          "spilled": false,
+          "put_median_ms": 5.6216,
+          "get_median_ms": 2.7366,
+          "putget_median_ms": 8.8806,
+          "putget_min_ms": 7.7214,
+          "putget_max_ms": 12.1506
+        },
+        {
+          "rows": 500000,
+          "mode": "forced_spill",
+          "size_bytes": 33100564,
+          "size_mb": 33.101,
+          "spilled": true,
+          "put_median_ms": 829.1771,
+          "get_median_ms": 136.512,
+          "putget_median_ms": 965.6891,
+          "putget_min_ms": 770.8355,
+          "putget_max_ms": 1205.9157
+        },
+        {
+          "rows": 500000,
+          "mode": "default",
+          "size_bytes": 33100564,
+          "size_mb": 33.101,
+          "spilled": true,
+          "put_median_ms": 1035.1624,
+          "get_median_ms": 208.6628,
+          "putget_median_ms": 1237.0364,
+          "putget_min_ms": 1065.9883,
+          "putget_max_ms": 3574.5387
+        }
+      ],
+      "sequential": [
+        {
+          "n_intermediates": 50,
+          "rows": 50000,
+          "mode": "forced_spill",
+          "trials": 3,
+          "total_wall_ms": 18998.159,
+          "total_wall_min_ms": 12930.316,
+          "total_wall_max_ms": 22438.113,
+          "per_intermediate_ms": 379.9632,
+          "peak_tracemalloc_mib": 2.18,
+          "disk_used_mib": 96.92
+        },
+        {
+          "n_intermediates": 50,
+          "rows": 50000,
+          "mode": "default",
+          "trials": 3,
+          "total_wall_ms": 494.937,
+          "total_wall_min_ms": 485.856,
+          "total_wall_max_ms": 518.598,
+          "per_intermediate_ms": 9.8987,
+          "peak_tracemalloc_mib": 80.7,
+          "disk_used_mib": 0
+        },
+        {
+          "n_intermediates": 100,
+          "rows": 50000,
+          "mode": "forced_spill",
+          "trials": 3,
+          "total_wall_ms": 35137.602,
+          "total_wall_min_ms": 29877.082,
+          "total_wall_max_ms": 38500.78,
+          "per_intermediate_ms": 351.376,
+          "peak_tracemalloc_mib": 2.36,
+          "disk_used_mib": 193.85
+        },
+        {
+          "n_intermediates": 100,
+          "rows": 50000,
+          "mode": "default",
+          "trials": 3,
+          "total_wall_ms": 2466.491,
+          "total_wall_min_ms": 2000.504,
+          "total_wall_max_ms": 3194.599,
+          "per_intermediate_ms": 24.6649,
+          "peak_tracemalloc_mib": 159.83,
+          "disk_used_mib": 0
+        },
+        {
+          "n_intermediates": 300,
+          "rows": 50000,
+          "mode": "forced_spill",
+          "trials": 3,
+          "total_wall_ms": 83117.751,
+          "total_wall_min_ms": 73084.936,
+          "total_wall_max_ms": 95044.701,
+          "per_intermediate_ms": 277.0592,
+          "peak_tracemalloc_mib": 2.75,
+          "disk_used_mib": 581.54
+        },
+        {
+          "n_intermediates": 300,
+          "rows": 50000,
+          "mode": "default",
+          "trials": 3,
+          "total_wall_ms": 6743.213,
+          "total_wall_min_ms": 5587.688,
+          "total_wall_max_ms": 8987.222,
+          "per_intermediate_ms": 22.4774,
+          "peak_tracemalloc_mib": 476.25,
+          "disk_used_mib": 0
+        }
+      ],
+      "speedups": [
+        {
+          "rows": 1000,
+          "forced_spill_ms": 93.3742,
+          "default_ms": 5.5284,
+          "speedup_x": 16.9,
+          "default_spilled": false
+        },
+        {
+          "rows": 50000,
+          "forced_spill_ms": 263.1326,
+          "default_ms": 8.8806,
+          "speedup_x": 29.6,
+          "default_spilled": false
+        },
+        {
+          "rows": 500000,
+          "forced_spill_ms": 965.6891,
+          "default_ms": 1237.0364,
+          "speedup_x": 0.8,
+          "default_spilled": true
+        }
+      ]
+    }
+  }
+}

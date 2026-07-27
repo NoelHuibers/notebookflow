@@ -1,0 +1,4 @@
+# Intermediate per-benchmark fragments written by standalone runs. The
+# committed, reviewable artifacts are the merged results/<date>-<host>.{md,json}
+# produced by run_all.mjs.
+results/*.fragment.json
