@@ -603,17 +603,6 @@ function CanvasInner(props: CanvasProps): ReactElement {
             onEdgesDelete={handleEdgesDelete}
             nodesDraggable
             fitView
-            // Viewport culling: don't render nodes/edges outside the visible
-            // area. Nodes without measured dimensions are treated as visible, so
-            // the first mount still renders + measures every node and `fitView`
-            // and the initial `MeasuredGroupLayout` group stacking are unchanged.
-            // Residual risk (browser-verified): an OFFSCREEN node whose content
-            // grows after a run isn't re-measured while unmounted, so its stored
-            // height in `nodeInternals` is briefly stale; scrolling it back into
-            // view remounts it, its ResizeObserver fires, `measureSignature`
-            // changes and MeasuredGroupLayout re-stacks with the corrected
-            // height. On-screen growth re-measures immediately as before.
-            onlyRenderVisibleElements
             proOptions={{ hideAttribution: true }}
           >
             <MeasuredGroupLayout portPlacement={portPlacement} manualGroupIds={manualGroupIds} />
