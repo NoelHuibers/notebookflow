@@ -31,7 +31,15 @@ import {
 
 import type { CanvasLabels } from "../labels";
 import { CanvasLabelsProvider, mergeCanvasLabels, useCanvasLabels } from "../labels";
-import type { GraphModel, NodeModel, NodeTag, RunSummary, RuntimeState, WireModel } from "../types";
+import type {
+  GraphModel,
+  NodeMeta,
+  NodeModel,
+  NodeTag,
+  RunSummary,
+  RuntimeState,
+  WireModel,
+} from "../types";
 import type { PortPlacement } from "./InletOutletGrid";
 import type { InsertSlotData } from "./InsertSlotNode";
 import { InsertSlotNode, insertSlotId } from "./InsertSlotNode";
@@ -224,9 +232,10 @@ export interface CanvasProps {
   timingByNode?: Record<string, number>;
   /**
    * Per-node data hints for the meta line: input filename (static) + output
-   * row count (post-run). Either field may be absent.
+   * row count (post-run), plus optional deltas vs the previous run. Every
+   * field may be absent.
    */
-  metaByNode?: Record<string, { filename?: string; rows?: number }>;
+  metaByNode?: Record<string, NodeMeta>;
   /** Per-node input bindings that don't resolve to a wire (shown as unresolved). */
   unresolvedByNode?: Record<string, string[]>;
   /**

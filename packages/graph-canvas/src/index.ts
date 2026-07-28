@@ -56,6 +56,7 @@ export type {
   GraphModel,
   NodeGroupModel,
   NodeMarker,
+  NodeMeta,
   NodeModel,
   NodeTag,
   RunSummary,
