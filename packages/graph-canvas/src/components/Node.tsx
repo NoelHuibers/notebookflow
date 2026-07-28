@@ -18,7 +18,7 @@ import { useEffect, useRef, useState } from "react";
 import type { NodeProps } from "reactflow";
 
 import { useCanvasLabels } from "../labels";
-import type { NodeModel, NodeTag, RuntimeState } from "../types";
+import type { NodeMeta, NodeModel, NodeTag, RuntimeState } from "../types";
 import {
   InletOutletGrid,
   inletPortsVisible,
@@ -44,10 +44,11 @@ export interface NotebookNodeData extends NodeModel {
   runtimeDurationMs?: number;
   /**
    * Data hints for the meta line: the input filename (static, from source)
-   * and the output row count (post-run, from the engine). Either may be
-   * absent; both absent means no meta line renders.
+   * and the output row count (post-run, from the engine), plus optional
+   * "changed since the previous run" deltas. Every field may be absent; a
+   * meta with no filename/rows renders no meta line.
    */
-  meta?: { filename?: string; rows?: number };
+  meta?: NodeMeta;
   /** Declared input refs that don't resolve to any wire (e.g. a missing
    * cross-notebook alias/node). Surfaced as a warning on the node. */
   unresolvedInputs?: string[];

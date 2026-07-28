@@ -27,6 +27,7 @@ import type {
   CanvasLabels,
   GraphModel,
   NodeManifestDef,
+  NodeMeta,
   NodeTag,
   RunSummary,
   RuntimeState,
@@ -109,6 +110,8 @@ import {
 import { sortPalette } from "@/lib/palette";
 import { DIVIDER_SIZE_PX } from "@/lib/panels";
 import { deleteProviderKey, getProviderKey, saveProviderKey } from "@/lib/providerKeyApi";
+import type { NodeRunDelta, RunSnapshot } from "@/lib/runDeltas";
+import { computeRunDeltas, EMPTY_RUN_SNAPSHOT } from "@/lib/runDeltas";
 import type { UserSettings } from "@/lib/settings";
 import { applyTheme, readUserSettings, SETTINGS_STORAGE_KEY } from "@/lib/settings";
 import { cn, isTypingTarget } from "@/lib/utils";
@@ -193,6 +196,14 @@ export function App(): ReactElement {
   const [streamingCellIndex, setStreamingCellIndex] = useState<number | null>(null);
   const [streamingNotebookPath, setStreamingNotebookPath] = useState<string | null>(null);
   const [timingByNode, setTimingByNode] = useState<Record<string, number>>({});
+  // Baseline for the canvas run deltas: a snapshot of rows/timing/status taken
+  // at run start, immediately before the wipe, so it holds the run that just
+  // finished. In memory only — a reload starts over with no baseline, which
+  // simply means no deltas render.
+  const [previousRun, setPreviousRun] = useState<RunSnapshot>(EMPTY_RUN_SNAPSHOT);
+  // Mirror of the live run maps so handleRun can snapshot them without listing
+  // them as dependencies (which would rebuild the callback on every event).
+  const currentRunRef = useRef<RunSnapshot>(EMPTY_RUN_SNAPSHOT);
   const [runSummary, setRunSummary] = useState<RunSummary | null>(null);
   const [cellClipboard, setCellClipboard] = useState<NotebookCell | null>(null);
   const [isAddCellMenuOpen, setIsAddCellMenuOpen] = useState(false);
@@ -979,30 +990,54 @@ export function App(): ReactElement {
     return result;
   }, [graph, definedByCell]);
 
+  // Keep the delta baseline's "current" side up to date; handleRun copies this
+  // into previousRun just before wiping the maps for a new run.
+  useEffect(() => {
+    currentRunRef.current = { rowsByNode, timingByNode, runtimeByNode };
+  }, [rowsByNode, timingByNode, runtimeByNode]);
+
+  // What changed versus the previous run of this session. Empty on the first
+  // run (no baseline) and for every node whose numbers didn't move.
+  const runDeltaByNode = useMemo<Record<string, NodeRunDelta>>(
+    () => computeRunDeltas(previousRun, { rowsByNode, timingByNode, runtimeByNode }),
+    [previousRun, rowsByNode, timingByNode, runtimeByNode],
+  );
+
   // Canvas meta line: a static input filename parsed from the node's first
-  // cell source, merged with the post-run row count from rowsByNode. Either
-  // half may be absent; a node with neither gets no entry.
-  const metaByNode = useMemo<Record<string, { filename?: string; rows?: number }>>(() => {
-    const result: Record<string, { filename?: string; rows?: number }> = {};
+  // cell source, merged with the post-run row count from rowsByNode and the
+  // vs-previous-run deltas. Every half may be absent; a node with none of
+  // them gets no entry.
+  const metaByNode = useMemo<Record<string, NodeMeta>>(() => {
+    const result: Record<string, NodeMeta> = {};
     for (const node of Object.values(graph.nodes)) {
       const cellIndex = node.cellIndices[0];
       const source = cellIndex === undefined ? undefined : notebook.cells[cellIndex]?.source;
       const filename = source === undefined ? null : extractSourceFilename(source);
       const rows = rowsByNode[node.id];
-      if (filename === null && rows === undefined) {
+      const delta = runDeltaByNode[node.id];
+      if (filename === null && rows === undefined && delta === undefined) {
         continue;
       }
-      const entry: { filename?: string; rows?: number } = {};
+      const entry: NodeMeta = {};
       if (filename !== null) {
         entry.filename = filename;
       }
       if (rows !== undefined) {
         entry.rows = rows;
       }
+      if (delta?.rowsDelta !== undefined) {
+        entry.rowsDelta = delta.rowsDelta;
+      }
+      if (delta?.durationDeltaMs !== undefined) {
+        entry.durationDeltaMs = delta.durationDeltaMs;
+      }
+      if (delta?.statusChanged !== undefined) {
+        entry.statusChanged = delta.statusChanged;
+      }
       result[node.id] = entry;
     }
     return result;
-  }, [graph, notebook.cells, rowsByNode]);
+  }, [graph, notebook.cells, rowsByNode, runDeltaByNode]);
 
   const pipelineDef = useMemo<PipelineDef>(
     () => buildPipelineDef(graph, cellsByPath),
@@ -1387,6 +1422,10 @@ export function App(): ReactElement {
       return;
     }
     setEvents([]);
+    // Freeze the run that just finished as the delta baseline BEFORE the wipe
+    // below, so the comparison is against a complete run rather than a
+    // half-cleared one. Stays empty until a first run has completed.
+    setPreviousRun(currentRunRef.current);
     clearOutputsForOpenFiles();
     setTimingByNode({});
     setRowsByNode({});

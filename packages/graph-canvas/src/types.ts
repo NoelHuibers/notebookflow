@@ -21,6 +21,30 @@ export type NodeTag = "input" | "transform" | "output" | "ai" | "io";
 export type RuntimeState = "idle" | "queued" | "running" | "ok" | "error" | "skipped";
 
 /**
+ * Per-node data hints for the canvas meta line, plus the "what changed since
+ * the previous run" annotations.
+ *
+ * `filename`/`rows` are the current picture (static input file parsed from the
+ * cell source; output row count from the last run). The `*Delta` fields and
+ * `statusChanged` describe this node's result *relative to the previous run* —
+ * the host computes them and omits them entirely when there is no baseline
+ * (first run of a session) or nothing changed, so the canvas never has to
+ * render "(+0)" noise.
+ */
+export interface NodeMeta {
+  /** Input filename parsed from the node's first cell source. */
+  filename?: string;
+  /** Output row count from the most recent run. */
+  rows?: number;
+  /** Signed row-count change vs the previous run (never 0). */
+  rowsDelta?: number;
+  /** Signed duration change in ms vs the previous run (never 0). */
+  durationDeltaMs?: number;
+  /** Terminal runtime status transition vs the previous run. */
+  statusChanged?: { from: RuntimeState; to: RuntimeState };
+}
+
+/**
  * Summary of the most recent pipeline run, rendered as the canvas run-status
  * overlay. Hosts compute it from engine `pipelineCompleted` events.
  */
