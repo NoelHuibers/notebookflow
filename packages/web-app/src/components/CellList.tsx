@@ -8,8 +8,9 @@
 
 import type { NotebookCell } from "@notebookflow/graph-canvas/sync";
 import type { ReactElement } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
-
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useNearCellIndices } from "@/hooks/useNearCellIndices";
+import { shouldRenderFullEditor } from "@/lib/cellVirtualization";
 import type { NbOutput } from "@/lib/EngineClient";
 import { useI18n } from "@/lib/i18n";
 
@@ -122,6 +123,46 @@ export function CellList({
     }
   }, [scrollToCellIndex, scrollToCellRevision]);
 
+  // Cell virtualization: only cells near the viewport (plus the focused and
+  // streaming cells) mount the live CodeMirror editor; the rest render the
+  // lightweight read-only fallback. `nearIndices === null` means "all near"
+  // (first paint before the observer reports, and SSR/jsdom) → today's behavior.
+  const nearIndices = useNearCellIndices(containerRef, draft.length);
+
+  // Last-known full-editor wrapper heights, keyed by cell index. Captured after
+  // paint while a cell is still full, then applied as the fallback's min-height
+  // the moment it demotes so the scroll position can't jump. `renderFullFlags`
+  // records which cells are full this render so the effect never overwrites a
+  // frozen height with a (shorter) fallback measurement.
+  const heightsRef = useRef<Map<number, number>>(new Map());
+  const renderFullFlags = draft.map((_, idx) =>
+    nearIndices === null
+      ? true
+      : shouldRenderFullEditor(idx, { nearIndices, focusedCellIndex, streamingCellIndex }),
+  );
+  const flagsRef = useRef(renderFullFlags);
+  flagsRef.current = renderFullFlags;
+
+  useLayoutEffect(() => {
+    const root = containerRef.current;
+    if (root === null) {
+      return;
+    }
+    const flags = flagsRef.current;
+    for (let idx = 0; idx < flags.length; idx += 1) {
+      if (flags[idx] !== true) {
+        continue;
+      }
+      const el = root.querySelector<HTMLElement>(`[data-cell-index="${String(idx)}"]`);
+      if (el !== null) {
+        const height = el.offsetHeight;
+        if (height > 0) {
+          heightsRef.current.set(idx, height);
+        }
+      }
+    }
+  });
+
   return (
     <div ref={containerRef} className="flex min-w-0 flex-col gap-3 p-4">
       {draft.length === 0 ? (
@@ -129,6 +170,7 @@ export function CellList({
       ) : (
         draft.map((cell, idx) => {
           const isFocused = focusedCellIndex === idx;
+          const renderFull = renderFullFlags[idx] ?? true;
           return (
             // biome-ignore lint/a11y/noStaticElementInteractions: focus indicator on click; CellEditor itself remains keyboard-accessible
             <div
@@ -149,6 +191,8 @@ export function CellList({
                 outputs={outputsByCell?.[idx] ?? EMPTY_OUTPUTS}
                 isStreaming={streamingCellIndex === idx}
                 onChangeAt={handleChange}
+                renderFullEditor={renderFull}
+                fallbackMinHeight={renderFull ? null : (heightsRef.current.get(idx) ?? null)}
               />
             </div>
           );
