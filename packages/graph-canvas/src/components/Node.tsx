@@ -110,6 +110,8 @@ interface NotebookNodeStyles {
   meta: CSSProperties;
   emptyState: CSSProperties;
   duration: CSSProperties;
+  durationDelta: CSSProperties;
+  rowsDelta: CSSProperties;
 }
 
 export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
@@ -269,14 +271,28 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
   const runtime = RUNTIME_BADGES[runtimeState];
   const statusLabel = statusLabels[runtimeState];
   const durationLabel = formatDuration(data.runtimeDurationMs);
+  const durationDeltaLabel = formatSignedDuration(
+    data.meta?.durationDeltaMs,
+    data.runtimeDurationMs,
+  );
+  const rowsDeltaLabel = formatSignedCount(data.meta?.rowsDelta);
+  // The dot already carries the current state; a status change only extends
+  // its tooltip rather than adding new chrome to the node.
+  const statusChanged = data.meta?.statusChanged;
+  const statusTitle =
+    statusChanged === undefined
+      ? labels.statusTitle.replace("{status}", statusLabel)
+      : `${labels.statusTitle.replace("{status}", statusLabel)} · ${labels.statusChangedTitle
+          .replace("{from}", statusLabels[statusChanged.from])
+          .replace("{to}", statusLabels[statusChanged.to])}`;
 
   const header = (
     <div style={styles.header}>
       <div style={styles.titleRow}>
         <span
           role="img"
-          aria-label={labels.statusTitle.replace("{status}", statusLabel)}
-          title={labels.statusTitle.replace("{status}", statusLabel)}
+          aria-label={statusTitle}
+          title={statusTitle}
           style={{
             display: "inline-block",
             width: 8,
@@ -293,6 +309,14 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
             style={styles.duration}
           >
             {durationLabel}
+          </span>
+        )}
+        {durationLabel !== null && durationDeltaLabel !== null && (
+          <span
+            title={labels.durationDeltaTitle.replace("{delta}", durationDeltaLabel)}
+            style={styles.durationDelta}
+          >
+            {durationDeltaLabel}
           </span>
         )}
         {isEditing ? (
@@ -337,11 +361,16 @@ export function NotebookNode(props: NodeProps<NotebookNodeData>): ReactElement {
   const bodyBlock = showBodySection ? (
     <div style={styles.meta}>
       {metaLabel !== null && (
-        <div
-          title={labels.nodeMetaTitle}
-          style={{ fontSize: 10, color: NODE_MUTED, fontVariantNumeric: "tabular-nums" }}
-        >
-          {metaLabel}
+        <div style={{ fontSize: 10, color: NODE_MUTED, fontVariantNumeric: "tabular-nums" }}>
+          <span title={labels.nodeMetaTitle}>{metaLabel}</span>
+          {rowsDeltaLabel !== null && (
+            <span
+              title={labels.rowsDeltaTitle.replace("{delta}", rowsDeltaLabel)}
+              style={styles.rowsDelta}
+            >
+              {rowsDeltaLabel}
+            </span>
+          )}
         </div>
       )}
       {data.unresolvedInputs !== undefined && data.unresolvedInputs.length > 0 && (
@@ -387,6 +416,49 @@ function formatDuration(ms: number | undefined): string | null {
     return `${String(Math.round(ms))}ms`;
   }
   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/**
+ * Real minus sign (U+2212), not a hyphen — matches the app's typography and
+ * keeps the sign legible at 10px. The explicit +/- means the direction of a
+ * delta never depends on colour alone.
+ */
+const MINUS_SIGN = "−";
+
+function signPrefix(value: number): string {
+  return value < 0 ? MINUS_SIGN : "+";
+}
+
+/** Signed row-count delta, e.g. "+12" / "−4". Null when there's nothing to show. */
+function formatSignedCount(delta: number | undefined): string | null {
+  if (delta === undefined || !Number.isFinite(delta) || delta === 0) {
+    return null;
+  }
+  return `${signPrefix(delta)}${Math.abs(delta).toLocaleString()}`;
+}
+
+/**
+ * Signed duration delta, e.g. "+120ms" / "−0.4s". Null when there's nothing
+ * to show. `baseMs` is the duration the delta annotates: it is rendered in
+ * seconds past 1s, so a delta sitting next to it uses seconds too ("1.2s
+ * −0.4s" rather than "1.2s −400ms") — unless that would round away to
+ * "0.0s", in which case milliseconds stay.
+ */
+function formatSignedDuration(deltaMs: number | undefined, baseMs?: number): string | null {
+  if (deltaMs === undefined || !Number.isFinite(deltaMs) || deltaMs === 0) {
+    return null;
+  }
+  const magnitude = Math.round(Math.abs(deltaMs));
+  if (magnitude === 0) {
+    return null;
+  }
+  const baseInSeconds = baseMs !== undefined && Number.isFinite(baseMs) && baseMs >= 1000;
+  const seconds = (magnitude / 1000).toFixed(1);
+  const formatted =
+    magnitude >= 1000 || (baseInSeconds && seconds !== "0.0")
+      ? `${seconds}s`
+      : `${String(magnitude)}ms`;
+  return `${signPrefix(deltaMs)}${formatted}`;
 }
 
 function formatMeta(meta: NotebookNodeData["meta"]): string | null {
@@ -562,6 +634,21 @@ function nodeStyles(
         fontVariantNumeric: "tabular-nums",
         flexShrink: 0,
       },
+      // Delta chrome recedes behind the value it annotates: same colour
+      // token as the duration, just dialled back. No new palette entries.
+      durationDelta: {
+        fontSize: 10,
+        color: "rgba(255, 255, 255, 0.82)",
+        opacity: 0.8,
+        fontVariantNumeric: "tabular-nums",
+        flexShrink: 0,
+      },
+      rowsDelta: {
+        marginLeft: 4,
+        color: NODE_MUTED,
+        opacity: 0.85,
+        fontVariantNumeric: "tabular-nums",
+      },
     };
   }
 
@@ -660,6 +747,21 @@ function nodeStyles(
         color: "rgba(255, 255, 255, 0.82)",
         fontVariantNumeric: "tabular-nums",
         flexShrink: 0,
+      },
+      // Delta chrome recedes behind the value it annotates: same colour
+      // token as the duration, just dialled back. No new palette entries.
+      durationDelta: {
+        fontSize: 10,
+        color: "rgba(255, 255, 255, 0.82)",
+        opacity: 0.8,
+        fontVariantNumeric: "tabular-nums",
+        flexShrink: 0,
+      },
+      rowsDelta: {
+        marginLeft: 4,
+        color: NODE_MUTED,
+        opacity: 0.85,
+        fontVariantNumeric: "tabular-nums",
       },
     };
   }
@@ -769,6 +871,21 @@ function nodeStyles(
       color: "rgba(255, 255, 255, 0.82)",
       fontVariantNumeric: "tabular-nums",
       flexShrink: 0,
+    },
+    // Delta chrome recedes behind the value it annotates: same colour
+    // token as the duration, just dialled back. No new palette entries.
+    durationDelta: {
+      fontSize: 10,
+      color: "rgba(255, 255, 255, 0.82)",
+      opacity: 0.8,
+      fontVariantNumeric: "tabular-nums",
+      flexShrink: 0,
+    },
+    rowsDelta: {
+      marginLeft: 4,
+      color: NODE_MUTED,
+      opacity: 0.85,
+      fontVariantNumeric: "tabular-nums",
     },
   };
 }
