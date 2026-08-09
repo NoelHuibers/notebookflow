@@ -83,7 +83,7 @@ A sample file is included at `.env.example`.
 
 ### What each one shows you
 
-- **Web app** — SyncEngine + Canvas only (the web-app fixture is in-browser; no notebook write-back, no execution).
+- **Web app** — cell view + canvas over the in-browser SyncEngine, pipeline execution over WebSocket against a local or hosted engine, and notebooks opened from disk (File System Access, Chromium-only for save-in-place) or from a signed-in user's cloud workspace.
 - **VS Code** — full loop: live notebook editing (`WorkspaceEdit` cell patches), rename round-trip, pipeline execution over WebSocket via the auto-spawned engine.
 - **JupyterLab** — full loop: live notebook editing via JL's shared (CRDT) model, rename round-trip, pipeline execution over WebSocket to the automatically started local engine.
 
@@ -129,13 +129,17 @@ This is what distinguishes NotebookFlow from Flowco: we extend notebooks rather 
 ```
 notebookflow/
 ├── packages/
+│   ├── app-core/             # Shared cross-surface pieces (EngineClient, CellOutputs, AI dialogs)
 │   ├── graph-canvas/         # Shared React + React Flow component, SyncEngine, MarkerParser
 │   ├── jupyterlab-extension/ # JupyterLab platform adapter (Lumino + ReactWidget)
 │   ├── vscode-extension/     # VS Code platform adapter (host + Vite-bundled webview)
-│   └── web-app/              # Standalone web app (Tailwind + shadcn shell)
+│   └── web-app/              # Standalone web app (TanStack Start + Tailwind + shadcn shell)
 ├── engine/                   # Python backend (FastAPI + WebSocket, DAG/DataBus/Executor)
 ├── node-library-spec/        # Public extension protocol spec + reference package
 ├── examples/                 # Sample .ipynb files for the demos
+├── bench/                    # Reproducible performance suite — see bench/README.md
+├── docs/                     # ADRs (docs/adr/), release notes, demo-recording guide
+├── scripts/
 ├── biome.json
 ├── pnpm-workspace.yaml
 ├── turbo.json
@@ -229,7 +233,7 @@ Same Dockerfile works on Railway, Render, Modal, DigitalOcean App Platform, or a
 
 - **VS Code:** Extension auto-launches the engine as a child process on first canvas open, connects the webview to its WebSocket. Implemented.
 - **JupyterLab:** The prebuilt extension connects through a named `jupyter-server-proxy` route, which launches the local FastAPI engine on first use.
-- **Standalone Web App:** Connects to a remotely hosted FastAPI instance, or a locally running one. (Currently exercises only the in-browser SyncEngine.)
+- **Standalone Web App:** Connects to a remotely hosted FastAPI instance, or a locally running one.
 
 The real engine always lives in FastAPI; each adapter is a thin host around it.
 
@@ -246,14 +250,17 @@ Everything below should pass on a clean checkout:
 ```powershell
 pnpm typecheck                  # tsc -b across all TS packages
 pnpm check                      # biome lint + format check + import sort
-pnpm --filter @notebookflow/graph-canvas test    # 40 sync-engine tests
+pnpm test                       # 361 tests across all TS packages
 
 cd engine
 uv run ruff check .
 uv run ty check
-uv run pytest                   # 52 tests (DAG, DataBus, Executor, Registry, server)
+uv run pytest                   # 295 tests (DAG, DataBus, Executor, Registry, triggers, LLM, server)
 cd ..
 ```
+
+`pnpm test` covers graph-canvas (148), web-app (99), app-core (71),
+jupyterlab-extension (38), and vscode-extension (5).
 
 ### Day-to-day commands
 
@@ -302,6 +309,13 @@ If you'd rather drive the pieces individually:
 
 ## Implementation status
 
-Phases 1–5d landed: sync engine + canvas + Tailwind/shadcn web-app + Python core (DAG, DataBus, Executor) + node registry with built-in nodes + FastAPI server (`/health`, `/nodes`, `/pipelines/{id}/run`, `/ws`) + VS Code extension (with engine subprocess) + JupyterLab extension (TS source compiles; labextension build expected from the user). Test count: 92 (40 TS sync-engine + 52 Python).
+All three surfaces are shipping: sync engine + canvas, the web app (TanStack
+Start, authenticated cloud workspaces, i18n), the VS Code extension (with its
+engine subprocess), and the JupyterLab extension (prebuilt bundle, launched
+through `jupyter-server-proxy`). The Python side covers DAG, DataBus, Executor,
+the node registry with built-in nodes, triggers, the LLM modules
+(`pipeline_author` / `code_synth` / `explainer` / `node_author` / `ask`), and
+the FastAPI server (`/health`, `/nodes`, `/files`, `/pipelines/{id}/run`,
+`/ws`). KernelBridge live-kernel execution is in the JupyterLab adapter.
 
-Deferred from the original plan: triggers (`triggers.py`), LLM modules (`pipeline_author`/`code_synth`/`explainer`), `jupyter-server-proxy` auto-launch for the JL adapter, KernelBridge live-kernel execution.
+Test count: 656 (361 TypeScript + 295 Python).
