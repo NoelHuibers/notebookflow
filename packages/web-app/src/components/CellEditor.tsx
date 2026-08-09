@@ -87,9 +87,13 @@ function CellEditorImpl({
  */
 export const CellEditor = memo(CellEditorImpl);
 
+/**
+ * Colours mirror the two CodeMirror themes (default light / One Dark) so the
+ * hand-off to the real editor isn't a visible flash in either mode.
+ */
 function EditorFallback({ source }: { source: string }): ReactElement {
   return (
-    <pre className="min-h-[40px] overflow-hidden whitespace-pre-wrap break-words bg-[#282c34] px-3 py-2 font-mono text-[12px] text-[#abb2bf]">
+    <pre className="min-h-[40px] overflow-hidden whitespace-pre-wrap break-words bg-white px-3 py-2 font-mono text-[12px] text-[#24292e] dark:bg-[#282c34] dark:text-[#abb2bf]">
       {source === "" ? " " : source}
     </pre>
   );

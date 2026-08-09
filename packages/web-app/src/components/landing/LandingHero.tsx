@@ -26,6 +26,7 @@ import {
   useState,
 } from "react";
 import { Trans } from "react-i18next";
+import { useIsDarkMode } from "@/hooks/useIsDarkMode";
 import { useI18n } from "@/lib/i18n";
 import { GraphScene } from "./GraphScene";
 import { DESIGN_H, DESIGN_W, IDLE_DOT, RUN_OK, RUN_TEAL } from "./graph-data";
@@ -59,18 +60,9 @@ export function LandingHero(): ReactElement {
   const reduced = useReducedMotion();
   const rootRef = useRef<HTMLDivElement>(null);
   const pinRef = useRef<HTMLDivElement>(null);
-  const [dark, setDark] = useState(false);
+  // The resolved theme (the .dark class on <html>) tints the backdrop.
+  const dark = useIsDarkMode();
   const [backdropPaused, setBackdropPaused] = useState(false);
-
-  // Track the resolved theme (the .dark class on <html>) to tint the backdrop.
-  useEffect(() => {
-    const el = document.documentElement;
-    const update = () => setDark(el.classList.contains("dark"));
-    update();
-    const obs = new MutationObserver(update);
-    obs.observe(el, { attributes: true, attributeFilter: ["class"] });
-    return () => obs.disconnect();
-  }, []);
 
   // Pause the WebGL backdrop once the pinned stage scrolls out of view.
   useEffect(() => {
