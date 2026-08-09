@@ -38,3 +38,8 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+
+# Paper / write-ups — LaTeX sources and build artefacts live outside the repo's
+# scope; keep them local so a stray *.log or pdfpages/ never lands in a diff.
+report/
+report-nils/
