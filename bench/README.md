@@ -96,8 +96,8 @@ always the cell's first non-blank line, as the parser requires.
 
 ### Protocol
 
-- **Warmups:** 3 (discarded) per size, per path.
-- **Measured repetitions:** 9 → the **median** is reported (plus min/max).
+- **Warmups:** 5 (discarded) per size, per path.
+- **Measured repetitions:** 15 → the **median** is reported (plus min/max).
 - **Timing:** `performance.now()` around a single awaited `ingestNotebook()`
   call. Notebook generation and graph inspection happen **outside** the timed
   region. Adapter callbacks (`onCellPatch`, `onGraphUpdate`) are no-ops so we
