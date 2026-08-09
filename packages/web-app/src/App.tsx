@@ -597,6 +597,19 @@ export function App(): ReactElement {
     } catch {
       // best-effort persistence
     }
+    if (settings.theme !== "system") {
+      return;
+    }
+    // Under "system" the OS can flip while the app stays open — re-resolve so
+    // the .dark class (and everything keyed off it) follows along.
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = (): void => {
+      applyTheme(settings.theme);
+    };
+    mq.addEventListener("change", onChange);
+    return () => {
+      mq.removeEventListener("change", onChange);
+    };
   }, [settings]);
 
   // Uploaded data files (CSVs etc.) a pipeline can read by name. Lives on the

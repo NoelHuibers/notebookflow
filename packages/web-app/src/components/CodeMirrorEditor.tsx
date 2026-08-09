@@ -4,6 +4,10 @@
  *
  * CellEditor wraps this in React.lazy + Suspense; the fallback is a
  * lightweight read-only pre that shows cell contents immediately.
+ *
+ * The editor follows the app theme: One Dark in dark mode, CodeMirror's
+ * default light theme otherwise. CodeMirror paints its own surface, so it
+ * can't inherit the Tailwind tokens the rest of the cell uses.
  */
 
 import { python } from "@codemirror/lang-python";
@@ -11,6 +15,8 @@ import { oneDark } from "@codemirror/theme-one-dark";
 import CodeMirror from "@uiw/react-codemirror";
 import type { ReactElement } from "react";
 import { useMemo } from "react";
+
+import { useIsDarkMode } from "@/hooks/useIsDarkMode";
 
 export interface CodeMirrorEditorProps {
   value: string;
@@ -24,6 +30,7 @@ export default function CodeMirrorEditor({
   onChange,
 }: CodeMirrorEditorProps): ReactElement {
   const extensions = useMemo(() => (isCode ? [python()] : []), [isCode]);
+  const isDark = useIsDarkMode();
   return (
     <CodeMirror
       className="notebookflow-codemirror"
@@ -31,7 +38,7 @@ export default function CodeMirrorEditor({
       width="100%"
       height="auto"
       minHeight="40px"
-      theme={oneDark}
+      theme={isDark ? oneDark : "light"}
       extensions={extensions}
       onChange={onChange}
       basicSetup={{
