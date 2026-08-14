@@ -1,6 +1,6 @@
 # NotebookFlow
 
-n8n-style workflow orchestration for computational notebooks. Visually wire together Jupyter notebooks and cell groups into pipelines, with AI assistance, a node library, and full bidirectional sync between the visual graph and the actual notebook cells.
+n8n-style workflow orchestration for computational notebooks. Visually wire together Jupyter notebooks and their cells into pipelines, with AI assistance, a node library, and full bidirectional sync between the visual graph and the actual notebook cells.
 
 ## Install in VS Code
 
@@ -95,7 +95,7 @@ Flowco (UIST 2025) proved that a dataflow graph is a better authoring model than
 
 ### Two-level data model
 
-**Level 1 — Cell Group = Node.** A set of cells inside a notebook delimited by a `# @node` marker:
+**Level 1 — Marked Cell = Node.** A code cell that starts with a `# @node` marker:
 
 ```python
 # @node: Load CSV  [input]
@@ -108,7 +108,7 @@ clean_df = df.dropna()
 
 The marker defines node name, tag (`input` / `transform` / `output` / `ai` / `io`), inputs, and outputs. Inputs use `local_var<-Node.output`, so rewiring a node changes only the right-hand source while the cell body keeps using the stable local variable.
 
-**Level 2 — Notebook = NodeGroup.** A full `.ipynb` file is a group of nodes. On the canvas it renders as a collapsible container. Collapsed = one rectangle. Expanded = shows internal cell-group nodes.
+**Level 2 — Notebook = NodeGroup.** A full `.ipynb` file is a group of nodes. On the canvas it renders as a collapsible container. Collapsed = one rectangle. Expanded = shows the internal cell nodes.
 
 Connections can be drawn at either level:
 - Notebook → Notebook (coarse, pipeline level)
@@ -120,7 +120,7 @@ The `.ipynb` file is always the source of truth. The graph is derived, never pri
 
 - **Cell → Graph:** parse `# @node` markers on file save → rebuild graph model automatically.
 - **Graph → Cell:** rename a node or draw a wire → inject or update `# @node` markers in the notebook cells.
-- **Conflict rule:** cell editor always wins on direct edit. Timestamp-based resolution otherwise.
+- **Conflict rule:** a newer direct cell edit wins over an in-flight graph edit (timestamp-based resolution; `cell-wins` / `graph-wins` also available).
 
 This is what distinguishes NotebookFlow from Flowco: we extend notebooks rather than replacing them.
 
