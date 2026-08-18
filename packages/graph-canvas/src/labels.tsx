@@ -39,6 +39,10 @@ export interface CanvasLabels {
   nodeMetaTitle: string;
   statusTitle: string; // "Status: {status}" — {status} = one of the runtime status labels
   lastRunTitle: string; // "Last run: {duration}"
+  // Deltas vs the previous run of the session (omitted entirely on a first run)
+  rowsDeltaTitle: string; // "{delta} rows vs last run"
+  durationDeltaTitle: string; // "{delta} vs last run"
+  statusChangedTitle: string; // "{from} → {to} since last run"
   unresolvedRefsTitle: string; // "Unresolved input refs:\n{refs}"
   unresolvedShort: string; // "unresolved: {refs}"
   // Node runtime status badges
@@ -104,6 +108,9 @@ export const defaultCanvasLabels: CanvasLabels = {
   nodeMetaTitle: "Input file · output rows",
   statusTitle: "Status: {status}",
   lastRunTitle: "Last run: {duration}",
+  rowsDeltaTitle: "{delta} rows vs last run",
+  durationDeltaTitle: "{delta} vs last run",
+  statusChangedTitle: "{from} → {to} since last run",
   unresolvedRefsTitle: "Unresolved input refs:\n{refs}",
   unresolvedShort: "unresolved: {refs}",
   statusIdle: "idle",

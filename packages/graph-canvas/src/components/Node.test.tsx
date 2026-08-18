@@ -275,6 +275,127 @@ describe("NotebookNode", () => {
     expect(container.textContent).not.toContain("rows");
   });
 
+  it("renders row and duration deltas next to the values they annotate", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    document.body.appendChild(container);
+    mounts.push({ container, root });
+
+    act(() => {
+      root.render(
+        <NotebookNode
+          id="node-1"
+          type="notebook"
+          selected={false}
+          xPos={0}
+          yPos={0}
+          zIndex={0}
+          isConnectable
+          dragging={false}
+          data={{
+            id: "node-1",
+            name: "Load CSV",
+            tag: "input",
+            inputs: [],
+            outputs: ["df"],
+            cellIndices: [0],
+            groupId: "group-a",
+            runtimeState: "ok",
+            runtimeDurationMs: 1200,
+            meta: { filename: "orders.csv", rows: 1204, rowsDelta: 12, durationDeltaMs: -400 },
+          }}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("1,204 rows");
+    expect(container.textContent).toContain("+12");
+    expect(container.textContent).toContain("1.2s");
+    // Real minus sign (U+2212), not a hyphen.
+    expect(container.textContent).toContain("−0.4s");
+    const rowsDelta = container.querySelector('[title="+12 rows vs last run"]');
+    expect(rowsDelta).not.toBeNull();
+    const durationDelta = container.querySelector('[title="−0.4s vs last run"]');
+    expect(durationDelta).not.toBeNull();
+  });
+
+  it("renders no delta chrome when the meta carries no deltas (first run)", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    document.body.appendChild(container);
+    mounts.push({ container, root });
+
+    act(() => {
+      root.render(
+        <NotebookNode
+          id="node-1"
+          type="notebook"
+          selected={false}
+          xPos={0}
+          yPos={0}
+          zIndex={0}
+          isConnectable
+          dragging={false}
+          data={{
+            id: "node-1",
+            name: "Load CSV",
+            tag: "input",
+            inputs: [],
+            outputs: ["df"],
+            cellIndices: [0],
+            groupId: "group-a",
+            runtimeState: "ok",
+            runtimeDurationMs: 1200,
+            meta: { filename: "orders.csv", rows: 1204 },
+          }}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("1,204 rows");
+    expect(container.textContent).not.toContain("+");
+    expect(container.textContent).not.toContain("−");
+    expect(container.textContent).not.toContain("()");
+    expect(container.querySelector('[title="Status: ok"]')).not.toBeNull();
+  });
+
+  it("extends the status tooltip when the node's status changed since last run", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    document.body.appendChild(container);
+    mounts.push({ container, root });
+
+    act(() => {
+      root.render(
+        <NotebookNode
+          id="node-1"
+          type="notebook"
+          selected={false}
+          xPos={0}
+          yPos={0}
+          zIndex={0}
+          isConnectable
+          dragging={false}
+          data={{
+            id: "node-1",
+            name: "Load CSV",
+            tag: "input",
+            inputs: [],
+            outputs: ["df"],
+            cellIndices: [0],
+            groupId: "group-a",
+            runtimeState: "error",
+            meta: { statusChanged: { from: "ok", to: "error" } },
+          }}
+        />,
+      );
+    });
+
+    const dot = container.querySelector('[role="img"]');
+    expect(dot?.getAttribute("title")).toBe("Status: error · ok → error since last run");
+    expect(dot?.getAttribute("aria-label")).toBe("Status: error · ok → error since last run");
+  });
+
   it("renders an unresolved-refs warning when inputs don't resolve", () => {
     const container = document.createElement("div");
     const root = createRoot(container);
