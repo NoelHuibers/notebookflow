@@ -60,7 +60,7 @@ jobs:
           packages/vscode-extension/notebookflow-vscode-0.1.0.vsix
 
       - name: Upload VSIX
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: vscode-extension
           path: packages/vscode-extension/notebookflow-vscode-0.1.0.vsix
