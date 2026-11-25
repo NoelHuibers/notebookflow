@@ -9,22 +9,17 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as LoginRouteImport } from './routes/login'
-import { Route as DeviceRouteImport } from './routes/device'
-import { Route as AppRouteImport } from './routes/app'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as LegalImpressumRouteImport } from './routes/legal/impressum'
-import { Route as LegalDatenschutzRouteImport } from './routes/legal/datenschutz'
+import { Route as AppRouteImport } from './routes/app'
+import { Route as DeviceRouteImport } from './routes/device'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as LegalAgbRouteImport } from './routes/legal/agb'
+import { Route as LegalDatenschutzRouteImport } from './routes/legal/datenschutz'
+import { Route as LegalImpressumRouteImport } from './routes/legal/impressum'
 
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DeviceRoute = DeviceRouteImport.update({
-  id: '/device',
-  path: '/device',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppRoute = AppRouteImport.update({
@@ -32,14 +27,19 @@ const AppRoute = AppRouteImport.update({
   path: '/app',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const DeviceRoute = DeviceRouteImport.update({
+  id: '/device',
+  path: '/device',
   getParentRoute: () => rootRouteImport,
 } as any)
-const LegalImpressumRoute = LegalImpressumRouteImport.update({
-  id: '/legal/impressum',
-  path: '/legal/impressum',
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LegalAgbRoute = LegalAgbRouteImport.update({
+  id: '/legal/agb',
+  path: '/legal/agb',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LegalDatenschutzRoute = LegalDatenschutzRouteImport.update({
@@ -47,9 +47,9 @@ const LegalDatenschutzRoute = LegalDatenschutzRouteImport.update({
   path: '/legal/datenschutz',
   getParentRoute: () => rootRouteImport,
 } as any)
-const LegalAgbRoute = LegalAgbRouteImport.update({
-  id: '/legal/agb',
-  path: '/legal/agb',
+const LegalImpressumRoute = LegalImpressumRouteImport.update({
+  id: '/legal/impressum',
+  path: '/legal/impressum',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -123,18 +123,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/device': {
-      id: '/device'
-      path: '/device'
-      fullPath: '/device'
-      preLoaderRoute: typeof DeviceRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app': {
@@ -144,18 +137,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/device': {
+      id: '/device'
+      path: '/device'
+      fullPath: '/device'
+      preLoaderRoute: typeof DeviceRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/legal/impressum': {
-      id: '/legal/impressum'
-      path: '/legal/impressum'
-      fullPath: '/legal/impressum'
-      preLoaderRoute: typeof LegalImpressumRouteImport
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/legal/agb': {
+      id: '/legal/agb'
+      path: '/legal/agb'
+      fullPath: '/legal/agb'
+      preLoaderRoute: typeof LegalAgbRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/legal/datenschutz': {
@@ -165,11 +165,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LegalDatenschutzRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/legal/agb': {
-      id: '/legal/agb'
-      path: '/legal/agb'
-      fullPath: '/legal/agb'
-      preLoaderRoute: typeof LegalAgbRouteImport
+    '/legal/impressum': {
+      id: '/legal/impressum'
+      path: '/legal/impressum'
+      fullPath: '/legal/impressum'
+      preLoaderRoute: typeof LegalImpressumRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
