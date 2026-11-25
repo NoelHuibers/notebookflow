@@ -63,14 +63,6 @@ export function PrivacyPolicy(): ReactElement {
 
       <LegalSection id="complaint-heading" title={t("legal.privacy.complaintTitle")}>
         <p>{t("legal.privacy.complaintBody")}</p>
-        <a
-          className="text-primary underline-offset-4 hover:underline"
-          href="https://www.lda.bayern.de/"
-          rel="noreferrer"
-          target="_blank"
-        >
-          www.lda.bayern.de
-        </a>
       </LegalSection>
 
       <LegalSection id="automation-heading" title={t("legal.privacy.automationTitle")}>

@@ -1,4 +1,8 @@
 // `legal` namespace — bilingual legal documents and the contact form.
+import { OPERATOR_ADDRESS_LINES, OPERATOR_COUNTRY, OPERATOR_NAME } from "@/lib/legal";
+
+const OPERATOR_ADDRESS = OPERATOR_ADDRESS_LINES.join(", ");
+
 export const en = {
   impressum: "Legal notice",
   datenschutz: "Privacy policy",
@@ -15,6 +19,8 @@ export const en = {
     contactIntro:
       "For questions about NotebookFlow, these legal pages, or your data, contact the operator by email or use the form below.",
     emailLabel: "Email",
+    phoneLabel: "Phone",
+    editorialTitle: "Responsible for content pursuant to Section 18(2) MStV",
     formTitle: "Contact form",
     formIntro:
       "The form prepares an email in your email application. Its contents are not submitted to a NotebookFlow server.",
@@ -36,8 +42,7 @@ export const en = {
     intro:
       "This privacy policy explains how Noel Huibers, operating NotebookFlow, processes personal data in the hosted NotebookFlow web application and its associated execution service. A separately hosted deployment is controlled by its respective operator.",
     controllerTitle: "Controller",
-    controllerBody:
-      "The controller is Noel Huibers, 81737 München, Germany. Privacy requests can be sent to notebookflow@huibers.io or through the contact form in the legal notice.",
+    controllerBody: `The controller is ${OPERATOR_NAME}, ${OPERATOR_ADDRESS}, ${OPERATOR_COUNTRY.en}. Privacy requests can be sent to notebookflow@huibers.io or through the contact form in the legal notice.`,
     dataTitle: "Data processed and purposes",
     data: {
       account:
@@ -81,7 +86,7 @@ export const en = {
       "Subject to the statutory conditions, you may request access, correction, deletion, restriction, data portability, or object to processing based on legitimate interests. You may withdraw consent at any time for the future. Send requests to notebookflow@huibers.io. Identity verification may be required before account data is disclosed or changed.",
     complaintTitle: "Right to complain",
     complaintBody:
-      "You may complain to a data-protection supervisory authority. The authority responsible for private-sector controllers in Bavaria is the Bayerisches Landesamt für Datenschutzaufsicht (BayLDA), www.lda.bayern.de.",
+      "Under Art. 77 GDPR, you have the right to lodge a complaint with a data-protection supervisory authority, in particular in the Member State of your habitual residence, place of work, or place of the alleged infringement.",
     automationTitle: "Automated decisions",
     automationBody:
       "NotebookFlow does not make decisions producing legal or similarly significant effects through solely automated processing. AI-generated suggestions and outputs may be inaccurate and remain subject to your review.",
@@ -149,8 +154,7 @@ export const en = {
     intro:
       "These terms govern use of the free NotebookFlow hosted service provided by Noel Huibers. By creating an account or using signed-in features, you agree to them. Public informational pages can be viewed without accepting these terms.",
     providerTitle: "Provider and scope",
-    providerBody:
-      "NotebookFlow is provided by Noel Huibers, 81737 München, Germany. The service is currently a free beta. Paid plans or materially different services will require separate or updated terms.",
+    providerBody: `NotebookFlow is provided by ${OPERATOR_NAME}, ${OPERATOR_ADDRESS}, ${OPERATOR_COUNTRY.en}. The service is currently a free beta. Paid plans or materially different services will require separate or updated terms.`,
     serviceTitle: "Service",
     serviceBody:
       "NotebookFlow provides a visual interface for composing and executing notebook pipelines, saving workspaces, and optionally requesting AI assistance. Features may be experimental, change during the beta, or depend on external services selected by you.",
@@ -203,6 +207,8 @@ export const de: typeof en = {
     contactIntro:
       "Bei Fragen zu NotebookFlow, diesen Rechtstexten oder Ihren Daten erreichen Sie den Anbieter per E-Mail oder über das folgende Formular.",
     emailLabel: "E-Mail",
+    phoneLabel: "Telefon",
+    editorialTitle: "Inhaltlich verantwortlich nach § 18 Abs. 2 MStV",
     formTitle: "Kontaktformular",
     formIntro:
       "Das Formular bereitet eine E-Mail in Ihrer E-Mail-Anwendung vor. Die Inhalte werden nicht an einen NotebookFlow-Server übermittelt.",
@@ -224,8 +230,7 @@ export const de: typeof en = {
     intro:
       "Diese Datenschutzerklärung erläutert, wie Noel Huibers als Betreiber von NotebookFlow personenbezogene Daten in der gehosteten NotebookFlow-Webanwendung und dem zugehörigen Ausführungsdienst verarbeitet. Für eine separat gehostete Installation ist deren jeweiliger Betreiber verantwortlich.",
     controllerTitle: "Verantwortlicher",
-    controllerBody:
-      "Verantwortlicher ist Noel Huibers, 81737 München, Deutschland. Datenschutzanfragen können an notebookflow@huibers.io oder über das Kontaktformular im Impressum gesendet werden.",
+    controllerBody: `Verantwortlicher ist ${OPERATOR_NAME}, ${OPERATOR_ADDRESS}, ${OPERATOR_COUNTRY.de}. Datenschutzanfragen können an notebookflow@huibers.io oder über das Kontaktformular im Impressum gesendet werden.`,
     dataTitle: "Verarbeitete Daten und Zwecke",
     data: {
       account:
@@ -269,7 +274,7 @@ export const de: typeof en = {
       "Unter den gesetzlichen Voraussetzungen können Sie Auskunft, Berichtigung, Löschung, Einschränkung oder Datenübertragbarkeit verlangen und einer Verarbeitung auf Grundlage berechtigter Interessen widersprechen. Eine Einwilligung kann jederzeit mit Wirkung für die Zukunft widerrufen werden. Richten Sie Anfragen an notebookflow@huibers.io. Vor Offenlegung oder Änderung von Kontodaten kann eine Identitätsprüfung erforderlich sein.",
     complaintTitle: "Beschwerderecht",
     complaintBody:
-      "Sie können sich bei einer Datenschutzaufsichtsbehörde beschweren. Zuständig für nicht-öffentliche Verantwortliche in Bayern ist das Bayerische Landesamt für Datenschutzaufsicht (BayLDA), www.lda.bayern.de.",
+      "Nach Art. 77 DSGVO haben Sie das Recht, sich bei einer Datenschutzaufsichtsbehörde zu beschweren, insbesondere in dem Mitgliedstaat Ihres gewöhnlichen Aufenthaltsorts, Ihres Arbeitsplatzes oder des Orts des mutmaßlichen Verstoßes.",
     automationTitle: "Automatisierte Entscheidungen",
     automationBody:
       "NotebookFlow trifft keine Entscheidungen mit rechtlicher oder ähnlich erheblicher Wirkung ausschließlich durch automatisierte Verarbeitung. KI-generierte Vorschläge und Ausgaben können fehlerhaft sein und müssen von Ihnen geprüft werden.",
@@ -340,8 +345,7 @@ export const de: typeof en = {
     intro:
       "Diese Bedingungen regeln die Nutzung des kostenlosen gehosteten NotebookFlow-Dienstes von Noel Huibers. Mit der Kontoerstellung oder Nutzung angemeldeter Funktionen stimmen Sie ihnen zu. Öffentliche Informationsseiten können ohne Zustimmung aufgerufen werden.",
     providerTitle: "Anbieter und Geltungsbereich",
-    providerBody:
-      "NotebookFlow wird von Noel Huibers, 81737 München, Deutschland, angeboten. Der Dienst befindet sich derzeit in einer kostenlosen Beta. Kostenpflichtige Tarife oder wesentlich andere Leistungen erfordern gesonderte oder aktualisierte Bedingungen.",
+    providerBody: `NotebookFlow wird von ${OPERATOR_NAME}, ${OPERATOR_ADDRESS}, ${OPERATOR_COUNTRY.de}, angeboten. Der Dienst befindet sich derzeit in einer kostenlosen Beta. Kostenpflichtige Tarife oder wesentlich andere Leistungen erfordern gesonderte oder aktualisierte Bedingungen.`,
     serviceTitle: "Leistung",
     serviceBody:
       "NotebookFlow stellt eine visuelle Oberfläche zum Erstellen und Ausführen von Notebook-Pipelines, zum Speichern von Arbeitsbereichen und optional zur Nutzung von KI-Unterstützung bereit. Funktionen können experimentell sein, sich während der Beta ändern oder von durch Sie gewählten externen Diensten abhängen.",
